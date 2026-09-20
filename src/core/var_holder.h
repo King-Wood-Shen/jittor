@@ -11,6 +11,7 @@
 #include "ops/composite/array_op.h"
 #include "mem/allocator.h"
 #include "mem/allocator/cuda_dual_allocator.h"
+#include "runtime/device.h"
 #include "runtime/holder_state.h"
 
 namespace jittor {

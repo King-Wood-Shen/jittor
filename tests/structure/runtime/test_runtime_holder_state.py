@@ -163,3 +163,14 @@ def test_device_header_is_sdk_free_and_callbacks_belong_to_native_providers():
         callback = callback[:callback.index("\n}") + 2] if "\n}" in callback else callback
         assert expected in callback
         assert "ops.host_callback = host_callback" in driver
+
+
+def test_var_holder_header_is_self_contained_without_accelerator():
+    result = subprocess.run(
+        [os.environ.get("CXX", "g++"), "-std=c++14",
+         "-UHAS_CUDA", "-UHAS_ACCELERATOR", "-I", str(SRC),
+         "-fsyntax-only", "-x", "c++", "-"],
+        input='#include "core/var_holder.h"\n',
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
