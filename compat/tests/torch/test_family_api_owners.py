@@ -6,6 +6,7 @@ import pickle
 import textwrap
 
 import numpy as np
+import pytest
 
 import jittor as jt
 from jittor.compat.torch.tensor_state import compatibility_owner
@@ -139,3 +140,44 @@ def test_module_templates_keep_frontend_parameters_and_functional_values(monkeyp
         parameter.requires_grad_(False)
     from jittor.compat.torch.nested import _torch_prune_leaf_registry
     _torch_prune_leaf_registry()
+
+
+def test_sampler_generic_subclasses_preserve_typing_and_iteration():
+    from typing import Any, List, Tuple, TypeVar
+
+    torch = compatibility_owner(jt)
+    sampler = torch.utils.data.Sampler
+    alias = sampler[int]
+    assert alias is not sampler
+    assert alias.__origin__ is sampler
+    assert alias.__args__ == (int,)
+    with pytest.raises(TypeError):
+        sampler[int, str]
+
+    class ScheduledSampler(sampler[List[Tuple[Any, int]]]):
+        def __iter__(self):
+            return iter([[(2, 0), (0, 1)]])
+
+    scheduled = ScheduledSampler()
+    assert isinstance(scheduled, sampler)
+    assert list(scheduled) == [[(2, 0), (0, 1)]]
+
+    item_type = TypeVar("item_type")
+
+    class TypedSampler(sampler[item_type]):
+        def __iter__(self):
+            return iter([2, 0])
+
+    concrete = TypedSampler[int]
+    assert concrete.__origin__ is TypedSampler
+    assert concrete.__args__ == (int,)
+    loader = torch.utils.data.DataLoader(
+        ["a", "b", "c"], sampler=concrete(), batch_size=2,
+        collate_fn=lambda batch: batch,
+    )
+    assert list(loader) == [["c", "a"]]
+
+    sequential = torch.utils.data.SequentialSampler(range(3))
+    assert list(sequential) == [0, 1, 2]
+    assert sorted(torch.utils.data.RandomSampler(range(4))) == [0, 1, 2, 3]
+    assert list(torch.utils.data.BatchSampler(sequential, 2, False)) == [[0, 1], [2]]

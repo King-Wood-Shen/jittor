@@ -20,6 +20,11 @@ from pathlib import Path
 import sys
 import time
 
+try:
+    from importlib import metadata as _distribution_metadata
+except ImportError:
+    import importlib_metadata as _distribution_metadata
+
 # This helper is also launched directly, outside pytest's path bootstrap.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tests"))
 from _helpers import capability as _test_capability
@@ -62,7 +67,17 @@ def _dependency_report(requirements):
     return report
 
 
-def _import_torch(runtime):
+def _validate_reference_torchvision(module):
+    distribution = _distribution_metadata.distribution("torchvision")
+    expected = Path(distribution.locate_file("torchvision/__init__.py")).resolve()
+    actual = Path(module.__file__).resolve()
+    if actual != expected:
+        raise RuntimeError(
+            "torchvision oracle imported {} instead of installed {}".format(actual, expected)
+        )
+
+
+def _import_torch(runtime, require_torchvision=False):
     """Return the ``torch`` module for the requested runtime.
 
     Jittor claims the ``torch`` namespace from inside its own import, and it
@@ -93,11 +108,16 @@ def _import_torch(runtime):
     try:
         import torchvision  # noqa: F401
     except Exception:
+        if require_torchvision:
+            raise
         # torchvision is optional for the transformer cases.  Some reference
         # environments ship a mismatched torchvision wheel whose import raises
         # RuntimeError while registering compiled operators; that must not
         # prevent unrelated torch-only models from running.
         pass
+    else:
+        if require_torchvision:
+            _validate_reference_torchvision(torchvision)
     _activate_package_site()
     return torch
 
@@ -118,7 +138,7 @@ def _select_device(torch, runtime, device, *, policy_stack=None):
             policy_stack.enter_context(jt.runtime.scope(use_cuda=1, use_acl=1))
         else:
             policy_stack.enter_context(jt.runtime.scope(use_cuda=0))
-        return lambda tensor: tensor
+        return lambda tensor: tensor.to(device)
     if device == "cuda":
         if not torch.cuda.is_available():
             raise SystemExit("CUDA is unavailable in this PyTorch build")
@@ -263,6 +283,77 @@ def _numpy_snapshot(value):
     return np.array(value.detach().cpu().numpy(), dtype="float32", copy=True)
 
 
+def _timm_tensor_residency(torch, model, inputs, output, runtime, device):
+    """Verify materialized storage before correctness snapshots copy it to CPU."""
+    tensors = {"output": output}
+    parameters = list(model.named_parameters())
+    buffers = list(model.named_buffers())
+    tensors.update(("param::" + name, value) for name, value in parameters)
+    tensors.update(("buffer::" + name, value) for name, value in buffers)
+    tensors.update(("input::" + name, value) for name, value in inputs.items())
+    for prefix, entries in (("grad::", parameters), ("ingrad::", inputs.items())):
+        for name, value in entries:
+            if not bool(getattr(value, "requires_grad", False)):
+                continue
+            grad = getattr(value, "grad", None)
+            if grad is None:
+                raise RuntimeError("missing required gradient: " + prefix + name)
+            tensors[prefix + name] = grad
+
+    expected_backend = {"cpu": "cpu", "cuda": "cuda", "npu": "acl"}[device]
+    if runtime == "jittor":
+        import jittor as jt
+
+        jt.sync(list(tensors.values()), device_sync=device != "cpu")
+        expected_index = -1 if device == "cpu" else int(jt.core.current_device())
+    else:
+        expected_index = (-1 if device == "cpu" else
+                          int(getattr(torch, device).current_device()))
+
+    groups = {}
+    for name, tensor in tensors.items():
+        if runtime == "jittor":
+            backend, index = jt.core.dispatch_context([tensor])
+            backend = "acl" if backend == "acl_legacy" else backend
+            location = tensor.location()
+            expected_location = "cpu" if device == "cpu" else "device"
+            if location != expected_location:
+                raise RuntimeError("{} resides in {}, expected {}".format(
+                    name, location, expected_location))
+        else:
+            actual_device = tensor.device
+            backend = "acl" if actual_device.type == "npu" else actual_device.type
+            index = -1 if actual_device.type == "cpu" else actual_device.index
+        if backend != expected_backend or index != expected_index:
+            raise RuntimeError("{} is on {}:{}, expected {}:{}".format(
+                name, backend, index, expected_backend, expected_index))
+        group = name.split("::", 1)[0]
+        groups[group] = groups.get(group, 0) + 1
+    return {
+        "checked_tensors": len(tensors), "groups": groups,
+        "backend": expected_backend, "device_index": expected_index,
+        "all_on_requested_device": True,
+    }
+
+
+def _gradient_snapshots(model, inputs, require_complete=False):
+    arrays = {}
+    for prefix, entries in (("grad::", model.named_parameters()),
+                            ("ingrad::", inputs.items())):
+        for name, value in entries:
+            key = prefix + name
+            grad = getattr(value, "grad", None)
+            if grad is None:
+                if require_complete and bool(getattr(value, "requires_grad", False)):
+                    raise RuntimeError("missing required gradient: " + key)
+                continue
+            snapshot = _numpy_snapshot(grad)
+            if require_complete and not np.isfinite(snapshot).all():
+                raise RuntimeError("non-finite gradient: " + key)
+            arrays[key] = snapshot
+    return arrays
+
+
 def main():
     with ExitStack() as policy_stack:
         return _run(policy_stack)
@@ -279,7 +370,8 @@ def _run(policy_stack):
     parser.add_argument("--device", choices=("cpu", "cuda", "npu"), default="cpu")
     options = parser.parse_args()
 
-    torch = _import_torch(options.runtime)
+    strict_timm = options.case in _ecosystem_cases.TIMM_CASES
+    torch = _import_torch(options.runtime, require_torchvision=strict_timm)
     to_device = _select_device(torch, options.runtime, options.device, policy_stack=policy_stack)
     tf32 = _configure_tf32(torch, options.device)
     runtime_conditions = _runtime_conditions(torch, tf32)
@@ -359,16 +451,13 @@ def _run(policy_stack):
         loss.backward()
 
         _synchronize(torch, options.runtime, options.device)
+        residency = (_timm_tensor_residency(
+            torch, model, inputs, output, options.runtime, options.device,
+        ) if strict_timm else None)
         arrays = {"__output__": _numpy_snapshot(output)}
-        for name, parameter in model.named_parameters():
-            grad = getattr(parameter, "grad", None)
-            if grad is None:
-                continue
-            arrays["grad::" + name] = _numpy_snapshot(grad)
-        for name, tensor in inputs.items():
-            grad = getattr(tensor, "grad", None)
-            if grad is not None:
-                arrays["ingrad::" + name] = _numpy_snapshot(grad)
+        if strict_timm and not np.isfinite(arrays["__output__"]).all():
+            raise RuntimeError("non-finite model output")
+        arrays.update(_gradient_snapshots(model, inputs, require_complete=strict_timm))
 
         # Timing runs after correctness capture. Inputs and loss weights are already
         # resident on the requested device, so the number excludes allocation/H2D.
@@ -445,6 +534,7 @@ def _run(policy_stack):
                 "dependencies": dependencies,
                 "tf32": tf32,
                 "runtime_conditions": runtime_conditions,
+                "tensor_residency": residency,
             }
         )
     )

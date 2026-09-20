@@ -27,6 +27,12 @@ from _ecosystem_harness import (
 class EcosystemParity(EcosystemComparison):
     """Compare a downstream library's numbers between PyTorch and Jittor."""
 
+    def test_timm_resnet18_tiny(self):
+        self._compare("timm_resnet18_tiny", correctness_only=True)
+
+    def test_timm_vit_tiny(self):
+        self._compare("timm_vit_tiny", correctness_only=True)
+
     def test_transformers_gpt2(self):
         self._compare("transformers_gpt2")
 

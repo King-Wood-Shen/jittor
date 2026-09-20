@@ -290,6 +290,36 @@ def _ms_swift_lora_llama(torch):
     return model, inputs
 
 
+def _timm_resnet18_tiny(torch):
+    """Small ResNet factory configuration, not full-size ResNet-18 coverage."""
+    import timm
+
+    model = timm.create_model(
+        "resnet18", pretrained=False, num_classes=7,
+        channels=(8, 16, 32, 64), layers=(1, 1, 1, 1), zero_init_last=False,
+    )
+    return model, {"x": ("float32", (2, 3, 32, 32), None)}
+
+
+def _timm_vit_tiny(torch):
+    """Small ViT factory configuration with deterministic attention/dropout."""
+    import timm
+
+    model = timm.create_model(
+        "vit_tiny_patch16_224", pretrained=False, img_size=32,
+        embed_dim=48, depth=2, num_heads=3, mlp_ratio=2, num_classes=7,
+        drop_rate=0.0, drop_path_rate=0.0,
+    )
+    return model, {"x": ("float32", (2, 3, 32, 32), None)}
+
+
+# These cases require an independent torchvision oracle and complete gradients.
+TIMM_CASES = {
+    "timm_resnet18_tiny": (_timm_resnet18_tiny, ("timm",)),
+    "timm_vit_tiny": (_timm_vit_tiny, ("timm",)),
+}
+
+
 #: name -> (builder, required top-level distributions)
 #:
 #: The realistic-size configurations used for wall-clock work live in
@@ -310,6 +340,8 @@ CASES = {
     "ms_swift_lora_llama": (_ms_swift_lora_llama, ("transformers", "peft", "swift")),
 }
 
+
+CASES.update(TIMM_CASES)
 
 def _merge_speed_cases():
     from _ecosystem_speed import CASES as SPEED_CASES

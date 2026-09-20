@@ -3,7 +3,7 @@
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[3] / "tests" / "compat" / "torch"
+ROOT = Path(__file__).resolve().parents[1] / "torch"
 
 
 def _source(name):

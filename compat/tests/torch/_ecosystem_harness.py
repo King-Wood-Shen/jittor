@@ -314,7 +314,7 @@ class EcosystemComparison(unittest.TestCase):
     device = "cpu"
     repeats = REPEATS
 
-    def _compare(self, case):
+    def _compare(self, case, *, correctness_only=False):
         _builder, requirements = _ecosystem_cases.CASES[case]
         if not _distributions_available(requirements):
             self.skipTest("missing {}".format(", ".join(requirements)))
@@ -383,9 +383,17 @@ class EcosystemComparison(unittest.TestCase):
                 jittor_report.get("tf32"),
                 "{} used different CUDA TF32 policies".format(case),
             )
+            torch_conditions = dict(torch_report.get("runtime_conditions") or {})
+            jittor_conditions = dict(jittor_report.get("runtime_conditions") or {})
+            if correctness_only:
+                # A placeholder thread API cannot establish performance parity.
+                # Preserve the raw reports for audit and compare every other
+                # condition, including precision, affinity and thread settings.
+                torch_conditions.pop("runtime_threads", None)
+                jittor_conditions.pop("runtime_threads", None)
             self.assertEqual(
-                torch_report.get("runtime_conditions"),
-                jittor_report.get("runtime_conditions"),
+                torch_conditions,
+                jittor_conditions,
                 "{} timed the runtimes with different thread counts, affinity, "
                 "or precision policy".format(case),
             )
@@ -427,6 +435,33 @@ class EcosystemComparison(unittest.TestCase):
                 self.backward_tolerance,
                 "{} gradient {} diverged: {:.3e}".format(case, worst_name, worst_error),
             )
+
+            if correctness_only:
+                print("CORRECTNESS_RESULT " + json.dumps({
+                    "case": case,
+                    "device": self.device,
+                    "forward_error": forward_error,
+                    "worst_gradient_error": worst_error,
+                    "worst_gradient": worst_name,
+                    "gradients_compared": len(gradients),
+                    "performance_validated": False,
+                    "performance_reason": (
+                        "Correctness-only acceptance: shim thread control is unavailable "
+                        "and its effective CPU thread count is unknown."
+                    ),
+                    "reported_runtime_threads": {
+                        "torch": torch_report["runtime_conditions"].get("runtime_threads"),
+                        "jittor": jittor_report["runtime_conditions"].get("runtime_threads"),
+                    },
+                    "jittor_effective_runtime_threads": None,
+                    "jittor_thread_control_available": False,
+                    "fallback_count": jittor_report["fallback_count"],
+                    "tensor_residency": {
+                        "torch": torch_report.get("tensor_residency"),
+                        "jittor": jittor_report.get("tensor_residency"),
+                    },
+                }))
+                return
 
             ratio = jittor_report["seconds"] / max(torch_report["seconds"], 1e-9)
             print(

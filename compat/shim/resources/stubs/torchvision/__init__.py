@@ -164,7 +164,7 @@ class Normalize:
         return (t - m) / s
 
     def __repr__(self):
-        return f"Normalize(mean={self.mean}, std={self.std})"
+        return f"Normalize(mean={self.mean!r}, std={self.std!r})"
 
 
 class ToTensor:
@@ -178,24 +178,32 @@ class ToTensor:
 class Resize:
     def __init__(self, size, interpolation=InterpolationMode.BILINEAR,
                  max_size=None, antialias=True, **kw):
+        from collections.abc import Sequence
+        if not isinstance(size, (int, Sequence)):
+            raise TypeError(f"Size should be int or sequence. Got {type(size)}")
+        if isinstance(size, Sequence) and len(size) not in (1, 2):
+            raise ValueError("If size is a sequence, it should have 1 or 2 values")
         self.size = size
         self.interpolation = interpolation
         self.max_size = max_size
         self.antialias = antialias
 
     def _hw(self, h, w):
-        size = self.size
-        if isinstance(size, int):
-            # torchvision: scale shorter side to `size`, keep aspect ratio.
-            if h <= w:
-                nh, nw = size, int(round(size * w / h))
-            else:
-                nh, nw = int(round(size * h / w)), size
-            if self.max_size is not None and max(nh, nw) > self.max_size:
-                scale = self.max_size / max(nh, nw)
-                nh, nw = int(round(nh * scale)), int(round(nw * scale))
-            return nh, nw
-        return int(size[0]), int(size[1])
+        size = [self.size] if isinstance(self.size, int) else self.size
+        if self.max_size is not None and len(size) != 1:
+            raise ValueError("max_size is only supported when size specifies the shorter edge")
+        if len(size) == 2:
+            return int(size[0]), int(size[1])
+        short, long = (w, h) if w <= h else (h, w)
+        new_short = size[0]
+        # Torchvision truncates the long edge before applying max_size.
+        new_long = int(new_short * long / short)
+        if self.max_size is not None:
+            if self.max_size <= new_short:
+                raise ValueError("max_size must be strictly greater than the requested size")
+            if new_long > self.max_size:
+                new_short, new_long = int(self.max_size * new_short / new_long), self.max_size
+        return (new_long, new_short) if w <= h else (new_short, new_long)
 
     def __call__(self, pic):
         from PIL import Image as _Im
