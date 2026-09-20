@@ -5,6 +5,7 @@ from jittor._core.dtypes import dtype_name as _jittor_dtype_name
 from .method_api import (
     _CAST_APIS, _UNARY_INPLACE_APIS,
     _api_fill,
+    _item,
     _api_zero,
     _api_add,
     _api_sub,
@@ -386,6 +387,7 @@ def _install_tensor_methods(g, Var, _DTYPE_OBJS=None):
     Var.detach = _var_detach
 
     _native_numpy = Var.numpy
+    _native_item = Var.item
     Var.numpy = _var_numpy
     Var.tolist = _api_tolist
 
@@ -564,6 +566,7 @@ def _install_tensor_methods(g, Var, _DTYPE_OBJS=None):
         '_native_nonzero': locals().get('_native_nonzero'),
         '_native_norm': locals().get('_native_norm'),
         '_native_numpy': locals().get('_native_numpy'),
+        '_native_item': _native_item,
         '_native_requires_grad': locals().get('_native_requires_grad'),
         '_native_squeeze': locals().get('_native_squeeze'),
         '_norm_via': locals().get('_norm_via'),
@@ -571,6 +574,10 @@ def _install_tensor_methods(g, Var, _DTYPE_OBJS=None):
         '_orig_setitem': locals().get('_orig_setitem'),
     })
 
+    Var.item = _item
+    register_api_bindings(Var, 'torch.Tensor', ('item',), Fidelity.APPROXIMATE,
+        'Scalar extraction preserves CUDA input residency using a temporary clone; '
+        'the native scalar read still synchronizes with the host')
     for name, implementation in _BINARY_APIS.items():
         if _native_operators[name] is not None:
             setattr(Var, name, implementation)

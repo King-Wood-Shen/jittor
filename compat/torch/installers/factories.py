@@ -52,6 +52,8 @@ def _invoke_factory(name, args, kwargs):
         raise RuntimeError("torch.%s is not installed" % name)
     from ..frontend import tensor_frontend
     like = args[0] if args and (name.endswith("_like") or name in _TENSOR_ARGUMENT) else None
+    if name == "full_like" and not args:
+        like = kwargs.get("input")
     with tensor_frontend(context.target_namespace.Var, device=kwargs.get("device"), like=like):
         return implementation(*args, **kwargs)
 
@@ -206,6 +208,27 @@ def _shape_arg(v):
 
 def _constructor_adapter(name, orig, _accepts_dtype, *args, **kwargs):
     g = get_install_context(jt).target_namespace
+    if name == "full_like" and "input" in kwargs:
+        if args:
+            raise TypeError("full_like() received multiple values for input")
+        args = (kwargs.pop("input"),)
+    full_out = kwargs.get("out") if name == "full" else None
+    if name in ("full", "full_like"):
+        # Resolve the destination dtype before a fill value reaches native
+        # scalar conversion; casting the completed result loses precision.
+        selected = kwargs.get("dtype")
+        if selected is None:
+            if name == "full_like" and args:
+                selected = args[0].dtype
+            elif full_out is not None:
+                selected = full_out.dtype
+            else:
+                value = args[1] if len(args) > 1 else kwargs.get("fill_value")
+                selected = (g.bool if isinstance(value, bool) else
+                            g.int64 if isinstance(value, int) else g.get_default_dtype())
+            kwargs["dtype"] = selected
+        if full_out is not None and _dtype_to_str(selected) != _dtype_to_str(full_out.dtype):
+            raise RuntimeError("dtype must match the dtype of out")
     # ACL adapters call jt.empty thousands of times; keep the FP32 fast path.
     if (name == "empty" and not kwargs and args and
             g.get_default_dtype() == g.float32 and
@@ -270,6 +293,9 @@ def _constructor_adapter(name, orig, _accepts_dtype, *args, **kwargs):
             # ones_like / tril / triu have no dtype param in jittor; torch
             # accepts one. Pop it and cast the result instead.
             _cast_to = _dtype_to_str(kwargs.pop("dtype"))
+    if (name in ("full", "full_like") and len(args) >= 2
+            and _dtype_to_str(kwargs.get("dtype")) == "float64"):
+        args = (args[0], jt.array(args[1], dtype="float64")) + tuple(args[2:])
     out = orig(*args, **kwargs)
     if _cast_to is not None:
         out = out.cast(_cast_to)
@@ -277,6 +303,14 @@ def _constructor_adapter(name, orig, _accepts_dtype, *args, **kwargs):
     out.requires_grad_(_requires_grad)
     if _requires_grad:
         _torch_register_leaf(out)
+    if full_out is not None:
+        if tuple(full_out.shape) != tuple(out.shape):
+            full_out.resize_(out.shape)
+        full_out.copy_(out)
+        if _requires_grad:
+            full_out.requires_grad_(True)
+            _torch_register_leaf(full_out)
+        return full_out
     return out
 
 

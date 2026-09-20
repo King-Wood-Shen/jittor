@@ -241,7 +241,13 @@ def rebuild_tensor(tensor_type, array, dtype, requires_grad, device=None):
 
 def deepcopy_tensor(value, memo):
     from copy import deepcopy
-    result = rebuild_tensor(type(value), value.numpy(), _jittor_dtype_name(value.dtype),
+    snapshot = value
+    if value.device.type == "cuda":
+        # Host extraction parks its receiver. Read an independent CUDA
+        # snapshot so copying a checkpoint preserves the source residency.
+        with tensor_frontend(type(value), device=str(value.device)):
+            snapshot = value.clone()
+    result = rebuild_tensor(type(value), snapshot.numpy(), _jittor_dtype_name(value.dtype),
                             value.requires_grad, str(value.device))
     memo[id(value)] = result
     result.__dict__.update(deepcopy(value.__dict__, memo))

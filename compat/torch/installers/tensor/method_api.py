@@ -208,12 +208,25 @@ def _ip(self, value):
         return self
     target = self
     was_trainable = not target.is_stop_grad()
+    # A live native graph node can still have public requires_grad disabled.
+    was_requires_grad = target.requires_grad
     target.assign(value)
-    if was_trainable and target.is_stop_grad():
+    if was_trainable and target.is_stop_grad() and was_requires_grad:
         target.start_grad()
     elif not was_trainable and not target.is_stop_grad():
         target.stop_grad()
     return self
+
+
+def _item(self):
+    native = get_install_context(_owner.jt).state['tensor_native_api']['_native_item']
+    if self.device.type == 'cuda':
+        # Native scalar reads host-park their input. Read an independent
+        # temporary so the public Tensor keeps its device allocation.
+        with _new_scope(self, self.device):
+            snapshot = self.clone()
+        return native(snapshot)
+    return native(self)
 
 
 def _copy_(self, other, non_blocking=False):
@@ -1061,6 +1074,15 @@ def _promoting_binary(self, other, opname, reflected):
     # `_extend_tokens` list concatenation). Match torch: defer to the sequence.
     if isinstance(other, (list, tuple)):
         return NotImplemented
+    if isinstance(other, (bool, int, float)):
+        expected = _owner._dtype_to_str(g.result_type(self, other))
+        if expected == "float64":
+            # Native Python-number conversion narrows floats before promotion.
+            # Materialize only an already-selected double computation dtype.
+            with _new_scope(self, self.device):
+                scalar = _owner.jt.array(other, dtype=expected)
+            left = self if _jittor_dtype_name(self.dtype) == expected else self.cast(expected)
+            return _binary_native(opname, left, scalar)
     out = _binary_native(opname, self, other)
     if isinstance(other, (bool, int, float)) and isinstance(out, _NativeVar):
         expected = _owner._dtype_to_str(g.result_type(self, other))
@@ -1098,7 +1120,11 @@ def _true_division(self, other, opname):
         use_wide = sd.startswith("float") and src_dt != "float64" and not acl_active
         calc_dt = "float64" if use_wide else tgt
         a = self if src_dt == calc_dt else self.cast(calc_dt)
-        b = _owner.jt.array(other, dtype=calc_dt) if use_wide else other
+        if use_wide or calc_dt == "float64":
+            with _new_scope(self, self.device):
+                b = _owner.jt.array(other, dtype=calc_dt)
+        else:
+            b = other
         out = _binary_native(opname, a, b)
         if isinstance(out, _NativeVar) and _jittor_dtype_name(out.dtype) != tgt:
             out = out.cast(tgt)
@@ -1181,7 +1207,14 @@ _BINARY_APIS = {
 
 
 def _api_fill(self, val):
-    return _ip(self, _owner.jt.ones(self.shape, self.dtype) * val)
+    if isinstance(val, _NativeVar) and val.ndim != 0:
+        raise RuntimeError("fill_ only supports 0-dimension value tensor")
+    # Build the value in the destination dtype before any arithmetic: a
+    # Python integer otherwise enters binary promotion as int32 and truncates.
+    # copy_ retains the existing mutation/view handling and destination device.
+    with _new_scope(self, self.device):
+        value = _owner.jt.array(val, dtype=_jittor_dtype_name(self.dtype))
+        return _copy_(self, value.broadcast(self.shape))
 
 
 def _api_zero(self):
