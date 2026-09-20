@@ -5,6 +5,7 @@ import inspect
 from .frontend import make_parameter_type, tensor_frontend
 from .parameter_containers import make_parameter_containers
 from .nn_adoption import adopt_owned_children
+from .batch_norm import make_batch_norm_type
 
 
 def module_setattr(module, name, value):
@@ -114,7 +115,7 @@ class NNFrontendOwner:
         self.Module = type("Module", (self.native_module,), {
             "__module__": "torch.nn", "__slots__": (),
             "_frontend_tensor_type": tensor_type, "_nn_frontend_owner": self,
-            "__setattr__": module_setattr, "__call__": module_call,
+            "__setattr__": module_setattr, "__call__": module_call, "_version": 1,
         })
         self.adapters = {self.native_module: self.Module}
         self.modules = {}
@@ -167,6 +168,9 @@ class NNFrontendOwner:
         return execute
 
     def adapt_class(self, native):
+        canonical_batch_norm = getattr(self.backend.nn, "BatchNorm", None)
+        if canonical_batch_norm is not None and native is canonical_batch_norm:
+            return make_batch_norm_type(self, native, "BatchNorm")
         known = self.adapters.get(native)
         if known is not None:
             return known
@@ -175,6 +179,10 @@ class NNFrontendOwner:
             "__init__": LayerInitializer(self, native),
             "_torch_native_layer": native,
         }
+        canonical_group_norm = getattr(self.backend.nn, "GroupNorm", None)
+        if canonical_group_norm is not None and native is canonical_group_norm:
+            from .group_norm import group_norm_init, group_norm_execute
+            namespace.update(__init__=group_norm_init, execute=group_norm_execute)
         execute = self._conv_padding_execute(native)
         if execute is not None:
             namespace["execute"] = execute
@@ -191,13 +199,18 @@ class NNFrontendOwner:
         if hasattr(source, "__path__"):
             result.__path__ = []
         self.modules[id(source)] = result
+        canonical_batch_norm = getattr(self.backend.nn, "BatchNorm", None)
         for key, value in vars(source).items():
             if key.startswith("__") and key not in ("__all__", "__doc__"):
                 continue
             if value is self.backend.nn.Parameter:
                 value = self.Parameter
             elif isinstance(value, type) and issubclass(value, self.native_module):
-                value = self.adapt_class(value)
+                if canonical_batch_norm is not None and value is canonical_batch_norm and key in (
+                        "BatchNorm", "BatchNorm1d", "BatchNorm2d", "BatchNorm3d"):
+                    value = make_batch_norm_type(self, value, key)
+                else:
+                    value = self.adapt_class(value)
             elif isinstance(value, types.ModuleType) and (
                     value.__name__.startswith("jittor.nn") or value is self.backend.init):
                 value = self.copy_module(value, name + "." + key)

@@ -102,14 +102,8 @@ def trunc_normal_(tensor, mean=0.0, std=1.0, a=-2.0, b=2.0, generator=None):
 
 
 def _fan(t):
-    sh = t.shape
-    if len(sh) < 2:
-        return sh[0], sh[0]
-    num_input_fmaps, num_output_fmaps = sh[1], sh[0]
-    rf = 1
-    for s in sh[2:]:
-        rf *= s
-    return num_input_fmaps * rf, num_output_fmaps * rf
+    # The native API takes a shape; Torch's public helper takes a Tensor.
+    return _native_init._calculate_fan_in_and_fan_out(t.shape)
 
 
 def _calculate_correct_fan(tensor, mode):
@@ -273,8 +267,7 @@ def _install_init_aliases(registry=None):
         if not hasattr(_init, tname) and hasattr(_init, jname):
             setattr(_init, tname, getattr(_init, jname))
     # initializers torch has that jittor lacks -- best-effort implementations
-    if not hasattr(_init, "_calculate_fan_in_and_fan_out"):
-        _init._calculate_fan_in_and_fan_out = _fan
+    _init._calculate_fan_in_and_fan_out = _fan
     if not hasattr(_init, "_calculate_correct_fan"):
         _init._calculate_correct_fan = _calculate_correct_fan
     if not hasattr(_init, "dirac_"):

@@ -1,4 +1,5 @@
 from ...fidelity import Fidelity, register_api_bindings
+from ...batch_norm import prepare_legacy_batch_norm_state
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
 import collections as _collections
 import functools as _functools
@@ -42,6 +43,7 @@ _ORIG_MODULE_NAMED_PARAMETERS = nn.Module.named_parameters
 _ORIG_MODULE_NAMED_BUFFERS = nn.Module.named_buffers
 _ORIG_MODULE_NAMED_MODULES = nn.Module.named_modules
 _ORIG_MODULE_LOAD_STATE_DICT = nn.Module.load_state_dict
+_ORIG_MODULE_STATE_DICT = nn.Module.state_dict
 _ORIG_MODULE_PARAMETERS = nn.Module.parameters
 
 
@@ -353,6 +355,13 @@ def _state_source_to_var(value):
         return jt.array(value)
 
 
+def _copy_state_mapping(state_dict):
+    copied = _collections.OrderedDict(state_dict)
+    if hasattr(state_dict, "_metadata"):
+        copied._metadata = state_dict._metadata
+    return copied
+
+
 def _preserve_target_dtypes_for_load(root, state_dict):
     """Cast each source value to the dtype of the live destination."""
     # torch.load_state_dict(assign=False), the default used by TRELLIS.2,
@@ -374,12 +383,35 @@ def _preserve_target_dtypes_for_load(root, state_dict):
         if src.shape != target.shape:
             continue
         target_dtype = _jittor_dtype_name(target.dtype)
-        if _jittor_dtype_name(src.dtype) == target_dtype:
+        if _jittor_dtype_name(src.dtype) != target_dtype:
+            src = src.cast(target_dtype)
+        # Native update retains the holder but adopts source placement. Move
+        # before delegating so ordinary loading keeps the target's device.
+        if src.device != target.device:
+            src = src.to(target.device)
+        if src is value:
             continue
         if converted is None:
-            converted = dict(state_dict)
-        converted[key] = src.cast(target_dtype)
+            converted = _copy_state_mapping(state_dict)
+        converted[key] = src
     return state_dict if converted is None else converted
+
+
+def _state_dict(self, to=None, recurse=True, destination=None, prefix="", keep_vars=False):
+    if destination is None:
+        destination = _collections.OrderedDict()
+        destination._metadata = _collections.OrderedDict()
+    result = _ORIG_MODULE_STATE_DICT(
+        self, to=to, recurse=recurse, destination=destination,
+        prefix=prefix, keep_vars=keep_vars)
+    if hasattr(result, "_metadata"):
+        for name, module in self.named_modules(remove_duplicate=False):
+            if name and not recurse:
+                continue
+            result._metadata[(prefix + name).rstrip(".")] = {
+                "version": getattr(module, "_version", 1),
+            }
+    return result
 
 
 def _state_dict_key_diff(root, state_dict):
@@ -414,14 +446,12 @@ def _state_dict_key_diff(root, state_dict):
         if tuple(int(d) for d in src_shape) != tuple(int(d) for d in target.shape):
             mismatched.append((str(key), tuple(int(d) for d in src_shape),
                                tuple(int(d) for d in target.shape)))
-    # torch never reports num_batches_tracked as missing for modules that
-    # do not keep one; jittor's BatchNorm has no such buffer at all.
-    missing = [k for k in missing if not k.endswith("num_batches_tracked")]
     return missing, unexpected, mismatched
 
 
 def _load_state_dict(self, state_dict, strict=True, assign=False):
     """Torch's ``load_state_dict``: honours ``strict`` and returns the keys."""
+    state_dict = prepare_legacy_batch_norm_state(self, state_dict)
     missing, unexpected, mismatched = _state_dict_key_diff(self, state_dict)
     # torch raises on a shape mismatch whatever `strict` says: the value
     # cannot be copied at all.  jittor's load_parameters only LOG.e'd it.
@@ -456,8 +486,10 @@ def _load_state_dict(self, state_dict, strict=True, assign=False):
     if unexpected:
         # jittor's load_parameters LOG.w's on every unknown key; drop them
         # here so a strict=False load stays quiet, exactly like torch.
-        load_state = {k: v for k, v in load_state.items()
-                      if str(k) not in set(unexpected)}
+        load_state = _copy_state_mapping(load_state)
+        for key in tuple(load_state):
+            if str(key) in set(unexpected):
+                del load_state[key]
     _ORIG_MODULE_LOAD_STATE_DICT(self, load_state)
     try:
         for n, p in self.named_parameters():
@@ -975,11 +1007,18 @@ register_fidelity(
     "remove_duplicate= are honored. Container children are enumerated through "
     "jittor's named_modules, so ordering within a ModuleList follows insertion.")
 register_fidelity(
+    "torch.nn.Module.state_dict", _state_dict, Fidelity.APPROXIMATE,
+    "Exports per-module checkpoint versions and persistent buffers, honoring "
+    "keep_vars and native export options. Detached exports do not track "
+    "subsequent storage rebinding.")
+
+register_fidelity(
     "torch.nn.Module.load_state_dict", _load_state_dict, Fidelity.APPROXIMATE,
     "Returns a namedtuple with missing_keys/unexpected_keys like torch, and "
-    "preserves each target parameter's existing dtype so loading a float32 "
-    "checkpoint into a half module stays half. assign= is accepted but always "
-    "copies into the existing Var so parameter identity survives.")
+    "assign=False retains target dtype, device and object identity. Detached "
+    "storage aliases are not fully preserved. assign=True retains target "
+    "objects rather than replacing them; recursive Torch load hooks are "
+    "not dispatched.")
 register_fidelity(
     "torch.nn.Module.parameters", _parameters, Fidelity.APPROXIMATE,
     "Returns a list-like that also registers its members as autograd leaves, so "
@@ -1044,6 +1083,7 @@ def _install_module_methods(nn, registry=None):
     M.named_parameters = _named_parameters
     M.named_buffers = _named_buffers
     M.named_modules = _named_modules
+    M.state_dict = _state_dict
     M.load_state_dict = _load_state_dict
     M.parameters = _parameters
     M.train = _train
@@ -1078,5 +1118,5 @@ def _install_module_methods(nn, registry=None):
         M._non_persistent_buffers_set = property(_nonpersist_set)
 
     register_api_bindings(M, 'torch.nn.Module',
-        ('__setattr__', 'buffers', 'cpu', 'cuda', 'double', 'eval', 'execute', 'float', 'forward', 'get_buffer', 'get_execution_pipelining', 'get_parameter', 'get_submodule', 'half', 'load_state_dict', 'named_buffers', 'named_modules', 'named_parameters', 'npu', 'parameters', 'register_parameter', 'set_execution_pipelining', 'to', 'to_empty', 'train', 'type', 'zero_grad') + tuple(()),
+        ('__setattr__', 'buffers', 'cpu', 'cuda', 'double', 'eval', 'execute', 'float', 'forward', 'get_buffer', 'get_execution_pipelining', 'get_parameter', 'get_submodule', 'half', 'load_state_dict', 'state_dict', 'named_buffers', 'named_modules', 'named_parameters', 'npu', 'parameters', 'register_parameter', 'set_execution_pipelining', 'to', 'to_empty', 'train', 'type', 'zero_grad') + tuple(()),
         Fidelity.APPROXIMATE, 'Module state and parameter management over native holders; Torch lazy iterator, meta, and layout semantics are approximate')

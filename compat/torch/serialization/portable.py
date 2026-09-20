@@ -1,6 +1,7 @@
 """Public Torch save/load and portable tensor payload conversion."""
 import os as _os_pickle
 import pickle as _pickle
+from collections import OrderedDict
 import numpy as np
 import jittor as jt
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
@@ -31,7 +32,11 @@ def _to_portable(obj, snapshots):
     if isinstance(obj, (_t.FunctionType, _t.LambdaType, _t.MethodType, _t.BuiltinFunctionType)):
         return None
     if isinstance(obj, dict):
-        return {k: _to_portable(v, snapshots) for k, v in obj.items()}
+        values = ((k, _to_portable(v, snapshots)) for k, v in obj.items())
+        result = OrderedDict(values) if isinstance(obj, OrderedDict) else dict(values)
+        if isinstance(obj, OrderedDict) and hasattr(obj, "_metadata"):
+            result._metadata = _to_portable(obj._metadata, snapshots)
+        return result
     if isinstance(obj, (list, tuple)):
         items = [_to_portable(v, snapshots) for v in obj]
         # Coerce list/tuple SUBCLASSES (e.g. the shim's local _ParamList in
@@ -62,7 +67,11 @@ def _from_portable(obj, source_devices):
                 value = g.nn.Parameter(value, requires_grad=value.requires_grad)
             source_devices[id(value)] = obj.get("device", "cpu")
             return value
-        return {k: _from_portable(v, source_devices) for k, v in obj.items()}
+        values = ((k, _from_portable(v, source_devices)) for k, v in obj.items())
+        result = OrderedDict(values) if isinstance(obj, OrderedDict) else dict(values)
+        if isinstance(obj, OrderedDict) and hasattr(obj, "_metadata"):
+            result._metadata = _from_portable(obj._metadata, source_devices)
+        return result
     if isinstance(obj, (list, tuple)):
         t = type(obj)
         values = [_from_portable(v, source_devices) for v in obj]
@@ -85,6 +94,8 @@ class _TensorSnapshots:
         elif isinstance(value, dict):
             for item in value.values():
                 self.collect(item)
+            if isinstance(value, OrderedDict) and hasattr(value, "_metadata"):
+                self.collect(value._metadata)
         elif isinstance(value, (list, tuple)):
             for item in value:
                 self.collect(item)
@@ -133,8 +144,13 @@ def _apply_map_location(obj, map_location, _depth=0, source_devices=None):
     if map_location is None and not source_devices:
         return obj
     if isinstance(obj, dict):
-        return {k: _apply_map_location(v, map_location, _depth + 1, source_devices)
-                for k, v in obj.items()}
+        values = ((k, _apply_map_location(v, map_location, _depth + 1, source_devices))
+                  for k, v in obj.items())
+        result = OrderedDict(values) if isinstance(obj, OrderedDict) else dict(values)
+        if isinstance(obj, OrderedDict) and hasattr(obj, "_metadata"):
+            result._metadata = _apply_map_location(
+                obj._metadata, map_location, _depth + 1, source_devices)
+        return result
     if isinstance(obj, (list, tuple)):
         built = [_apply_map_location(v, map_location, _depth + 1, source_devices) for v in obj]
         if isinstance(obj, tuple):

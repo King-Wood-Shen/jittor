@@ -401,16 +401,34 @@ class ModuleDict(nn.Module):
         items = modules.items() if hasattr(modules, "items") else modules
         for k, v in items:
             self[k] = v
+    def add_module(self, name, module):
+        if module is not None and not isinstance(module, jt.Module):
+            raise TypeError("%s is not a Module subclass" % type(module).__name__)
+        if not isinstance(name, str):
+            raise TypeError("module name should be a string")
+        if hasattr(self, name) and name not in self._keys:
+            raise KeyError("attribute %r already exists" % name)
+        if not name or "." in name:
+            raise KeyError("module name must be nonempty and cannot contain '.'")
+        # All dictionary registration paths share this ordered key index.
+        # The native parent owns attribute/parameter registration, not _keys.
+        super().add_module(name, module)
+        if name not in self._keys:
+            self._keys.append(name)
     def __setitem__(self, key, module):
-        setattr(self, key, module)
-        if key not in self._keys:
-            self._keys.append(key)
+        self.add_module(key, module)
     def __getitem__(self, key):
+        if key not in self._keys:
+            raise KeyError(key)
         return getattr(self, key)
     def __delitem__(self, key):
+        if key not in self._keys:
+            raise KeyError(key)
         delattr(self, key)
-        if key in self._keys:
-            self._keys.remove(key)
+        self._keys.remove(key)
+    @property
+    def _modules(self):
+        return {key: getattr(self, key) for key in vars(self).get("_keys", ())}
     def __contains__(self, key):
         return key in self._keys
     def __len__(self):

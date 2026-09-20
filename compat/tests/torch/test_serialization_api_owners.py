@@ -231,3 +231,48 @@ def test_optional_patch_failure_restores_all_owners(monkeypatch):
     assert not hasattr(root, "_jittor_torch_compat")
     assert leaf.safe_open is leaf.load is leaf.load_file is original
     assert context.state.get("safetensors_native_api", sentinel) is before
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+@pytest.mark.parametrize("unexpected", [False, True])
+def test_custom_load_delegate_keeps_checkpoint_metadata(device, unexpected):
+    """Dtype/device conversion and permissive filtering preserve checkpoint context."""
+    import copy
+    import torch
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("accelerator prerequisite: CUDA unavailable")
+
+    class Capture(torch.nn.Module):
+        def __init__(self, dtype, device):
+            super().__init__()
+            self.register_buffer("payload", torch.tensor([1.5, 2.5], dtype=dtype, device=device))
+
+        def load_parameters(self, state):
+            self.received_metadata = copy.deepcopy(getattr(state, "_metadata", None))
+            self.received_keys = tuple(state)
+            super().load_parameters(state)
+
+    source = Capture(torch.float64, "cpu")
+    target = Capture(torch.float32, device)
+    state = source.state_dict()
+    state._metadata[""]["custom_checkpoint_context"] = {"revision": 7}
+    if unexpected:
+        state["extra"] = torch.tensor(1, device="cpu")
+    original_keys = tuple(state)
+    original_metadata = copy.deepcopy(state._metadata)
+    original_values = {key: value.detach().cpu().numpy().copy() for key, value in state.items()}
+    old_target = target.payload
+    result = target.load_state_dict(state, strict=not unexpected)
+    assert result.missing_keys == []
+    assert result.unexpected_keys == (["extra"] if unexpected else [])
+    assert target.received_metadata == original_metadata
+    assert target.received_keys == ("payload",)
+    assert tuple(state) == original_keys
+    assert state._metadata == original_metadata
+    for key, value in state.items():
+        np.testing.assert_array_equal(value.detach().cpu().numpy(), original_values[key])
+    assert target.payload is old_target
+    assert target.payload.dtype == torch.float32
+    assert target.payload.device.type == device
+    target.payload.sync()
+    assert target.payload.location() == ("cpu" if device == "cpu" else "device")
+    np.testing.assert_array_equal(target.payload.detach().cpu().numpy(), [1.5, 2.5])
