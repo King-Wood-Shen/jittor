@@ -26,8 +26,9 @@ def _init(self, *a, **k):
     reg[:] = [r for r in reg if r() is not None and r() is not self]
     reg.append(_weakref.ref(self))
     try:
-        for pg in self.param_groups:
-            pg.setdefault("lr", self.lr)
+        if "_torch_defaults" not in self.__dict__:
+            for pg in self.param_groups:
+                pg.setdefault("lr", self.lr)
     except EXPECTED as exc:
         swallowed("torch/optimizers.py _init: for pg in self.param_groups:", exc)
 
@@ -61,6 +62,32 @@ def _torch_optimizer_kind(opt):
             or type(opt).__name__.lower())
 
 
+def _adamw_host_step(opt, pg):
+    return (_torch_optimizer_kind(opt) == "adamw"
+            and not pg.get("capturable", getattr(opt, "capturable", False))
+            and not pg.get("fused", getattr(opt, "fused", False)))
+
+
+def _adamw_step_tensor(opt, pg, i, value=None):
+    """Own the public noncapturable AdamW counter outside native groups."""
+    counters = opt.__dict__.setdefault("_torch_adamw_step_tensors", {})
+    key = id(pg["params"][i])
+    if value is not None:
+        counters[key] = value
+    if key not in counters:
+        g = get_install_context(jt).target_namespace
+        counters[key] = g.tensor(
+            float(_torch_param_steps(pg)[i]),
+            dtype=g.get_default_dtype(), device="cpu")
+    return counters[key]
+
+
+def _adamw_has_step(opt, pg, i):
+    return (_adamw_host_step(opt, pg)
+            and id(pg["params"][i]) in opt.__dict__.get(
+                "_torch_adamw_step_tensors", {}))
+
+
 class _ParamState(dict):
     def __init__(self, owner, param, values):
         dict.__init__(self, values)
@@ -91,6 +118,8 @@ class _OptState:
                 if self.get(p, marker) is not marker:
                     yield p
     def _reset_slot(self, pg, i):
+        self._opt.__dict__.get("_torch_adamw_step_tensors", {}).pop(
+            id(pg["params"][i]), None)
         _torch_param_steps(pg)[i] = 0
         for key in ("m", "values", "v", "d", "pre_grad"):
             buffers = pg.get(key)
@@ -109,9 +138,13 @@ class _OptState:
             raise KeyError(param)
         kind = _torch_optimizer_kind(self._opt)
         if key == "step":
+            if _adamw_host_step(self._opt, pg) and isinstance(value, jt.Var):
+                _adamw_step_tensor(self._opt, pg, i, value)
             if isinstance(value, jt.Var):
                 value = value.item()
             _torch_param_steps(pg)[i] = int(value)
+            if _adamw_host_step(self._opt, pg):
+                _adamw_step_tensor(self._opt, pg, i).fill_(value)
             self._sync_n_step()
             return
         mappings = {
@@ -131,14 +164,16 @@ class _OptState:
         if pg is None:
             return default
         steps = _torch_param_steps(pg)
-        if int(steps[i]) <= 0:
+        if int(steps[i]) <= 0 and not _adamw_has_step(self._opt, pg, i):
             return default
         kind = _torch_optimizer_kind(self._opt)
         if kind in ("adam", "adamw") and "m" in pg and "values" in pg:
             return _ParamState(self, param, {
                 "exp_avg": pg["m"][i],
                 "exp_avg_sq": pg["values"][i],
-                "step": float(steps[i])})
+                "step": (_adamw_step_tensor(self._opt, pg, i)
+                         if _adamw_host_step(self._opt, pg)
+                         else float(steps[i]))})
         if kind == "sgd" and "values" in pg and pg.get(
                 "momentum", getattr(self._opt, "momentum", 0)):
             return _ParamState(self, param, {
@@ -199,6 +234,9 @@ class _OptState:
 
 
 def _state_dict_torch(self):
+    if "_torch_defaults" in self.__dict__:
+        from .optimizer_state import state_dict
+        return state_dict(self)
     _context = get_install_context(jt)
     g = _context.target_namespace
     kind = _torch_optimizer_kind(self)
@@ -220,7 +258,8 @@ def _state_dict_torch(self):
                      "pre_grad", "_torch_steps"):
                 continue
             group[k] = v
-        group.setdefault("lr", pg.get("lr", getattr(self, "lr", 0.0)))
+        if "_torch_defaults" not in self.__dict__:
+            group.setdefault("lr", pg.get("lr", getattr(self, "lr", 0.0)))
         if kind in ("adam", "adamw"):
             group.setdefault("betas", pg.get(
                 "betas", getattr(self, "betas", (0.9, 0.999))))
@@ -263,7 +302,8 @@ def _state_dict_torch(self):
         steps = _torch_param_steps(pg)
         for i, p in enumerate(pg.get("params", [])):
             pid = param_ids.get(id(p))
-            if pid is None or int(steps[i]) <= 0:
+            if pid is None or (int(steps[i]) <= 0
+                               and not _adamw_has_step(self, pg, i)):
                 continue
             entry = {}
             if kind in ("adam", "adamw"):
@@ -289,12 +329,18 @@ def _state_dict_torch(self):
                         entry[target] = values[i]
             if entry:
                 if kind != "sgd":
-                    entry["step"] = g.tensor(float(steps[i]), dtype=g.float32)
+                    entry["step"] = (
+                        _adamw_step_tensor(self, pg, i)
+                        if _adamw_host_step(self, pg)
+                        else g.tensor(float(steps[i]), dtype=g.float32))
                 state[pid] = entry
     return {"state": state, "param_groups": param_groups}
 
 
 def _load_state_dict_torch(self, state_dict):
+    if "_torch_defaults" in self.__dict__:
+        from .optimizer_state import load_state_dict
+        return load_state_dict(self, state_dict)
     _context = get_install_context(jt)
     _native_load_state_dict = _context.state["optimizer_native_api"]['_native_load_state_dict']
     if not isinstance(state_dict, Mapping) or "param_groups" not in state_dict:
@@ -314,6 +360,8 @@ def _load_state_dict_torch(self, state_dict):
     for saved_pg, current_pg in zip(saved_groups, self.param_groups):
         if not isinstance(saved_pg, Mapping):
             raise TypeError("loaded optimizer parameter group must be a mapping")
+        from .optim_frontend import validate_foreach_groups
+        validate_foreach_groups(self, [saved_pg])
         saved_params = saved_pg.get("params", [])
         if not isinstance(saved_params, (list, tuple)):
             raise TypeError("loaded optimizer group params must be a sequence")
@@ -349,6 +397,8 @@ def _load_state_dict_torch(self, state_dict):
             max_step = max(max_step, step)
             slots.append((st, step))
         load_plan.append((dict(saved_pg), slots))
+    if kind == "adamw":
+        self.__dict__.pop("_torch_adamw_step_tensors", None)
     # Apply only after the complete input has been validated. This keeps
     # malformed loads atomic instead of leaving half-reset moments.
     for pg in self.param_groups:
@@ -388,11 +438,27 @@ def _load_state_dict_torch(self, state_dict):
                     if target in st and source in pg and i < len(pg[source]):
                         pg[source][i] = st[target]
             steps[i] = step
+            if st and _adamw_host_step(self, pg):
+                saved_step = st.get("step")
+                _adamw_step_tensor(
+                    self, pg, i,
+                    saved_step if isinstance(saved_step, jt.Var) else None)
     self.n_step = max_step
     return None
 
 
 def _zero_grad_compat(self, set_to_none=True):
+    if "_torch_defaults" in self.__dict__:
+        for group in self.param_groups:
+            for parameter in group["params"]:
+                gradient = getattr(parameter, "_torch_grad", None)
+                if set_to_none:
+                    parameter.grad = None
+                elif isinstance(gradient, jt.Var):
+                    gradient.update(jt.zeros_like(gradient))
+                    gradient.stop_grad().stop_fuse()
+                    parameter.grad = gradient
+        return None
     _context = get_install_context(jt)
     _orig_zero = _context.state["optimizer_native_api"]['_orig_zero']
     for _pg in getattr(self, "param_groups", []):
@@ -522,6 +588,8 @@ def _lsd(self, state):
 
 
 def _state_getter(self):
+    if "_torch_defaults" in self.__dict__:
+        return self._torch_generic_state
     return get_install_context(jt).target_namespace.optim.Optimizer._OptState(self)
 
 
@@ -532,6 +600,8 @@ def _lbfgs_type(base):
 
 
 def _step_with_closure(self, loss, retain_graph, closure, kwargs, native_kind):
+    from .optim_frontend import validate_foreach_groups
+    validate_foreach_groups(self, self.param_groups)
     _orig_step = get_install_context(jt).state["optimizer_native_api"]["steps"][native_kind]
     called_closure = False
     native_fsdp_loss = None
@@ -607,6 +677,8 @@ def _update_in_target_dtype(target, value):
 
 
 def _adam_step(self, loss, retain_graph, closure, kwargs, decoupled_weight_decay):
+    from .optim_frontend import validate_foreach_groups
+    validate_foreach_groups(self, self.param_groups)
     native_fsdp_loss = None
     if closure is None and callable(loss):
         closure = loss
@@ -701,7 +773,14 @@ def _adam_step(self, loss, retain_graph, closure, kwargs, decoupled_weight_decay
             was_trainable = bool(p.requires_grad)
             if not was_trainable or not isinstance(g, jt.Var) or list(g.shape) != list(p.shape):
                 continue
-            param_steps[i] = int(param_steps[i]) + 1
+            if _adamw_host_step(self, pg):
+                counter = _adamw_step_tensor(self, pg, i)
+                # The public tensor is authoritative, including user edits.
+                # Noncapturable AdamW uses a host scalar for bias correction.
+                param_steps[i] = int(counter.item()) + 1
+                counter.fill_(param_steps[i])
+            else:
+                param_steps[i] = int(param_steps[i]) + 1
             _update_in_target_dtype(p, adam_update(
                 p, g, v, m, lr=lr, eps=eps, weight_decay=weight_decay,
                 betas=(b0, b1), step=param_steps[i],

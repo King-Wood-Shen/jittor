@@ -12,6 +12,7 @@ from ..diagnostics import EXPECTED, swallowed
 from .. import fsdp_hooks as _fsdp_hooks
 from .. import optimizer_kinds as _optimizer_kinds
 from .tensor_state import get_tensor_state
+from .optimizer_required import required
 
 
 from .optimizer_api import (
@@ -67,6 +68,7 @@ def _install_optimizers(g, registry=None):
             _modules["torch.optim.optimizer"] = _optim_sub
         _optim_sub.Optimizer = Base
         _optim_sub.ParamsT = object
+        _optim_sub.required = required
         return
     import weakref as _weakref
     _native_steps = {}
@@ -126,6 +128,8 @@ def _install_optimizers(g, registry=None):
     Base._torch_compat_wrapped = True
     if not hasattr(_optim, "LBFGS"):
         _optim.LBFGS = _lbfgs_type(Base)
+    from .optimizer_algorithms import install as install_composed_optimizers
+    install_composed_optimizers(_optim, Base)
     _optim.__all__ = sorted(name for name in vars(_optim)
                            if not name.startswith("_"))
 
@@ -145,6 +149,7 @@ def _install_optimizers(g, registry=None):
         _modules["torch.optim.optimizer"] = _optim_sub
     _optim_sub.Optimizer = Base
     _optim_sub.ParamsT = object
+    _optim_sub.required = required
 
     # jittor's load_state_dict runs a dfs that calls .stop_grad() on every Var
     # it meets -- including params nested under param_groups -- freezing all
@@ -182,6 +187,10 @@ def _install_optimizers(g, registry=None):
                 "gradient retention and the registered FSDP provider boundary")
     register_api_bindings(_optim.LBFGS, "torch.optim.LBFGS", ("step",),
         Fidelity.UNIMPLEMENTED, "LBFGS updates explicitly raise NotImplementedError")
+    register_api_bindings(_optim, "torch.optim", ("Adagrad", "Adadelta", "Adamax", "RAdam", "NAdam"),
+        Fidelity.APPROXIMATE,
+        "Dense eager float32/float64 Tensor compositions; optional foreach, "
+        "capturable, differentiable, fused, sparse and Tensor-lr paths are restricted")
 
 
 def install_module_keys(ctx):
@@ -193,6 +202,11 @@ def install_module_keys(ctx):
         ("adam", "Adam", None),
         ("adamw", "AdamW", "Adam"),
         ("rmsprop", "RMSprop", None),
+        ("adagrad", "Adagrad", None),
+        ("adadelta", "Adadelta", None),
+        ("adamax", "Adamax", None),
+        ("radam", "RAdam", None),
+        ("nadam", "NAdam", None),
     ):
         optim_module = registry.ensure("torch.optim." + suffix)
         value = getattr(optim, class_name, None)

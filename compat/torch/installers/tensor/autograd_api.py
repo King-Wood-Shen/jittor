@@ -55,6 +55,23 @@ def requires_grad_(self, v=True):
     return self
 
 
+def _fill_generic_opt_grads(opt, grad_by_id, filled_param_ids):
+    for group in opt.param_groups:
+        for parameter in group["params"]:
+            if id(parameter) in filled_param_ids:
+                continue
+            gradient = grad_by_id.get(id(parameter))
+            if gradient is None or not parameter.requires_grad:
+                continue
+            gradient = gradient.stop_grad()
+            previous = getattr(parameter, "_torch_grad", None)
+            if previous is not None:
+                previous.update(previous + gradient)
+                gradient = previous
+            object.__setattr__(parameter, "_torch_grad", gradient)
+            filled_param_ids.add(id(parameter))
+
+
 def _fill_opt_grads(opt, grad_by_id, filled_param_ids=None):
     # Replicate the grad-storage half of jittor's Optimizer.backward() but
     # from an already-computed {id(param): grad} map (so a SINGLE jt.grad
@@ -66,6 +83,8 @@ def _fill_opt_grads(opt, grad_by_id, filled_param_ids=None):
     zero = getattr(opt, "_Optimizer__zero_grad", True)
     if filled_param_ids is None:
         filled_param_ids = set()
+    if "_torch_defaults" in opt.__dict__:
+        return _fill_generic_opt_grads(opt, grad_by_id, filled_param_ids)
     for pg in opt.param_groups:
         grads_list = pg.get("grads")
         if grads_list is None:
@@ -280,7 +299,7 @@ def _grad_get(self):
         return g
     for r in _owner.get_tensor_state(_owner.jt).active_optimizers:
         o = r() if callable(r) else r
-        if o is None:
+        if o is None or "_torch_defaults" in o.__dict__:
             continue
         try:
             return o.find_grad(self)
@@ -313,7 +332,7 @@ def _grad_set(self, value):
     # critically, p.grad=None cannot leave an old optimizer slot behind.
     for r in _owner.get_tensor_state(_owner.jt).active_optimizers:
         o = r() if callable(r) else r
-        if o is None:
+        if o is None or "_torch_defaults" in o.__dict__:
             continue
         changed = False
         for pg in getattr(o, "param_groups", []):
