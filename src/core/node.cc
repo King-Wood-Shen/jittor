@@ -391,6 +391,14 @@ void Node::release_backward_liveness() {
             if (is_finished() && is_stop_grad()) continue;
             liveness_queue.emplace_back(in, &Node::release_backward_liveness);
         }
+        // Logical-alias history is needed exactly while a backward owner
+        // survives. Release the forward-only pin before free() examines it.
+        // Propagation uses the existing liveness queue and outer free buffer;
+        // no recursive drain and no owning reference back to this node.
+        if (is_var() && var()->alias_history_pin) {
+            var()->alias_history_pin = false;
+            release_forward_liveness();
+        }
         LOGvvvv << "Free backward_liveness=0" << this;
         free();
     }

@@ -61,6 +61,7 @@ int64 do_graph_check() {
         auto* node = queue[i];
         LOGvvvv << "Check node" << i << node;
         int f=0, b=0, p=0;
+        if (node->is_var() && node->var()->alias_history_pin) ++f;
         if (i<vhsize) {
             f+=visited.at(node), b+=visited.at(node), p+=visited.at(node);
         }

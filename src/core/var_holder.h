@@ -5,6 +5,7 @@
 // file 'LICENSE.txt', which is part of this source code package.
 // ***************************************************************
 #pragma once
+#include <memory>
 #include "core/common.h"
 #include "core/var.h"
 #include "core/var_slices.h"
@@ -81,6 +82,14 @@ struct VarView {
     VarView* next = nullptr;
 };
 
+// Opt-in logical aliases are distinct from the allocator's sharing ring:
+// clone may share an allocation but must never join this group. Members are
+// weak; each holder owns its current graph value and its own autograd flags.
+struct HolderAliasGroup {
+    std::shared_ptr<LogicalAliasVersion> version;
+    vector<VarHolder*> members;
+};
+
 struct DataView {
     VarHolder* vh;
     void* ptr;
@@ -125,6 +134,7 @@ struct VarHolder {
     // Head of the list of views onto this holder, so that destruction can tell
     // them their base is gone.
     VarView* views = nullptr;
+    std::shared_ptr<HolderAliasGroup> aliases;
     VarHolder(Var* v);
     VarHolder(VarPtr&& v);
     // will move and delete v
@@ -334,6 +344,15 @@ struct VarHolder {
         var->set_flag(VarFlags::_first_order_only);
         return this;
     }
+
+    // Torch opts into logical aliasing explicitly; native detach is unchanged.
+    // @pyjt(_detach_alias)
+    VarHolder* detach_alias();
+    void ensure_alias_group();
+    void leave_alias_group();
+    void check_alias_write(Var* value);
+    void publish_alias_value(Var* value, bool mutation);
+    void replace_local_value(VarPtr&& value);
 
     /* detach the grad */
     // @pyjt(detach)

@@ -43,6 +43,7 @@ _ORIG_MODULE_NAMED_PARAMETERS = nn.Module.named_parameters
 _ORIG_MODULE_NAMED_BUFFERS = nn.Module.named_buffers
 _ORIG_MODULE_NAMED_MODULES = nn.Module.named_modules
 _ORIG_MODULE_LOAD_STATE_DICT = nn.Module.load_state_dict
+_ORIG_MODULE_STATE_DICT = nn.Module.state_dict
 _ORIG_MODULE_PARAMETERS = nn.Module.parameters
 
 
@@ -421,6 +422,13 @@ def _state_dict_key_diff(root, state_dict):
     return missing, unexpected, mismatched
 
 
+def _state_dict(self, destination=None, prefix="", keep_vars=False):
+    if destination is None:
+        destination = _collections.OrderedDict()
+    return _ORIG_MODULE_STATE_DICT(
+        self, destination=destination, prefix=prefix, keep_vars=keep_vars)
+
+
 def _load_state_dict(self, state_dict, strict=True, assign=False):
     """Torch's ``load_state_dict``: honours ``strict`` and returns the keys."""
     missing, unexpected, mismatched = _state_dict_key_diff(self, state_dict)
@@ -459,7 +467,9 @@ def _load_state_dict(self, state_dict, strict=True, assign=False):
         # here so a strict=False load stays quiet, exactly like torch.
         load_state = {k: v for k, v in load_state.items()
                       if str(k) not in set(unexpected)}
-    _ORIG_MODULE_LOAD_STATE_DICT(self, load_state)
+    # Checkpoint loading mutates existing leaves without recording gradients.
+    with jt.no_grad():
+        _ORIG_MODULE_LOAD_STATE_DICT(self, load_state)
     try:
         for n, p in self.named_parameters():
             if n in trainable and p.is_stop_grad():
@@ -632,7 +642,9 @@ def _module_replace_vars(self, convert):
                             # Module conversion changes parameter storage, not
                             # its identity or its position as a graph leaf.
                             on_cpu = replacement.location() == "cpu"
-                            value.assign(replacement.detach())
+                            requires_grad = value.requires_grad
+                            value._update(replacement.detach())
+                            value.requires_grad_(requires_grad)
                             if on_cpu:
                                 _make_cpu_resident(value, inplace=True)
                         replacement = value
@@ -640,7 +652,7 @@ def _module_replace_vars(self, convert):
                         if isinstance(gradient, jt.Var):
                             new_gradient = convert(gradient)
                             if new_gradient is not gradient:
-                                gradient.assign(new_gradient)
+                                gradient._update(new_gradient)
                     elif replacement is not value:
                         for attribute in ("is_buffer", "persistent"):
                             if hasattr(value, attribute):
@@ -1029,6 +1041,11 @@ register_fidelity(
     "remove_duplicate= are honored. Container children are enumerated through "
     "jittor's named_modules, so ordering within a ModuleList follows insertion.")
 register_fidelity(
+    "torch.nn.Module.state_dict", _state_dict, Fidelity.APPROXIMATE,
+    "Defaults to detached logical aliases of parameters and buffers; "
+    "keep_vars=True preserves the original holders. Uses native traversal "
+    "and does not implement all Torch state-dict hooks or metadata.")
+register_fidelity(
     "torch.nn.Module.load_state_dict", _load_state_dict, Fidelity.APPROXIMATE,
     "Returns a namedtuple with missing_keys/unexpected_keys like torch, and "
     "preserves each target parameter's existing dtype so loading a float32 "
@@ -1098,6 +1115,7 @@ def _install_module_methods(nn, registry=None):
     M.named_parameters = _named_parameters
     M.named_buffers = _named_buffers
     M.named_modules = _named_modules
+    M.state_dict = _state_dict
     M.load_state_dict = _load_state_dict
     M.parameters = _parameters
     M.train = _train
@@ -1132,5 +1150,5 @@ def _install_module_methods(nn, registry=None):
         M._non_persistent_buffers_set = property(_nonpersist_set)
 
     register_api_bindings(M, 'torch.nn.Module',
-        ('__setattr__', 'buffers', 'cpu', 'cuda', 'double', 'eval', 'execute', 'float', 'forward', 'get_buffer', 'get_execution_pipelining', 'get_parameter', 'get_submodule', 'half', 'load_state_dict', 'named_buffers', 'named_modules', 'named_parameters', 'npu', 'parameters', 'register_parameter', 'set_execution_pipelining', 'to', 'to_empty', 'train', 'type', 'zero_grad') + tuple(()),
+        ('__setattr__', 'buffers', 'cpu', 'cuda', 'double', 'eval', 'execute', 'float', 'forward', 'get_buffer', 'get_execution_pipelining', 'get_parameter', 'get_submodule', 'half', 'load_state_dict', 'named_buffers', 'named_modules', 'named_parameters', 'npu', 'parameters', 'register_parameter', 'set_execution_pipelining', 'state_dict', 'to', 'to_empty', 'train', 'type', 'zero_grad') + tuple(()),
         Fidelity.APPROXIMATE, 'Module state and parameter management over native holders; Torch lazy iterator, meta, and layout semantics are approximate')

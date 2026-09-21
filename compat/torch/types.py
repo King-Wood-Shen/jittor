@@ -642,7 +642,9 @@ def _make_cpu_resident(v, inplace=False):
         moved = v._copy_to_cpu()
         if inplace:
             trainable = bool(v.requires_grad)
-            v.assign(moved.detach())
+            # Device migration replaces this holder's storage. Retained
+            # detach/state_dict aliases continue to own the old allocation.
+            v._update(moved.detach())
             v.requires_grad = trainable
             return v
         return moved
@@ -706,7 +708,9 @@ def _make_cuda_resident(v, force=False, inplace=False, device=None):
         moved = v.to_device(index)
         if inplace:
             trainable = bool(v.requires_grad)
-            v.assign(moved.detach())
+            # Device migration replaces this holder's storage. Retained
+            # detach/state_dict aliases continue to own the old allocation.
+            v._update(moved.detach())
             v.requires_grad = trainable
             return v
         return moved

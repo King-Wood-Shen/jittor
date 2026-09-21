@@ -6,6 +6,7 @@
 // ***************************************************************
 #pragma once
 #include <atomic>
+#include <memory>
 #include "runtime/tensor_placement.h"
 #include "core/common.h"
 #include "core/node.h"
@@ -17,7 +18,25 @@ namespace jittor {
 constexpr size_t alignment = 32;
 struct VarHolder;
 
+// Logical aliases opt in at the Torch detach boundary. This state owns no
+// graph node or Python object and is unrelated to physical allocation sharing.
+struct LogicalAliasVersion {
+    static std::atomic<int64> live_count;
+    uint64 value = 0;
+    LogicalAliasVersion() { ++live_count; }
+    ~LogicalAliasVersion() { --live_count; }
+};
+struct LogicalLeafIdentity {};
+
 struct Var : Node {
+    std::shared_ptr<LogicalAliasVersion> alias_version;
+    uint64 alias_generation = 0;
+    // A replaced leaf keeps only its forward contribution while an existing
+    // backward owner still needs it. The last backward release removes this
+    // pin, so neither a holder nor the alias group stores historical Vars.
+    bool alias_history_pin = false;
+    std::shared_ptr<LogicalLeafIdentity> alias_leaf;
+
     NanoVector shape;
     // Element strides; empty means the canonical dense layout. Offset remains
     // represented by mem_ptr relative to the shared allocation's base.

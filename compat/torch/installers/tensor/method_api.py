@@ -209,8 +209,9 @@ def _ip(self, value):
         return self
     target = self
     was_trainable = not target.is_stop_grad()
+    was_requires_grad = target.requires_grad
     target.assign(value)
-    if was_trainable and target.is_stop_grad():
+    if was_trainable and target.is_stop_grad() and was_requires_grad:
         target.start_grad()
     elif not was_trainable and not target.is_stop_grad():
         target.stop_grad()
@@ -317,7 +318,7 @@ def _new_tensor(self, data, dtype=None, device=None, requires_grad=False, **kw):
             return v
         data = [_coerce(v) for v in data]
     with _new_scope(self, device):
-        return _new_finish(_owner.jt.array(data).cast(dt), device, requires_grad)
+        return _new_finish(_owner.jt.array(data, dtype=dt), device, requires_grad)
 
 
 def _clamp(input, min=None, max=None, min_v=None, max_v=None):
@@ -671,15 +672,16 @@ def _var_detach(self):
     Var = _context.state["Var"]
     _native = _context.state["tensor_native_api"]
     _native_detach = _native['_native_detach']
-    out = _native_detach(self)
     # Jittor's native detach marks the producing clone op as stopped while
     # leaving the returned Var's requires_grad bit set.  Torch's detached
     # tensor is a stopped leaf.  The torch-facing runtime selects
     # EXPLICIT_REQUIRES_GRAD, so apply that policy at this API boundary;
     # native Jittor callers retain the native behavior.
     policy = getattr(getattr(_owner.jt, "autograd", None), "get_policy", None)
-    if Var is not _NativeVar or (
-            policy is not None and policy().stop_outputs_when_inputs_stopped):
+    torch_contract = Var is not _NativeVar or (
+        policy is not None and policy().stop_outputs_when_inputs_stopped)
+    out = self._detach_alias() if torch_contract else _native_detach(self)
+    if torch_contract:
         # This Python method runs after the native binding's policy scope
         # has restored its caller. Its frontend owner determines detach's
         # contract even when the surrounding native policy is unchanged.
@@ -1309,11 +1311,18 @@ _BINARY_APIS = {
 
 
 def _api_fill(self, val):
-    return _ip(self, _owner.jt.ones(self.shape, self.dtype) * val)
+    if isinstance(val, _NativeVar) and val.ndim != 0:
+        raise RuntimeError("fill_ only supports 0-dimension value tensor")
+    # Construct directly in the destination dtype to preserve double precision
+    # and large integers before broadcasting; copy_ retains view mutation.
+    with _new_scope(self, self.device):
+        value = _owner.jt.array(val, dtype=_jittor_dtype_name(self.dtype))
+        return _copy_(self, value.broadcast(self.shape))
 
 
 def _api_zero(self):
-    return _ip(self, _owner.jt.zeros(self.shape, self.dtype))
+    with _new_scope(self, self.device):
+        return _ip(self, _owner.jt.zeros(self.shape, self.dtype))
 
 
 def _api_add(self, o, alpha=1):

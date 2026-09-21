@@ -4,6 +4,7 @@
 // This file is subject to the terms and conditions defined in
 // file 'LICENSE.txt', which is part of this source code package.
 // ***************************************************************
+#include <unordered_set>
 #include "bindings/pybind/py_var_tracer.h"
 #include "core/grad.h"
 #include "runtime/launch_diagnostics.h"
@@ -76,6 +77,94 @@ struct AmpGradGuard {
     }
 };
 
+// Follow actual value reads of the newly constructed derivative. An old
+// forward value is a saved-value boundary: exp's derivative reads its output,
+// not that output's forward ancestors. Allocation age only locates that
+// boundary; actual input edges (excluding control/shape-only dependencies)
+// determine whether a saved value is read.
+static void check_saved_alias_values(Var* derivative, int64 before) {
+    if (!derivative || LogicalAliasVersion::live_count.load() == 0) return;
+    vector<Node*> pending{derivative};
+    std::unordered_set<Node*> visited;
+    while (!pending.empty()) {
+        Node* node = pending.back();
+        pending.pop_back();
+        if (!visited.insert(node).second) continue;
+        if (node->is_var() && node->id <= before) {
+            Var* value = node->var();
+            if (value->alias_version)
+                USER_CHECK(value->alias_generation == value->alias_version->value)
+                    << "A value saved for backward was modified by an inplace "
+                       "logical alias operation";
+            // A real storage view carries its source's version even when it
+            // was created by native broadcasting without a Python holder.
+            Op* producer = value->input();
+            if (!producer || !producer->is_storage_view()
+                || producer->name() == string("clone"))
+                continue;
+        }
+        for (auto& edge : node->_inputs) {
+            if (!node->is_var()) {
+                if (edge.reverse().index < 0) continue;
+                // Broadcast's optional second input supplies shape, not data.
+                if (node->op()->type() == OpType::broadcast
+                    && edge.reverse().index == 1) continue;
+                if (node->op()->flag(OpFlags::_no_input_storage)) continue;
+            }
+            pending.push_back(edge.node);
+        }
+    }
+}
+
+// Holder rebinding changes graph-node identity, not the identity of an
+// autograd leaf. Detached siblings receive independent identities, while
+// no_grad writes retain the identity of each individual holder.
+static void resolve_alias_leaf_targets(Var* loss, vector<Var*>& targets) {
+    std::unordered_set<LogicalLeafIdentity*> requested;
+    for (auto* target : targets)
+        if (target->alias_leaf && !target->is_stop_grad()
+            && !target->flag(VarFlags::_requires_grad_disabled))
+            requested.insert(target->alias_leaf.get());
+    if (requested.empty()) return;
+    std::unordered_map<LogicalLeafIdentity*, Var*> leaves;
+    vector<Node*> pending{loss};
+    std::unordered_set<Node*> visited;
+    while (!pending.empty()) {
+        Node* node = pending.back();
+        pending.pop_back();
+        if (!visited.insert(node).second) continue;
+        if (node->is_var()) {
+            Var* value = node->var();
+            if (value->alias_leaf && requested.count(value->alias_leaf.get())
+                && !value->is_stop_grad()) {
+                auto* key = value->alias_leaf.get();
+                auto found = leaves.find(key);
+                USER_CHECK(found == leaves.end() || found->second == value)
+                    << "Multiple versions of one logical alias leaf in a "
+                       "single backward graph are not supported";
+                leaves[key] = value;
+            }
+        }
+        if (node->is_stop_grad()) continue;
+        for (auto& edge : node->_inputs)
+            if (!is_requires_grad_disabled_edge(edge.node, node))
+                pending.push_back(edge.node);
+    }
+    // Validate the whole mapping before changing flags. A holder may have
+    // been rebound while frozen and then thawed; its old graph node must use
+    // that same logical leaf's current policy. Frozen input-edge snapshots
+    // above remain authoritative, so thawing cannot add retroactive edges.
+    for (auto*& target : targets) {
+        if (!target->alias_leaf || target->is_stop_grad()
+            || target->flag(VarFlags::_requires_grad_disabled)) continue;
+        auto found = leaves.find(target->alias_leaf.get());
+        if (found != leaves.end()) {
+            found->second->set_flag(VarFlags::_requires_grad_disabled, 0);
+            target = found->second;
+        }
+    }
+}
+
 VarPtr make_grad(Op* op, Var* out, Var* dout, Var* x, int x_index) {
     if (dout == nullptr) return nullptr;
     if (x_index<0) return nullptr;
@@ -84,7 +173,9 @@ VarPtr make_grad(Op* op, Var* out, Var* dout, Var* x, int x_index) {
     AmpGradGuard agg(op);
     Float32PrecisionScope precision_scope(op->float32_precision);
     LaunchOriginScope origin_scope(op->launch_origin);
+    const auto before = total_node.load();
     auto dx = op->grad(out, dout, x, x_index);
+    check_saved_alias_values(dx.ptr, before);
     // A null dx is an ordinary path, not an error: floor/round/ceil, mod,
     // floor_divide, the bitwise ops and the default Op::grad all return one.
     // The guard used to test the input x and then dereference the result.
@@ -155,6 +246,7 @@ vector<VarPtr> grad(
     bool retain_graph,
     bool materialize_grads
 ) {
+    resolve_alias_leaf_targets(loss, targets);
     LOGvv << "loss:" >> loss << "targets:" >> targets;
     USER_CHECK(loss->is_float()) << "Loss should be float";
     USER_CHECK(!loss->flag(VarFlags::_first_order_only))

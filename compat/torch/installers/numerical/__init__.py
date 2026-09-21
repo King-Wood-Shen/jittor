@@ -309,6 +309,18 @@ _LERP_FIDELITY_DETAIL = (
 
 from .elementwise import lerp
 
+from .foreach import _foreach_lerp_
+
+register_fidelity(
+    "torch._foreach_lerp_",
+    _foreach_lerp_,
+    Fidelity.APPROXIMATE,
+    "In-place scalar-weight interpolation for matching-shape float32/float64 "
+    "tensor pairs, preserving the input sequence and tensor identities. "
+    "Tensor/list weights, broadcasting, other dtypes, and fused execution "
+    "are not implemented; trainable operands require no_grad.",
+)
+
 register_fidelity(
     "torch.lerp",
     lerp,
@@ -1122,6 +1134,7 @@ def install(ctx):
     _bind_missing(g, "log1p", log1p)
     _bind_missing(g, "reciprocal", reciprocal)
     _bind_missing(g, "lerp", lerp)
+    _bind_missing(g, "_foreach_lerp_", _foreach_lerp_)
     _bind_missing(g, "isclose", isclose)
     _bind_missing(g, "allclose", allclose)
     _bind_missing(g, "cosine_similarity", cosine_similarity)

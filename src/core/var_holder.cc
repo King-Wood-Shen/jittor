@@ -4,6 +4,7 @@
 // This file is subject to the terms and conditions defined in
 // file 'LICENSE.txt', which is part of this source code package.
 // ***************************************************************
+#include <algorithm>
 #include <unordered_set>
 #include <sstream>
 #include "core/var_holder.h"
@@ -244,6 +245,10 @@ VarHolder::VarHolder(VarHolder* v) : var(v->var) {
     for (auto* w = views; w; w = w->next) w->base = this;
     v->view = nullptr;
     v->views = nullptr;
+    aliases = move(v->aliases);
+    if (aliases)
+        for (auto*& member : aliases->members)
+            if (member == v) member = this;
     // free memory without calling deconstructor
     operator delete(v);
 }
@@ -450,7 +455,10 @@ void VarHolder::refresh_transpose_views() {
             value = apply_view_step(value.ptr, step);
         }
         if (fits) {
-            *record->owner = move(value);
+            if (record->owner->aliases)
+                record->owner->publish_alias_value(value.ptr, false);
+            else
+                *record->owner = move(value);
         } else if (record->owner) {
             // The view keeps the data it was taken from, which is what torch's
             // views do after `x.data = y` replaces the storage under them.
@@ -498,6 +506,7 @@ bool VarHolder::write_through_view(Var* value) {
 }
 
 VarHolder::~VarHolder() {
+    leave_alias_group();
     drop_view();
     orphan_views();
     if (PREDICT_BRANCH_NOT_TAKEN(!var)) return;
@@ -533,7 +542,121 @@ static inline void assign_var(Var* a, Var* b) {
         b->flag(VarFlags::_requires_grad_disabled));
 }
 
+void VarHolder::ensure_alias_group() {
+    if (aliases) return;
+    if (view && view->base) view->base->ensure_alias_group();
+    aliases = std::make_shared<HolderAliasGroup>();
+    aliases->version = view && view->base
+        ? view->base->aliases->version : std::make_shared<LogicalAliasVersion>();
+    var->alias_version = aliases->version;
+    var->alias_generation = aliases->version->value;
+    var->alias_leaf = std::make_shared<LogicalLeafIdentity>();
+    aliases->members.push_back(this);
+}
+
+VarHolder* VarHolder::detach_alias() {
+    ensure_alias_group();
+    auto* result = new VarHolder(jittor::detach(var));
+    result->aliases = aliases;
+    result->var->alias_version = aliases->version;
+    result->var->alias_generation = aliases->version->value;
+    result->var->alias_leaf = std::make_shared<LogicalLeafIdentity>();
+    aliases->members.push_back(result);
+    // A detached view keeps the same indexing expression without retaining
+    // its Python source. Each record is independently owned and unlinked.
+    if (view && view->base) {
+        auto* base = view->base;
+        result->view = new VarView{base, result, view->steps, nullptr, base->views};
+        if (base->views) base->views->prev = result->view;
+        base->views = result->view;
+    }
+    return result;
+}
+
+void VarHolder::leave_alias_group() {
+    if (!aliases) return;
+    auto& members = aliases->members;
+    members.erase(std::remove(members.begin(), members.end(), this), members.end());
+    if (views && !members.empty()) {
+        // Same-shape aliases can anchor existing view records when this
+        // wrapper dies or is explicitly rebound to different storage.
+        auto* successor = members.front();
+        while (views) {
+            auto* record = views;
+            views = record->next;
+            record->base = successor;
+            record->prev = nullptr;
+            record->next = successor->views;
+            if (successor->views) successor->views->prev = record;
+            successor->views = record;
+        }
+    }
+    aliases.reset();
+}
+
+extern bool no_grad;
+void VarHolder::check_alias_write(Var* value) {
+    USER_CHECK(value->shape == var->shape && value->dtype() == var->dtype())
+        << "Logical alias writes require unchanged shape and dtype";
+    USER_CHECK(value->device_id == var->device_id)
+        << "Logical alias writes require the same device";
+    USER_CHECK(!view || view->base)
+        << "Writing an orphaned detached view is not supported";
+    for (auto* member : aliases->members) {
+        USER_CHECK(no_grad || !member->get_requires_grad())
+            << "In-place writes to trainable logical aliases require no_grad";
+        USER_CHECK(!member->get_requires_grad() || member->is_backward_leaf())
+            << "In-place writes through non-leaf logical aliases are not supported";
+        for (auto* record = member->views; record; record = record->next)
+            USER_CHECK(!record->owner->get_requires_grad())
+                << "In-place alias writes with differentiable views are not supported";
+    }
+}
+
+void VarHolder::replace_local_value(VarPtr&& value) {
+    // Detach only the new value, never a sibling's node: sharing grad flags
+    // would let a checkpoint export freeze its live model parameter.
+    value.set_stop_grad(var->is_stop_grad());
+    value->alias_leaf = var->alias_leaf;
+    value->alias_version = aliases->version;
+    value->alias_generation = aliases->version->value;
+    assign_var(value.ptr, var);
+    if (var->alias_leaf && !var->is_stop_grad()
+        && var->liveness.backward.active() && !var->alias_history_pin) {
+        // The holder already contributes forward liveness, so adding this
+        // extra owner cannot enqueue a 0->1 propagation here.
+        var->alias_history_pin = true;
+        var->own_forward_liveness();
+    }
+    release_holder();
+    var->release_both_liveness();
+    var = value.ptr;
+    value.ptr = nullptr;
+    own_holder();
+}
+
+void VarHolder::publish_alias_value(Var* value, bool mutation) {
+    if (mutation) {
+        check_alias_write(value);
+        ++aliases->version->value;
+    }
+    auto group = aliases;
+    // Prepare every replacement before dropping any old graph liveness.
+    vector<VarPtr> replacements;
+    replacements.reserve(group->members.size());
+    for (size_t i=0; i<group->members.size(); ++i)
+        replacements.push_back(jittor::detach(value));
+    for (size_t i=0; i<group->members.size(); ++i)
+        group->members[i]->replace_local_value(move(replacements[i]));
+    for (auto* member : group->members)
+        member->refresh_transpose_views();
+}
+
 void VarHolder::operator=(VarPtr&& v) {
+    if (aliases) {
+        publish_alias_value(v.ptr, true);
+        return;
+    }
     if (autograd_policy.preserve_requires_grad_on_assignment) {
         if (var->is_stop_grad() != v->is_stop_grad())
             v.set_stop_grad(var->is_stop_grad());
@@ -575,6 +698,9 @@ VarHolder* VarHolder::start_grad() {
     AutogradPolicyOverride policy_guard({});
     no_grad = 0;
     auto dvar = jittor::detach(var);
+    dvar->alias_leaf = var->alias_leaf;
+    dvar->alias_version = var->alias_version;
+    dvar->alias_generation = var->alias_generation;
     std::swap(dvar.ptr, var);
     no_grad = no_grad_bk;
     var->set_flag(VarFlags::_explicit_requires_grad);
@@ -611,6 +737,12 @@ string VarHolder::to_string() {
 }
 
 VarHolder* VarHolder::assign(VarHolder* v) {
+    if (aliases) {
+        check_alias_write(v->var);
+        if (!write_through_view(v->var))
+            publish_alias_value(v->var, true);
+        return this;
+    }
     if (autograd_policy.preserve_requires_grad_on_assignment) {
         v->set_requires_grad(get_requires_grad());
     }
@@ -634,6 +766,12 @@ VarHolder* VarHolder::update(VarHolder* v) {
 }
 
 VarHolder* VarHolder::_update(VarHolder* v) {
+    // Explicit storage replacement leaves retained aliases on the old value.
+    if (aliases) {
+        leave_alias_group();
+        drop_view();
+        orphan_views();
+    }
     if (var->flag(VarFlags::_placement_published))
         v->var->set_flag(VarFlags::_placement_published);
     release_holder();
