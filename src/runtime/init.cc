@@ -6,6 +6,7 @@
 // ***************************************************************
 #include "runtime/device.h"
 #include "runtime/backend.h"
+#include "runtime/fetch_state.h"
 #include <random>
 
 #include <csignal>
@@ -64,16 +65,13 @@ vector<set_seed_callback> callbacks;
 int current_seed;
 int64 current_offset;
 
-// fron fetch_op.cc
-EXTERN_LIB list<VarPtr> fetcher;
-EXTERN_LIB list<VarPtr> fetcher_to_free;
 EXTERN_LIB vector<void(*)()> take_cleanup_callbacks();
 EXTERN_LIB volatile sig_atomic_t exited;
 
 void cleanup() {
     exited = true;
-    fetcher_to_free.clear();
-    fetcher.clear();
+    runtime_fetch_state().deferred().clear();
+    runtime_fetch_state().pending().clear();
     // Walk a private copy, taken under the registration lock, rather than the
     // live vector: a callback may register another one (`get_resources` does,
     // on whichever thread first touches a side stream), and `push_back` then

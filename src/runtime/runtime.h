@@ -1,6 +1,7 @@
 #pragma once
 #include "core/executor.h"
 #include "runtime/holder_state.h"
+#include "runtime/fetch_state.h"
 #include "runtime/submission_pipeline.h"
 #include "runtime/traversal_state.h"
 #include "runtime/device_state.h"
@@ -23,6 +24,7 @@ public:
     Executor& executor() { return executor_; }
     SubmissionPipeline& submissions() { return submissions_; }
     RuntimeHolderState& holders() { return holders_; }
+    RuntimeFetchState& fetches() { return fetches_; }
     RuntimeTraversalState& traversals() { return traversals_; }
     RuntimeDeviceState& devices() { return devices_; }
     RuntimeJitPolicy& jit_policy() { return jit_policy_; }
@@ -35,6 +37,7 @@ private:
     Executor executor_;
     SubmissionPipeline submissions_;
     RuntimeHolderState holders_;
+    RuntimeFetchState fetches_;
     RuntimeTraversalState traversals_;
     RuntimeDeviceState devices_;
     RuntimeJitPolicy jit_policy_;

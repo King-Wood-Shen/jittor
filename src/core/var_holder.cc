@@ -11,6 +11,7 @@
 #include "core/executor.h"
 #include "runtime/device.h"
 #include "runtime/backend.h"
+#include "runtime/fetch_state.h"
 #include "core/graph.h"
 #include "core/grad.h"
 #include "mem/allocator/cuda_dual_allocator.h"
@@ -723,9 +724,6 @@ ItemData VarHolder::item() {
     return data;
 }
 
-// from fetch_op.cc
-EXTERN_LIB list<VarPtr> fetcher;
-
 void sync_all(bool device_sync) {
     vector<Var*> vars;
     vars.reserve(runtime_holder_state().holders().size());
@@ -743,7 +741,7 @@ void sync_all(bool device_sync) {
         if (!v->var->_outputs.size())
             vars.push_back(v->var);
     }
-    for (auto& v :fetcher)
+    for (auto& v : runtime_fetch_state().pending())
         vars.push_back(v.ptr);
     graph_check();
     runtime_executor().run_sync(vars, device_sync); //need sync at last
