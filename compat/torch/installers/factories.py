@@ -237,6 +237,7 @@ def _constructor_adapter(name, orig, _accepts_dtype, *args, **kwargs):
         if native_shape:
             out = orig(*args)
             out._jittor_torch_ext_mutable = True
+            out.requires_grad_(False)
             return out
     # _invoke_factory already established native construction placement.
     _requires_grad = bool(kwargs.get("requires_grad", False))
@@ -292,7 +293,9 @@ def _constructor_adapter(name, orig, _accepts_dtype, *args, **kwargs):
             _cast_to = _dtype_to_str(kwargs.pop("dtype"))
     out = orig(*args, **kwargs)
     if _cast_to is not None:
-        out = out.cast(_cast_to)
+        # A metadata factory has no storage or CastOp to execute. Preserve its
+        # native shape/stride metadata while changing only the requested dtype.
+        out = out.metadata_copy(_cast_to) if out.is_metadata else out.cast(_cast_to)
     out._jittor_torch_ext_mutable = True
     out.requires_grad_(_requires_grad)
     if _requires_grad:

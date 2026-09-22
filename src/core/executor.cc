@@ -63,7 +63,7 @@ struct PendingSubmissionScope {
 
 void Executor::submit_pending(Var* target, bool force) {
     auto& pipeline = runtime_submission_pipeline();
-    if (!target || pipeline.flush_active || target->is_finished()) return;
+    if (!target || target->is_metadata() || pipeline.flush_active || target->is_finished()) return;
 
     if (force || target->num < 0) {
         PendingSubmissionScope scope(pipeline);
@@ -80,7 +80,7 @@ void Executor::submit_pending(Var* target, bool force) {
         int64 pending_bytes = 0;
         for (auto holder : runtime_holder_state().holders()) {
             auto var = holder->var;
-            if (var->_outputs.size() || var->is_finished()) continue;
+            if (var->is_metadata() || var->_outputs.size() || var->is_finished()) continue;
             // The third place a kept graph must not be picked up as a
             // bystander (see `top_weak_sync` and `sync_all`), and the easiest
             // to miss: this fires in the middle of the NEXT call's
@@ -194,7 +194,7 @@ static void top_weak_sync(vector<Var*>& vars) {
         if (v->id > max_id) break;
         roots.consume_pending();
         if (epoch.marked(v)) continue;
-        if (v->_outputs.size()) continue;
+        if (v->is_metadata() || v->_outputs.size()) continue;
         if (v->is_finished()) continue;
         // A kept graph is run on purpose, by whoever kept it, and never as a
         // bystander of somebody else's sync. Widening a batch with one costs a
@@ -282,6 +282,7 @@ static void resolve_dynamic_inputs(Executor& executor, const vector<Var*>& roots
 }
 
 void Executor::run_sync(vector<Var*> vars, bool device_sync, bool weak_sync) {
+    for (auto* value : vars) USER_CHECK(!value->is_metadata()) << "Cannot execute a metadata-only tensor";
     // == phase 1: setup ==
     // One batch at a time. Until the device waits inside started releasing the
     // GIL, the GIL *was* this exclusion for Python threads; now that another
@@ -294,6 +295,7 @@ void Executor::run_sync(vector<Var*> vars, bool device_sync, bool weak_sync) {
     pipeline.last_run_ops = Op::number_of_created_ops;
     if (weak_sync && !use_threading)
         top_weak_sync(vars);
+    for (auto* value : vars) USER_CHECK(!value->is_metadata()) << "Cannot execute a metadata-only tensor";
     resolve_dynamic_inputs(*this, vars);
     this->allocator = get_allocator();
     this->temp_allocator = get_allocator(true);

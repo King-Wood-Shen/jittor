@@ -20,6 +20,10 @@
 namespace jittor {
 
 struct VarHolder;
+// Native metadata creation is separate from an EmptyOp: it creates no producer.
+EXTERN_LIB VarPtr make_metadata_var(NanoVector shape, NanoString dtype, Var* like=nullptr);
+// @pyjt(metadata_empty)
+VarHolder* metadata_empty(NanoVector shape, NanoString dtype=ns_float32);
 // @pyjt(submit_pending_fetches)
 void submit_pending_fetches();
 VarPtr detach(Var* x);
@@ -195,9 +199,16 @@ struct VarHolder {
     // @pyjt(__get__device_id)
     inline int device_id() { return var->device_id; }
 
-    // Explicit graph placement (-1 means native FollowRuntime policy).
+    // @pyjt(__get__is_metadata)
+    inline bool is_metadata() { return var->is_metadata(); }
+    // A noncomputing metadata copy; dtype=void preserves the original dtype.
+    // @pyjt(metadata_copy)
+    VarHolder* metadata_copy(NanoString dtype=ns_void);
+
+    // Explicit graph placement (-1 is FollowRuntime, -2 is metadata-only).
     // @pyjt(__get__placement_backend)
     inline int placement_backend() {
+        if (var->is_metadata()) return -2;
         return var->placement.explicit_backend ? int(var->placement.device.backend) : -1;
     }
 
@@ -214,6 +225,7 @@ struct VarHolder {
 
     // @pyjt(location)
     inline string location() {
+        if (var->is_metadata()) return "meta";
         if (var->flag(VarFlags::_is_swapped))
             return "disk";
         if (var->mem_ptr == nullptr)
