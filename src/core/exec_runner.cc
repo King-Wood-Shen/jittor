@@ -18,6 +18,7 @@
 #include "runtime/launch_diagnostics.h"
 #include "ops/op_register.h"
 #include "ops/composite/array_op.h"
+#include "ops/composite/tape_op.h"
 #include "core/exec_runner.h"
 #include "core/executor.h"
 #include "core/var.h"
@@ -498,6 +499,24 @@ static bool has_reuse_candidate(FusedOp& fused) {
     return false;
 }
 
+// Whether `v` shares its storage with nothing but the value its tape wraps.
+// A `jt.Function`'s output is a tape: no kernel, the storage of what the
+// Function computed, which only the tape reads -- and the tape's backward does
+// not read it either. So when the tape dies the buffer has no reader left,
+// although the wrapped value stays pending as long as the tape's graph does,
+// and the ring the two form used to keep every Function output -- a linear
+// layer's product, a batch norm's -- from being taken over by the elementwise
+// kernel reading it.
+static bool shares_only_with_its_tape_source(Var* v) {
+    if (!v->share_next || v->share_next->share_next != v) return false;
+    Op* op = v->input();
+    if (!op || !dynamic_cast<TapeOp*>(op)) return false;
+    Var* source = v->share_next;
+    return op->inputs().front() == source && !source->holder && source->outputs().size() == 1
+        && source->mem_ptr == v->mem_ptr && source->size == v->size
+        && !source->flag(VarFlags::_host_resident);
+}
+
 static void reuse_dying_inputs_of(FusedOp& fused, const vector<Var*>& last_used,
                                   const std::unordered_set<Var*>& kept_pinned,
                                   Allocator* allocator, vector<Var*>& taken) {
@@ -519,7 +538,8 @@ static void reuse_dying_inputs_of(FusedOp& fused, const vector<Var*>& last_used,
             if (in_info.type != 0 || !v->mem_ptr || v->allocator != allocator
                     || v->size != out->size || v->dsize() != out->dsize() || v->shape != out->shape
                     || v->storage_strides != out->storage_strides || v->storage_span_bytes() != v->size
-                    || v->storage_offset_bytes || v->share_next || v->is_sharing()
+                    || v->storage_offset_bytes || v->is_sharing()
+                    || (v->share_next && !shares_only_with_its_tape_source(v))
                     || (best && v->id < best->id)
                     || std::find(taken.begin(), taken.end(), v) != taken.end())
                 continue;
@@ -533,6 +553,36 @@ static void reuse_dying_inputs_of(FusedOp& fused, const vector<Var*>& last_used,
         out->storage_offset_bytes = 0;
         taken.push_back(best);
     }
+}
+
+DEFINE_FLAG(int, stream_dying_inputs, 1 << 20, "Bytes from which a CUDA kernel loads an input it reads for the last time evict-first, the way inductor's reductions load theirs. Streamed through the cache like any other, such an input evicts the lines the kernel is about to read -- a gradient the previous GEMM has just written -- though nothing reads it again: BERT-base's GELU backward with its bias gradient, over 12.6 M elements, took 155 us a call without and 123 with on a 4090 (PyTorch 117). 0 never streams.");
+
+// The inputs of a segment its CUDA kernel may load evict-first: large, read
+// once per element -- a broadcast operand is read by every row -- and read
+// here for the last time in the batch, by nothing Python holds. What a later
+// batch reads -- the backward, a saved activation -- is too far away to find
+// its lines still cached. As a mask over `fused.vars`; see
+// FusedOp::streamed_inputs.
+static uint64 dying_stream_mask(FusedOp& fused, const vector<Var*>& last_used,
+                                const std::unordered_set<Var*>& kept_pinned) {
+    int64 widest = 0;
+    for (auto& info : fused.vars) widest = std::max(widest, info.var->num);
+    uint64 mask = 0;
+    for (uint k = 0; k < fused.vars.size() && k < 64; k++) {
+        auto& info = fused.vars[k];
+        Var* v = info.var;
+        if (info.type != 0 || v->size < stream_dying_inputs || v->num != widest || !v->mem_ptr)
+            continue;
+        if (std::find(last_used.begin(), last_used.end(), v) == last_used.end()) continue;
+        if (keep_graph == 2 ? may_release_kept(v, kept_pinned) : !v->holder) mask |= uint64(1) << k;
+    }
+    return mask;
+}
+
+static bool has_stream_candidate(FusedOp& fused) {
+    for (auto& info : fused.vars)
+        if (info.type == 0 && info.var->size >= stream_dying_inputs) return true;
+    return false;
 }
 
 void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
@@ -684,14 +734,18 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
                 swap_epoch.mark(var);
             }
         } else {
-            if (reuse_dying_inputs && is_fused_op && keep_graph != 1 && plan.batch_hold
-                    && has_reuse_candidate(fused_op)) {
+            bool reuse = reuse_dying_inputs && is_fused_op && keep_graph != 1 && plan.batch_hold
+                && has_reuse_candidate(fused_op);
+            bool stream = stream_dying_inputs && is_fused_op && keep_graph != 1 && plan.batch_hold
+                && requested_backend == BackendId::Cuda && has_stream_candidate(fused_op);
+            if (reuse || stream) {
                 vector<Var*> last_used;
                 for (int index : plan.release_after[rid]) last_used.push_back(plan.all_vars[index]);
                 // What running the segment would flag anyway (see below), so
                 // that `_needed_by_backward` is final when it is read.
                 propergate_needed_flags(fused_op);
-                reuse_dying_inputs_of(fused_op, last_used, kept_pinned, allocator, reused_inputs);
+                if (stream) fused_op.streamed_inputs = dying_stream_mask(fused_op, last_used, kept_pinned);
+                if (reuse) reuse_dying_inputs_of(fused_op, last_used, kept_pinned, allocator, reused_inputs);
             }
             for (auto* var : op->outputs()) {
                 // the return value used to be discarded: a CPU OOM reached the
