@@ -230,7 +230,7 @@ def _state_dict_torch(self):
                 "weight_decay", getattr(self, "weight_decay", 0)))
             group.setdefault("amsgrad", False)
             group.setdefault("maximize", False)
-            group.setdefault("foreach", None)
+            group.setdefault("foreach", getattr(self, "foreach", None))
             group.setdefault("capturable", False)
             group.setdefault("differentiable", False)
             group.setdefault("fused", getattr(self, "fused", None))
@@ -677,8 +677,9 @@ def _adam_step(self, loss, retain_graph, closure, kwargs, decoupled_weight_decay
         # So the fused list update is taken unless the caller turned both
         # off, or asked for a variant it does not compute.
         fused = pg.get("fused", getattr(self, "fused", None))
+        foreach = pg.get("foreach", getattr(self, "foreach", None))
         want_fused = (decoupled_weight_decay and fused is not False
-                      and (fused is True or pg.get("foreach") is not False)
+                      and (fused is True or foreach is not False)
                       and not pg.get("amsgrad") and not pg.get("maximize"))
         active = []
         if want_fused:
@@ -780,8 +781,14 @@ def adam_init(self, params, lr=1e-3, *args, **kwargs):
     return _initialize_default(self, params, lr, args, kwargs, 'Adam')
 
 
-def adamw_init(self, params, lr=1e-3, *args, **kwargs):
-    return _initialize_default(self, params, lr, args, kwargs, 'AdamW')
+def adamw_init(self, params, lr=1e-3, *args, foreach=None, **kwargs):
+    if foreach and kwargs.get("fused"):
+        raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
+    result = _initialize_default(self, params, lr, args, kwargs, 'AdamW')
+    self.foreach = foreach
+    for group in self.param_groups:
+        group.setdefault("foreach", foreach)
+    return result
 
 
 def rmsprop_init(self, params, lr=1e-3, *args, **kwargs):

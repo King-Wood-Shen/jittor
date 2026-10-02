@@ -216,6 +216,32 @@ class TestAdam(Base):
 
         both_devices(body)
 
+    def test_adamw_foreach_false_updates_and_roundtrips(self):
+        def body(dev):
+            value = torch.tensor([1.0, -2.0], requires_grad=True)
+            optimizer = torch.optim.AdamW(
+                [value], lr=0.01, weight_decay=0.1,
+                foreach=False, fused=False)
+            (value * value).sum().backward()
+            optimizer.step()
+            self.ac(value.numpy(), [0.989, -1.988], atol=1e-6)
+            saved = optimizer.state_dict()
+            self.assertIs(optimizer.defaults["foreach"], False)
+            self.assertIs(saved["param_groups"][0]["foreach"], False)
+            restored = torch.optim.AdamW([value])
+            restored.load_state_dict(saved)
+            self.assertIs(restored.param_groups[0]["foreach"], False)
+
+        both_devices(body)
+
+    def test_adamw_foreach_preserves_group_override_and_rejects_fused(self):
+        value = torch.tensor([1.0], requires_grad=True)
+        optimizer = torch.optim.AdamW(
+            [{"params": [value], "foreach": False}], foreach=True)
+        self.assertIs(optimizer.param_groups[0]["foreach"], False)
+        with self.assertRaisesRegex(RuntimeError, "fused.*foreach"):
+            torch.optim.AdamW([value], foreach=True, fused=True)
+
     def test_adamw_accepts_and_serializes_fused_option(self):
         value = jt.array(np.array([1.0, -2.0], dtype=np.float32))
         optimizer = torch.optim.AdamW(
