@@ -784,6 +784,8 @@ def adam_init(self, params, lr=1e-3, *args, **kwargs):
 def adamw_init(self, params, lr=1e-3, *args, foreach=None, **kwargs):
     if foreach and kwargs.get("fused"):
         raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
+    if len(args) < 3:
+        kwargs.setdefault("weight_decay", 0.01)
     result = _initialize_default(self, params, lr, args, kwargs, 'AdamW')
     self.foreach = foreach
     for group in self.param_groups:

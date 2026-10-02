@@ -216,6 +216,23 @@ class TestAdam(Base):
 
         both_devices(body)
 
+    def test_adamw_default_weight_decay_matches_torch(self):
+        def body(dev):
+            for options, expected in (
+                    ({}, [0.999, -1.998]),
+                    ({"weight_decay": 0.0}, [1.0, -2.0])):
+                value = torch.tensor([1.0, -2.0], requires_grad=True)
+                optimizer = torch.optim.AdamW(
+                    [value], lr=0.1, foreach=False, fused=False, **options)
+                (value * 0).sum().backward()
+                optimizer.step()
+                self.ac(value.numpy(), expected, atol=1e-6)
+                self.assertEqual(
+                    optimizer.state_dict()["param_groups"][0]["weight_decay"],
+                    options.get("weight_decay", 0.01))
+
+        both_devices(body)
+
     def test_adamw_foreach_false_updates_and_roundtrips(self):
         def body(dev):
             value = torch.tensor([1.0, -2.0], requires_grad=True)
