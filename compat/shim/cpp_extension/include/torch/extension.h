@@ -295,6 +295,7 @@ public:
     }
 
     // method-form ATen ops (defined in jtorch_aten.cu; wired on first real use)
+    Tensor max() const;
     Tensor cumsum(int64_t dim) const;
     std::tuple<Tensor, Tensor> sort(int64_t dim = -1, bool descending = false) const;
     Tensor masked_select(const Tensor& mask) const;
@@ -338,9 +339,7 @@ Tensor argsort(const Tensor& self, int64_t dim = -1, bool descending = false);
 std::tuple<Tensor, Tensor> sort(const Tensor& self, int64_t dim = -1, bool descending = false);
 Tensor index_select(const Tensor& self, int64_t dim, const Tensor& index);
 inline Tensor reshape(const Tensor& self, IntArrayRef shape) { return self.reshape(shape); }
-inline void sum_out(Tensor&, const Tensor&, IntArrayRef) {
-    throw std::runtime_error("at::sum_out is not implemented in the Jittor torch shim");
-}
+void sum_out(Tensor& out, const Tensor& self, IntArrayRef dims);
 // at::_unique(self, sorted=true, return_inverse=false) -> (unique_values, inverse_indices)
 std::tuple<Tensor, Tensor> _unique(const Tensor& self, bool sorted = true, bool return_inverse = false);
 

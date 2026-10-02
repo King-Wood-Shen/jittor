@@ -149,7 +149,7 @@ def _official_sources(root: pathlib.Path) -> List[str]:
     _facade = _importlib.import_module(__package__)
     src_dir = root / "csrc" / "flash_attn" / "src"
     sources: List[pathlib.Path] = [root / "csrc" / "flash_attn" / "flash_api.cpp"]
-    for prefix in ("flash_fwd", "flash_fwd_split"):
+    for prefix in ("flash_fwd", "flash_fwd_split", "flash_fwd_split_align"):
         for dim in _facade._official_head_dims(root):
             for dtype in _facade._official_dtypes():
                 for causal in ("", "_causal"):

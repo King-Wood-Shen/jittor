@@ -1341,7 +1341,40 @@ static Tensor _ne_scalar_typed(const Tensor& self, double other) {
     return _tensor_from_host_same_device(out.get(), self, self._vh()->var->shape, ScalarType::Bool);
 }
 
+// ATen sum_out writes into the caller's existing storage. FlashAttention's
+// GQA backward supplies preallocated dK/dV tensors, so rebinding the local
+// Tensor wrapper here would leave the caller's aliases unchanged.
+void sum_out(Tensor& out, const Tensor& self, IntArrayRef dims) {
+    TORCH_CHECK(out.defined() && self.defined(), "sum_out: undefined tensor");
+    static auto maker = jittor::get_op_info("reduce")
+        .get_constructor<jittor::VarPtr, jittor::Var*, jittor::NanoString, jittor::NanoVector, bool>();
+    Tensor reduced = detail::adopt(
+        new jittor::VarHolder(maker(self._vh()->var, jittor::NanoString("add"), to_nv(dims), false)), true);
+    TORCH_CHECK(out.sizes() == reduced.sizes(), "sum_out: output shape mismatch");
+    TORCH_CHECK(out.scalar_type() == reduced.scalar_type(), "sum_out: output dtype mismatch");
+    const bool out_cuda = detail::vh_is_cuda(out._vh());
+    const bool src_cuda = detail::vh_is_cuda(reduced._vh());
+    TORCH_CHECK(out_cuda == src_cuda, "sum_out: output device mismatch");
+    const size_t nbytes = static_cast<size_t>(out.numel()) * out.element_size();
+    if (nbytes == 0) return;
+    void* dst = out.data_ptr_void();
+    void* src = reduced.data_ptr_void();
+    if (out_cuda) {
+        const cudaError_t err = cudaMemcpy(dst, src, nbytes, cudaMemcpyDeviceToDevice);
+        TORCH_CHECK(err == cudaSuccess, "sum_out: CUDA copy failed: ", cudaGetErrorString(err));
+    } else {
+        std::memcpy(dst, src, nbytes);
+    }
+}
+
 // --------- Tensor method-form ops (wired on first real use) -----------------
+Tensor Tensor::max() const {
+    TORCH_CHECK(defined() && numel() > 0, "max(): expected a non-empty tensor");
+    static auto maker = jittor::get_op_info("reduce")
+        .get_constructor<jittor::VarPtr, jittor::Var*, jittor::NanoString, jittor::NanoVector, bool>();
+    auto result = maker(_vh()->var, jittor::NanoString("maximum"), jittor::NanoVector(), false);
+    return detail::adopt(new jittor::VarHolder(std::move(result)), true);
+}
 Tensor Tensor::cumsum(int64_t dim) const { return jtorch::cumsum(*this, dim); }
 std::tuple<Tensor, Tensor> Tensor::sort(int64_t dim, bool descending) const {
     return jtorch::sort(*this, dim, descending);

@@ -38,9 +38,15 @@ T* get_generator_or_default(std::optional<Generator>, T* default_gen) {
 }
 
 namespace cuda { namespace detail {
-inline CUDAGeneratorImpl* getDefaultCUDAGenerator() {
+struct CUDAGeneratorHandle {
+    CUDAGeneratorImpl* impl;
+    std::mutex& mutex() const { return impl->mutex_; }
+    template <typename T> T* get() const { return static_cast<T*>(impl); }
+    operator CUDAGeneratorImpl*() const { return impl; }
+};
+inline CUDAGeneratorHandle getDefaultCUDAGenerator() {
     static CUDAGeneratorImpl gen;
-    return &gen;
+    return {&gen};
 }
 }} // namespace cuda::detail
 
