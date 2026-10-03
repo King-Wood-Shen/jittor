@@ -293,6 +293,10 @@ def _constructor_adapter(name, orig, _accepts_dtype, *args, **kwargs):
     out = orig(*args, **kwargs)
     if _cast_to is not None:
         out = out.cast(_cast_to)
+    # Factory results own their gradient, even when native construction
+    # introduced a broadcast or dtype-conversion producer.
+    if _requires_grad and name not in _TENSOR_ARGUMENT:
+        out = out.detach()
     out._jittor_torch_ext_mutable = True
     out.requires_grad_(_requires_grad)
     if _requires_grad:
@@ -487,8 +491,10 @@ def _draw_from_generator(name, generator, args, kwargs):
     if tuple(t.shape) != tuple(shape):
         t = t.reshape(shape)
     t = t.cast(cast_to)
-    t._jittor_torch_ext_mutable = True
     requires_grad = bool(kwargs.get("requires_grad", False))
+    if requires_grad:
+        t = t.detach()
+    t._jittor_torch_ext_mutable = True
     t.requires_grad_(requires_grad)
     if requires_grad:
         _torch_register_leaf(t)
