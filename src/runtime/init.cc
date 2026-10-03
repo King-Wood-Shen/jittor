@@ -7,6 +7,7 @@
 #include "runtime/device.h"
 #include "runtime/backend.h"
 #include <random>
+#include <sstream>
 
 #include <csignal>
 #include "runtime/init.h"
@@ -130,6 +131,26 @@ void set_seed(int seed) {
 
 int get_seed() {
     return current_seed;
+}
+
+string get_cpu_rng_state() {
+    std::ostringstream state;
+    state << "JTCPU1 " << current_seed << " " << *eng;
+    return state.str();
+}
+
+void set_cpu_rng_state(string state) {
+    std::istringstream input(state);
+    string version;
+    int seed;
+    std::default_random_engine restored;
+    USER_CHECK(bool(input >> version >> seed >> std::ws >> restored) && version == "JTCPU1")
+        << "invalid Jittor CPU RNG state";
+    input >> std::ws;
+    USER_CHECK(input.eof()) << "trailing data in Jittor CPU RNG state";
+    // CPU restoration must not invoke seed callbacks or reset CUDA streams.
+    *eng = restored;
+    current_seed = seed;
 }
 
 void add_set_seed_callback(set_seed_callback callback) {

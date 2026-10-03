@@ -88,9 +88,11 @@ class TestCoreMiscOwner(unittest.TestCase):
             self.assertIs(torch.get_default_dtype(), torch.float64)
             self.assertIs(torch.manual_seed(1729), torch)
             self.assertEqual(torch.initial_seed(), 1729)
-            self.assertEqual(int(torch.get_rng_state().numpy()[0]), 1729)
-            torch.set_rng_state(torch.tensor([42], dtype=torch.int64))
-            self.assertEqual(torch.random.initial_seed(), 42)
+            state = torch.get_rng_state()
+            self.assertEqual(state.dtype, torch.uint8)
+            torch.manual_seed(42)
+            torch.set_rng_state(state)
+            self.assertEqual(torch.random.initial_seed(), 1729)
             # The default device follows the runtime policy, which is what
             # the factories follow too: under use_cuda the tensors really do
             # land on the accelerator, so reporting "cpu" there would be a

@@ -31,6 +31,12 @@ Returns the seed of jittor random number generator.
 // @pyjt(get_seed)
 int get_seed();
 
+// Opaque CPU-engine snapshot; callers must synchronize pending random ops.
+// @pyjt(get_cpu_rng_state)
+string get_cpu_rng_state();
+// @pyjt(set_cpu_rng_state)
+void set_cpu_rng_state(string state);
+
 void add_set_seed_callback(set_seed_callback callback);
 
 extern

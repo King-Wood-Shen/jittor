@@ -423,23 +423,21 @@ def _seed(value=_seed_sentinel):
 
 
 def _get_rng_state():
-    return jt.array([initial_seed()], dtype="int64")
+    jt.sync_all(True)
+    namespace = _misc_context().target_namespace
+    blob = jt.core.get_cpu_rng_state().encode("ascii")
+    return namespace.tensor(list(blob), dtype=namespace.uint8, device="cpu")
 
 
 def _set_rng_state(state):
     ctx = _misc_context()
-    Var = ctx.state["Var"]
-    try:
-        if isinstance(state, Var):
-            state = int(state.reshape(-1)[0].item())
-        elif hasattr(state, "__len__"):
-            state = int(list(state)[0])
-        else:
-            state = int(state)
-    except EXPECTED as exc:
-        swallowed("torch/installers/core.py _set_rng_state: if isinstance(state, Var):", exc)
-        state = initial_seed()
-    _manual_seed(state)
+    if not isinstance(state, ctx.state["Var"]) or str(state.dtype) not in (
+            "uint8", "torch.uint8"):
+        raise TypeError("CPU RNG state must be a uint8 tensor")
+    blob = bytes(state.numpy().reshape(-1).tolist()).decode("ascii")
+    jt.sync_all(True)
+    jt.core.set_cpu_rng_state(blob)
+    ctx.state["core_misc"]["seed"] = jt.get_seed()
 
 
 class PyTorchFileReader:
@@ -1217,8 +1215,8 @@ _MISC_DETAILS = {
     "autocast_increment_nesting": "real thread-local nesting depth, as torch's counter",
     "autocast_decrement_nesting": "real thread-local nesting depth, as torch's counter",
     "use_deterministic_algorithms": "no-op setter; deterministic algorithm policy is not implemented",
-    "get_rng_state": "seed-only state, not a full generator snapshot or exact stream restoration",
-    "set_rng_state": "restores the recorded seed, not an exact generator stream snapshot",
+    "get_rng_state": "opaque native CPU engine snapshot; not interchangeable with PyTorch state bytes",
+    "set_rng_state": "restores the CPU engine position without reseeding CUDA generators",
     "norm": "existing Torch norm adapter; out and extra keyword semantics are not implemented",
     "where": "existing one- or three-argument selection; out is not implemented",
     "bincount": "native scatter-add implementation; existing flatten/minlength behavior retained",
