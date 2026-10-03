@@ -18,7 +18,13 @@ _DEVICES = [("cpu", 0)] + ([("cuda", 1)] if _test_capability.any_accelerator_ena
 def both_devices(fn):
     for name, use_cuda in _DEVICES:
         with jt.flag_scope(use_cuda=use_cuda):
-            fn(name)
+            # Torch factories follow their default device, not jt.use_cuda.
+            previous = torch.get_default_device()
+            try:
+                torch.set_default_device(name)
+                fn(name)
+            finally:
+                torch.set_default_device(previous)
 
 
 class Base(unittest.TestCase):
@@ -302,6 +308,8 @@ class TestAdam(Base):
             )
             for name, operation in operations:
                 value = torch.tensor(np.array([1.0, 2.0], "float32"), requires_grad=True)
+                self.assertEqual(value.device.type, dev, f"{name} initial device")
+                assert_stays_on_device(value, name + " before mutation")
                 self.assertFalse(value.is_stop_grad(), f"{name} starts trainable {dev}")
                 with torch.no_grad():
                     operation(value)
