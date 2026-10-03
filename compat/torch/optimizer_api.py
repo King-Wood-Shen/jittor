@@ -44,6 +44,30 @@ def _torch_param_steps(pg):
     return steps
 
 
+def _torch_step_tensor(opt, pg, index):
+    steps = _torch_param_steps(pg)
+    value = steps[index]
+    if not isinstance(value, jt.Var):
+        namespace = get_install_context(jt).target_namespace
+        on_parameter = pg.get("capturable", False) or pg.get(
+            "fused", getattr(opt, "fused", None)) is True
+        device = pg["params"][index].device if on_parameter else "cpu"
+        value = namespace.tensor(float(value), dtype=namespace.float32,
+                                 device=device)
+        steps[index] = value
+    return value
+
+
+def _increment_torch_step(steps, index):
+    value = steps[index]
+    if isinstance(value, jt.Var):
+        # Keep the published scalar alive; a caller may hold or mutate it.
+        with jt.flag_scope(use_cuda=int(value.location() == "device")):
+            value.assign(value + 1)
+    else:
+        steps[index] = int(value) + 1
+
+
 def _torch_optimizer_kind(opt):
     """Which optimizer's state layout `opt` has.
 
@@ -109,9 +133,8 @@ class _OptState:
             raise KeyError(param)
         kind = _torch_optimizer_kind(self._opt)
         if key == "step":
-            if isinstance(value, jt.Var):
-                value = value.item()
-            _torch_param_steps(pg)[i] = int(value)
+            _torch_param_steps(pg)[i] = (
+                value if isinstance(value, jt.Var) else int(value))
             self._sync_n_step()
             return
         mappings = {
@@ -138,7 +161,7 @@ class _OptState:
             return _ParamState(self, param, {
                 "exp_avg": pg["m"][i],
                 "exp_avg_sq": pg["values"][i],
-                "step": float(steps[i])})
+                "step": _torch_step_tensor(self._opt, pg, i)})
         if kind == "sgd" and "values" in pg and pg.get(
                 "momentum", getattr(self._opt, "momentum", 0)):
             return _ParamState(self, param, {
@@ -289,7 +312,9 @@ def _state_dict_torch(self):
                         entry[target] = values[i]
             if entry:
                 if kind != "sgd":
-                    entry["step"] = g.tensor(float(steps[i]), dtype=g.float32)
+                    entry["step"] = (_torch_step_tensor(self, pg, i)
+                                     if kind in ("adam", "adamw") else
+                                     g.tensor(float(steps[i]), dtype=g.float32))
                 state[pid] = entry
     return {"state": state, "param_groups": param_groups}
 
@@ -387,7 +412,7 @@ def _load_state_dict_torch(self, state_dict):
                         ("pre_grad", "pre_grad")):
                     if target in st and source in pg and i < len(pg[source]):
                         pg[source][i] = st[target]
-            steps[i] = step
+            steps[i] = st["step"] if isinstance(st.get("step"), jt.Var) else step
     self.n_step = max_step
     return None
 
@@ -699,7 +724,7 @@ def _adam_step(self, loss, retain_graph, closure, kwargs, decoupled_weight_decay
                 if not p.requires_grad or not isinstance(g, jt.Var) \
                         or list(g.shape) != list(p.shape):
                     continue
-                param_steps[i] = int(param_steps[i]) + 1
+                _increment_torch_step(param_steps, i)
                 stepped.append(i)
             lr_arg = lr
             if step_capture.active():   # a replay advances these without step()
@@ -724,10 +749,10 @@ def _adam_step(self, loss, retain_graph, closure, kwargs, decoupled_weight_decay
             was_trainable = bool(p.requires_grad)
             if not was_trainable or not isinstance(g, jt.Var) or list(g.shape) != list(p.shape):
                 continue
-            param_steps[i] = int(param_steps[i]) + 1
+            _increment_torch_step(param_steps, i)
             _update_in_target_dtype(p, adam_update(
                 p, g, v, m, lr=lr, eps=eps, weight_decay=weight_decay,
-                betas=(b0, b1), step=param_steps[i],
+                betas=(b0, b1), step=int(param_steps[i]),
                 decoupled_weight_decay=decoupled_weight_decay,
                 torch_math=True,
             ))
