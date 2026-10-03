@@ -2,6 +2,7 @@
 from typing import List, Tuple
 from collections import OrderedDict
 import itertools
+import inspect
 import numpy as np
 from builtins import int as ori_int
 from jittor_core import Var, ops
@@ -850,10 +851,14 @@ Returns a handle that removes both halves.
         Module._in_extra_repr = True
         try:
             ss = []
-            n = len(self.__init__.__code__.co_varnames)
-            if self.__init__.__defaults__ is not None:
-                n -= len(self.__init__.__defaults__)
-            for i, k in enumerate(self.__init__.__code__.co_varnames[1:]):
+            initializer = inspect.unwrap(self.__init__)
+            code = getattr(initializer, "__code__", None)
+            if code is None:
+                return ""
+            n = len(code.co_varnames)
+            if initializer.__defaults__ is not None:
+                n -= len(initializer.__defaults__)
+            for i, k in enumerate(code.co_varnames[1:]):
                 v = getattr(self, k) if hasattr(self, k) else None
                 if isinstance(v, Var): v = v.peek()
                 s = f"{k}={v}" if i >= n else str(v)
