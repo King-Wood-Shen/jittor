@@ -5,6 +5,8 @@
 // file 'LICENSE.txt', which is part of this source code package.
 // ***************************************************************
 #include <sstream>
+#include <regex>
+#include <unordered_set>
 #include "core/var.h"
 #include "codegen/opt/pass_manager.h"
 #include "codegen/opt/pass/loop_to_func_pass.h"
@@ -20,6 +22,7 @@ void LoopToFuncPass::run() {
     if (cc_type=="clang") choice=1;
     if (!choice) return;
     int func_num=0;
+    std::unordered_set<KernelIR*> device_stores;
     string hash_name = op->get_hash_name();
     
     ir->push_back("using namespace jittor;", &ir->before);
@@ -75,6 +78,21 @@ void LoopToFuncPass::run() {
                 }
             }
             func->push_back(d->clone());
+            // Pointer stores copied into a CUDA kernel must not also execute
+            // on the host: their destination is device memory. Keep the
+            // originals until every loop has captured its preamble.
+            if (is_cuda && d->type == KernelIRType::none &&
+                d->has_attr(kir::code)) {
+                for (auto arg : args) {
+                    if (arg->attrs[kir::dtype].find("*") == string::npos)
+                        continue;
+                    const std::regex store(
+                        "^\\s*" + arg->attrs[kir::lvalue] +
+                        "\\s*\\[[^\\]]+\\]\\s*=[^=]");
+                    if (std::regex_search(d->attrs[kir::code], store))
+                        device_stores.insert(d.get());
+                }
+            }
         }
         func->push_back(c->clone());
         string func_call = func->attrs[kir::lvalue]+"(";
@@ -104,6 +122,7 @@ void LoopToFuncPass::run() {
         auto& fc = ir->children[i];
         fc->attrs[kir::loop_func] = func->attrs[kir::lvalue];
     }
+    for (auto store : device_stores) store->erase();
     #ifdef __APPLE__
     ir->remove_all_unused();
     #endif
