@@ -102,7 +102,18 @@ class StepLR(LRScheduler):
         self.base_lrs = _base_lrs(optimizer)
         super().__init__(optimizer, last_epoch, verbose)
     def get_lr(self):
-        return [b * self.gamma ** (max(self.last_epoch, 0) // self.step_size) for b in self.base_lrs]
+        if self.last_epoch == 0 or self.last_epoch % self.step_size:
+            return _base_lrs(self.optimizer)
+        return [lr * self.gamma for lr in _base_lrs(self.optimizer)]
+
+    def step(self, epoch=None):
+        if epoch is None:
+            return super().step()
+        self.last_epoch = epoch
+        self._step_count += 1
+        self._last_lr = [
+            lr * self.gamma ** (epoch // self.step_size) for lr in self.base_lrs]
+        _set_lrs(self.optimizer, self._last_lr)
 
 
 class MultiStepLR(LRScheduler):
