@@ -41,6 +41,37 @@ register_kernel("optim.adamw_fused", "acl", _acl_fused_adamw_updates)
 from jittor.backends.cuda.kernels.optim import fused_adamw_cuda as _fused_adamw_cuda  # noqa: E402,F401
 
 
+def _torch_low_precision_adam_update(param, grad, value, momentum, *, lr,
+                                      eps, weight_decay, betas, step,
+                                      decoupled_weight_decay):
+    # Torch computes each low-precision pointwise operation in opmath float,
+    # then rounds its result before the next public in-place operation.
+    dtype = param.dtype
+
+    def rounded(tensor):
+        return tensor.cast(dtype).stop_fuse()
+
+    b0, b1 = betas
+    if decoupled_weight_decay:
+        param = rounded(param.float32() * (1 - lr * weight_decay))
+    elif weight_decay:
+        grad = rounded(grad.float32() + param.float32() * weight_decay)
+    m = momentum.float32()
+    g = grad.float32()
+    new_m = rounded(m + (g - m) * (1 - b0))
+    scaled_v = rounded(value.float32() * b1)
+    new_v = rounded(scaled_v.float32() + ((1 - b1) * g) * g)
+    _update_preserve_dtype(momentum, new_m)
+    _update_preserve_dtype(value, new_v)
+    root = rounded(jt.sqrt(new_v.float32()))
+    correction = (1 - b1 ** float(step)) ** 0.5
+    denominator = rounded(root.float32() / correction)
+    denominator = rounded(denominator.float32() + eps)
+    step_size = lr / (1 - b0 ** float(step))
+    return rounded(param.float32() - (step_size * new_m.float32()) /
+                   denominator.float32())
+
+
 def adam_update(param, grad, value, momentum, *, lr, eps, weight_decay,
                 betas, step, decoupled_weight_decay=False, torch_math=False):
     """Shared Adam arithmetic; callers own gradient sourcing and step counters.
@@ -48,6 +79,12 @@ def adam_update(param, grad, value, momentum, *, lr, eps, weight_decay,
     Native Adam historically puts epsilon before bias scaling. Torch and
     AdamW put it after scaling; keep that policy explicit at the call site.
     """
+    if (torch_math and decoupled_weight_decay
+            and dtype_name(param.dtype) in ("float16", "bfloat16")):
+        return _torch_low_precision_adam_update(
+            param, grad, value, momentum, lr=lr, eps=eps,
+            weight_decay=weight_decay, betas=betas, step=step,
+            decoupled_weight_decay=decoupled_weight_decay)
     b0, b1 = betas
     if weight_decay != 0 and decoupled_weight_decay:
         param = (param * (1 - lr * weight_decay)).cast(param.dtype)
