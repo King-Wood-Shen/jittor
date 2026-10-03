@@ -7,6 +7,7 @@ from jittor._core.dtypes import dtype_name as _jittor_dtype_name
 
 import jittor as jt
 import types as _types_misc
+import threading as _threading
 import numpy as _np
 
 from ..functional import (
@@ -1022,44 +1023,115 @@ _STORAGE_TYPES = (
     ByteStorage,
     BoolStorage,
 )
+_cpu_generator_lock = _threading.RLock()
+
+
 class _DefaultGenerator:
-    """`torch.default_generator`: a handle on the *global* CPU generator.
+    """Global CPU handle, or an independent snapshot restored by pickle."""
 
-    Deliberately not a `Generator` instance. That class owns a private stream
-    so that two generators seeded alike agree whatever the process has already
-    done -- which is exactly what the default generator must *not* do, because
-    `torch.manual_seed(n)` seeds this one and `torch.get_rng_state()` is its
-    state. So this delegates and holds nothing; anything else would let the two
-    drift apart.
-
-    Missing entirely before, and the shim's namespace reports a missing name by
-    raising `AttributeError(name)`, so MiniMax-H3's reference path failed with
-    a bare `default_generator` and nothing to say where it came from.
-    """
+    def __init__(self, state=None, seed=0):
+        self._cpu_state = state
+        self._initial_seed = seed
 
     @property
     def device(self):
         return _torch_device_misc("cpu")
 
     def manual_seed(self, value):
-        manual_seed(value)
+        value = int(value)
+        state = jt.core.make_cpu_rng_state(value)
+        with _cpu_generator_lock:
+            if self._cpu_state is None:
+                jt.sync_all(True)
+                jt.core.set_cpu_rng_state(state)
+                _misc_context().state["core_misc"]["seed"] = value
+            else:
+                self._cpu_state = state
+                self._initial_seed = value
         return self
 
     def initial_seed(self):
-        return initial_seed()
+        return initial_seed() if self._cpu_state is None else self._initial_seed
 
     def seed(self):
-        return seed()
+        import secrets
+        value = secrets.randbits(31)
+        self.manual_seed(value)
+        return value
 
     def get_state(self):
-        return get_rng_state()
+        with _cpu_generator_lock:
+            if self._cpu_state is None:
+                return get_rng_state()
+            namespace = _misc_context().target_namespace
+            return namespace.tensor(
+                list(self._cpu_state.encode("ascii")),
+                dtype=namespace.uint8, device="cpu")
 
     def set_state(self, state):
-        set_rng_state(state)
+        with _cpu_generator_lock:
+            if self._cpu_state is None:
+                set_rng_state(state)
+                return self
+            ctx = _misc_context()
+            if not isinstance(state, ctx.state["Var"]) or str(state.dtype) not in (
+                    "uint8", "torch.uint8"):
+                raise TypeError("CPU RNG state must be a uint8 tensor")
+            blob = bytes(state.numpy().reshape(-1).tolist()).decode("ascii")
+            jt.sync_all(True)
+            previous = jt.core.get_cpu_rng_state()
+            try:
+                # The core validates the opaque snapshot without invoking
+                # CUDA seed callbacks. A malformed state cannot replace ours.
+                jt.core.set_cpu_rng_state(blob)
+                seed = jt.get_seed()
+            finally:
+                jt.core.set_cpu_rng_state(previous)
+            self._cpu_state = blob
+            self._initial_seed = seed
         return self
 
+    def _draw_cpu(self, original, args, kwargs):
+        namespace = _misc_context().target_namespace
+        requested = kwargs.get("device")
+        if requested is None:
+            requested = (args[0].device if args and hasattr(args[0], "device")
+                         else namespace.get_default_device())
+        kind = getattr(requested, "type", str(requested).split(":", 1)[0])
+        if kind != "cpu":
+            raise RuntimeError("Expected a CPU device for a CPU generator")
+        with _cpu_generator_lock:
+            jt.sync_all(True)
+            if self._cpu_state is None:
+                result = original(*args, **kwargs)
+                jt.sync_all(True)
+                return result
+            previous = jt.core.get_cpu_rng_state()
+            try:
+                jt.core.set_cpu_rng_state(self._cpu_state)
+                result = original(*args, **kwargs)
+                # Random ops are lazy: materialize before restoring the
+                # global engine and retain this generator's new position.
+                jt.sync_all(True)
+                self._cpu_state = jt.core.get_cpu_rng_state()
+            finally:
+                jt.core.set_cpu_rng_state(previous)
+            return result
+
+    def __reduce__(self):
+        with _cpu_generator_lock:
+            jt.sync_all(True)
+            state = (jt.core.get_cpu_rng_state() if self._cpu_state is None
+                     else self._cpu_state)
+            return (_restore_cpu_generator, (state, self.initial_seed()))
+
     def __repr__(self):
-        return "<torch.Generator object (default, device=cpu)>"
+        suffix = "default, " if self._cpu_state is None else ""
+        return "<torch.Generator object (%sdevice=cpu)>" % suffix
+
+
+def _restore_cpu_generator(state, seed):
+    return _DefaultGenerator(state, seed)
 
 
 def _torch_device_misc(spelling):

@@ -32,7 +32,14 @@ class TestCoreMiscOwner(unittest.TestCase):
                 self.assertIs(fidelity_of("torch." + name).implementation, implementation)
                 self.assertEqual(implementation.__module__,
                                  _FOREIGN_OWNERS.get(name, core.__name__))
-                self.assertIs(pickle.loads(pickle.dumps(implementation)), implementation)
+                restored = pickle.loads(pickle.dumps(implementation))
+                if name == "default_generator":
+                    # Native Torch restores an independent CPU stream.
+                    self.assertIsNot(restored, implementation)
+                    np.testing.assert_array_equal(
+                        restored.get_state().numpy(), implementation.get_state().numpy())
+                else:
+                    self.assertIs(restored, implementation)
         for storage in core._STORAGE_TYPES:
             self.assertIs(getattr(torch, storage.__name__), storage)
             self.assertIs(getattr(torch.storage, storage.__name__), storage)

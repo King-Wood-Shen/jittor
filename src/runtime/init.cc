@@ -133,6 +133,13 @@ int get_seed() {
     return current_seed;
 }
 
+string make_cpu_rng_state(int seed) {
+    std::default_random_engine engine(seed);
+    std::ostringstream state;
+    state << "JTCPU1 " << seed << " " << engine;
+    return state.str();
+}
+
 string get_cpu_rng_state() {
     std::ostringstream state;
     state << "JTCPU1 " << current_seed << " " << *eng;

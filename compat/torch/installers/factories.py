@@ -496,6 +496,9 @@ def _draw_from_generator(name, generator, args, kwargs):
 
 
 def _random_adapter(original, *args, generator=None, _name=None, **kwargs):
+    cpu_draw = getattr(generator, "_draw_cpu", None)
+    if cpu_draw is not None:
+        return cpu_draw(original, args, kwargs)
     drawn = _draw_from_generator(_name, generator, args, kwargs) if _name else None
     if drawn is not None:
         return drawn
