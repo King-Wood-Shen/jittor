@@ -1133,6 +1133,11 @@ def _vinv(self):
 
 
 def install(ctx):
+    from .shape import fliplr
+    ctx.jittor_module.fliplr = fliplr
+    register_api_bindings(ctx.jittor_module, "torch", ("fliplr",),
+                          Fidelity.APPROXIMATE,
+                          "Dense tensor column reversal using native flip; sparse layouts are unsupported")
     _modules = ctx.registry.module_map
     g = ctx.jittor_module
     Var = ctx.state["Var"]

@@ -157,3 +157,11 @@ def tile(input, *dims):
         _tile_impl,
     )
     return _tile_impl(input, *dims)
+
+
+def fliplr(input):
+    """Reverse dimension one of a dense tensor with at least two dimensions."""
+    from . import jt
+    if input.ndim < 2:
+        raise RuntimeError("Input must be >= 2-d.")
+    return jt.flip(input, 1)
