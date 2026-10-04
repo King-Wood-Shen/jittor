@@ -9,9 +9,12 @@ from jittor._runtime.dispatch import optional_kernel, select_kernel
 def _supports_softmax(a, log=False, zero_all_neg_inf=False, dim=-1):
     if not a.shape:
         return False
-    if dim != -1 and dim != len(a.shape)-1:
+    if not isinstance(dim, int) or not -len(a.shape) <= dim < len(a.shape):
         return False
-    if int(a.shape[-1]) <= 0:
+    axis = dim % len(a.shape)
+    if axis != len(a.shape) - 1 and not log:
+        return False
+    if int(a.shape[axis]) <= 0 and not log:
         return False
     return True
 
@@ -286,6 +289,18 @@ CHECK(0 == cudaGetLastError());
 @optional_kernel("nn.softmax", "cuda", dtypes=("float16", "bfloat16", "float32"),
                  supports=_supports_softmax)
 def _softmax_v1(a, log=False, zero_all_neg_inf=False, dim=-1):
+    if log and any(int(size) == 0 for size in a.shape):
+        # There are no values to normalize, including on an empty reduce axis.
+        return a
+    axis = dim % len(a.shape)
+    if axis != len(a.shape) - 1:
+        # Use the same stable CUDA reduction for arbitrary log-softmax axes.
+        # This permutation is its own inverse and preserves autograd.
+        order = list(range(len(a.shape)))
+        order[axis], order[-1] = order[-1], order[axis]
+        result = _softmax_v1(a.permute(order), log=log,
+                             zero_all_neg_inf=zero_all_neg_inf, dim=-1)
+        return result.permute(order)
     length = int(a.shape[-1])
     kind, threads = _softmax_schedule(length)
     cls = (_softmax_v1_cls(length, bool(log), bool(zero_all_neg_inf))
