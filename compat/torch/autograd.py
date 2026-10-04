@@ -4,6 +4,7 @@ Installation publishes these objects. Native delegates belong to InstallContext;
 Function input/output bookkeeping belongs to each native one-shot call context.
 """
 import contextlib
+from contextvars import ContextVar
 import jittor as jt
 import numpy as np
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
@@ -11,6 +12,19 @@ from .context import get_install_context
 from ._placeholder_context import _PlaceholderContext
 from . import profiler as _profiler
 from ..diagnostics import EXPECTED, swallowed
+
+
+# None preserves native jt.grad behavior outside a Torch differentiation call.
+_backward_create_graph = ContextVar("torch_backward_create_graph", default=None)
+
+
+@contextlib.contextmanager
+def _create_graph_scope(create_graph):
+    token = _backward_create_graph.set(bool(create_graph))
+    try:
+        yield
+    finally:
+        _backward_create_graph.reset(token)
 
 
 def _state():
@@ -189,7 +203,11 @@ def function_grad(self, *grad_outputs):
                     if not any(t in dt for t in ("int", "bool", "uint")):
                         go[i] = jt.zeros(shp, dtype=dt)
             grad_outputs = tuple(go)
-    ret = bw(self, *grad_outputs)
+    requested = _backward_create_graph.get()
+    grad_scope = (contextlib.nullcontext() if requested is None else
+                  (jt.enable_grad() if requested else jt.no_grad()))
+    with grad_scope:
+        ret = bw(self, *grad_outputs)
     shapes = getattr(self, "_fwd_input_shapes", None)
     if shapes is None:
         return ret
@@ -243,7 +261,8 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None,
             "materialize_grads=True, but got: allow_unused=False.")
     allow_unused = bool(materialize_grads) if allow_unused is None \
         else bool(allow_unused)
-    gs = list(jt.core.grad_optional(loss, ins, rg))
+    with _create_graph_scope(create_graph):
+        gs = list(jt.core.grad_optional(loss, ins, rg))
     missing = [i for i, value in enumerate(gs) if value is None]
     if missing and materialize_grads:
         for i in missing:

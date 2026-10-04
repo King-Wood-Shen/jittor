@@ -236,7 +236,9 @@ def _backward(self, gradient=None, retain_graph=None, create_graph=False, **kw):
     # torch leaves a disconnected target at grad=None. Keep jt.grad's
     # historical zero-materialization untouched and use the compatibility
     # core entry point that preserves missing gradients explicitly.
-    grads = _owner.jt.core.grad_optional(self, leaves, retain_graph)
+    from ...autograd import _create_graph_scope
+    with _create_graph_scope(create_graph):
+        grads = _owner.jt.core.grad_optional(self, leaves, retain_graph)
     grad_by_id = {}
     for p, gr in zip(leaves, grads):
         if gr is None:
