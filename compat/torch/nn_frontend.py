@@ -45,7 +45,12 @@ def module_setattr(module, name, value):
     if name in attributes and isinstance(value, (owner.native_module, owner.Parameter)) \
             and not isinstance(attributes[name], (owner.native_module, owner.backend.Var)):
         del attributes[name]
-    object.__setattr__(module, name, value)
+    native = getattr(type(module), "_torch_native_layer", owner.native_module)
+    setter = native.__setattr__
+    if setter is not owner.native_module.__setattr__:
+        setter(module, name, value)
+    else:
+        object.__setattr__(module, name, value)
 
 
 #: The native module call (`src/bindings/pyjt/py_module_call.h`), once the
@@ -239,13 +244,26 @@ class NNFrontendOwner:
         known = self.adapters.get(native)
         if known is not None:
             return known
-        namespace = {
+        # Preserve the implementation hierarchy's method precedence while
+        # placing the public Module first in the cooperative initialization MRO.
+        namespace = {}
+        excluded = {"__dict__", "__weakref__", "__module__", "__slots__",
+                    "__init__", "__setattr__", "__classcell__"}
+        for base in reversed(native.__mro__):
+            if base is self.native_module or base is object:
+                continue
+            namespace.update((key, value) for key, value in vars(base).items()
+                             if key not in excluded)
+        namespace.update({
             "__module__": "torch.nn", "__slots__": (),
             "__init__": LayerInitializer(self, native),
             "_torch_native_layer": native,
-        }
+        })
         namespace.update(self._conv_padding_members(native))
-        adapted = type(native.__name__, (native, self.Module), namespace)
+        # Public layer super() must reach the frontend Module before the
+        # implementation class. Keep the native base for its methods and
+        # isinstance identity; LayerInitializer invokes its constructor directly.
+        adapted = type(native.__name__, (self.Module, native), namespace)
         self.adapters[native] = adapted
         return adapted
 

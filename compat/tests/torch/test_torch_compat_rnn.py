@@ -31,7 +31,7 @@ class TestRNNShapes(Base):
         L, B, I, H = 5, 2, 4, 6
         def body(dev):
             x = jt.randn(L, B, I)
-            m = nn.LSTM(I, H, num_layers=2)
+            m = nn.LSTM(I, H, num_layers=2).to(dev)
             out, (h, c) = m(x)
             self.shape(out, (L, B, H), f"lstm out {dev}")
             self.shape(h, (2, B, H), f"lstm h {dev}")
@@ -42,7 +42,7 @@ class TestRNNShapes(Base):
         L, B, I, H = 4, 3, 5, 7
         def body(dev):
             x = jt.randn(L, B, I)
-            m = nn.GRU(I, H)
+            m = nn.GRU(I, H).to(dev)
             out, h = m(x)
             self.shape(out, (L, B, H), f"gru out {dev}")
             self.shape(h, (1, B, H), f"gru h {dev}")
@@ -52,7 +52,7 @@ class TestRNNShapes(Base):
         B, L, I, H = 2, 5, 4, 6
         def body(dev):
             x = jt.randn(B, L, I)
-            m = nn.RNN(I, H, batch_first=True)
+            m = nn.RNN(I, H, batch_first=True).to(dev)
             out, h = m(x)
             self.shape(out, (B, L, H), f"rnn batch_first out {dev}")
         both_devices(body)
@@ -60,7 +60,7 @@ class TestRNNShapes(Base):
     def test_lstm_backward_finite(self):
         def body(dev):
             x = jt.randn(4, 2, 3)
-            m = nn.LSTM(3, 5)
+            m = nn.LSTM(3, 5).to(dev)
             out, _ = m(x)
             g = jt.grad(out.sum(), [p for p in m.parameters() if not p.is_stop_grad()])
             self.assertTrue(all(bool(jt.isfinite(gi).all().item()) for gi in g),
