@@ -29,15 +29,13 @@ def any(x, dim=(), keepdims=False, keepdim=None):
 
 
 def _as_truth(x):
-    """``x != 0`` for a half-precision input, `x` itself otherwise.
+    """Convert numeric inputs to truth values before logical reduction.
 
-    The logical reductions run on their input's dtype, and CUDA has no atomic
-    OR or AND on bfloat16 or float16: ``any``/``all`` of a half tensor did not
-    compile on the device (``reduce_op.cc``: no ``atomicOr`` for the argument
-    list). Transformers' static KV cache asks exactly that of a bf16 model.
-    NaN counts as true, as in torch.
+    CUDA logical reductions require integral accumulators. Convert every
+    numeric dtype, including float32/float64, rather than just half types.
+    Nonzero values (including NaN) are true; boolean inputs need no conversion.
     """
-    if isinstance(x, Var) and _jittor_dtype_name(x.dtype) in ("float16", "bfloat16"):
+    if isinstance(x, Var) and _jittor_dtype_name(x.dtype) != "bool":
         return x != 0
     return x
 
