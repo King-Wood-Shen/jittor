@@ -162,6 +162,20 @@ def _set_data_owner(view, slices, value):
     return _write_data_owner_numpy(view, value, slices)
 
 
+def _indices_on_target(self, indices):
+    # Torch permits CPU index tensors when indexing a CUDA tensor. Move
+    # each tensor in a composite index before native placement dispatch.
+    if isinstance(indices, _NativeVar):
+        if _device(self).type == "cuda" and _device(indices).type == "cpu":
+            return indices.to_device(int(_device(self).index or 0))
+        return indices
+    if isinstance(indices, tuple):
+        return tuple(_indices_on_target(self, index) for index in indices)
+    if isinstance(indices, list):
+        return [_indices_on_target(self, index) for index in indices]
+    return indices
+
+
 def _torch_setitem(self, slices, value):
     _context = get_install_context(_owner.jt)
     _native = _context.state["tensor_native_api"]
@@ -193,6 +207,7 @@ def _torch_setitem(self, slices, value):
                 value = value.squeeze(0)
     except _owner.EXPECTED as exc:
         _owner.swallowed("torch/installers/tensor.py _torch_setitem: mask = slices", exc)
+    slices = _indices_on_target(self, slices)
     result = _orig_setitem(self, slices, value)
     return result
 
@@ -475,6 +490,7 @@ def _is_basic_index(index):
 
 
 def _torch_getitem(self, slices):
+    slices = _indices_on_target(self, slices)
     # A basic index, natively (`src/bindings/pyjt/py_compat_fast.h`).
     fast = _owner.jt.core._fast_getitem(self, slices)
     if fast is not NotImplemented:

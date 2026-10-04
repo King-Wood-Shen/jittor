@@ -1133,6 +1133,11 @@ def _vinv(self):
 
 
 def install(ctx):
+    from .shape import triu_indices
+    ctx.jittor_module.triu_indices = triu_indices
+    register_api_bindings(ctx.jittor_module, "torch", ("triu_indices",),
+                          Fidelity.APPROXIMATE,
+                          "Dense integer triangular coordinates; sparse layouts are unsupported")
     from .shape import fliplr
     ctx.jittor_module.fliplr = fliplr
     register_api_bindings(ctx.jittor_module, "torch", ("fliplr",),
