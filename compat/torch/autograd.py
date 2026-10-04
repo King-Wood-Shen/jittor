@@ -280,7 +280,7 @@ def backward(tensors, grad_tensors=None, retain_graph=None,
     gts = None if grad_tensors is None else _as_list(grad_tensors)
     for i, t in enumerate(ts):
         gt = None if gts is None else gts[i]
-        t.backward(gradient=gt, retain_graph=retain_graph)
+        t.backward(gradient=gt, retain_graph=retain_graph, create_graph=create_graph)
     return None
 
 
