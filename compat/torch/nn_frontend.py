@@ -7,6 +7,17 @@ from .parameter_containers import make_parameter_containers
 from .nn_adoption import adopt_owned_children
 
 
+def module_init(module, *args, **kwargs):
+    # Torch Module stops cooperative initialization unless explicitly enabled.
+    # super(torch.nn.Module, instance) still reaches the native cooperative
+    # bridge and then the user's mixin.
+    if getattr(module, "call_super_init", False):
+        owner = type(module)._nn_frontend_owner
+        owner.native_module.__init__(module, *args, **kwargs)
+    elif args or kwargs:
+        raise TypeError("Module.__init__() does not accept arguments")
+
+
 def module_setattr(module, name, value):
     owner = type(module)._nn_frontend_owner
     attributes = vars(module)
@@ -183,6 +194,7 @@ class NNFrontendOwner:
         self.Module = type("Module", (self.native_module,), {
             "__module__": "torch.nn", "__slots__": (),
             "_frontend_tensor_type": tensor_type, "_nn_frontend_owner": self,
+            "__init__": module_init,
             "__setattr__": module_setattr, "__call__": module_call,
         })
         self.adapters = {self.native_module: self.Module}

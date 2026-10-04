@@ -128,7 +128,11 @@ def _walk_by_dfs(module, prefix, recurse):
 
 class Module:
     def __init__(self, *args, **kw):
-        pass
+        # Continue cooperative initialization when a mixin follows Module.
+        # Keep the historical no-op at the object boundary.
+        initialize = super().__init__
+        if getattr(initialize, "__objclass__", None) is not object:
+            initialize(*args, **kw)
     def execute(self, *args, **kw):
         ''' Executes the module computation.
 
