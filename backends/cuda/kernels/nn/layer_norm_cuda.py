@@ -1,13 +1,15 @@
 """CUDA inference fast path for :func:`jittor.nn.layer_norm`."""
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
 
+import functools
 import os
 
 import jittor as jt
 from jittor._runtime.core_api import _output_requires_grad, _stop_grad_outputs
-from jittor._runtime.dispatch import optional_kernel
+from jittor._runtime.dispatch import native_rule, optional_kernel
 
 
+@native_rule("layer_norm_inference")
 def _supports_layer_norm_inference(
         x, normalized_shape, weight, bias, eps, *, allow_bfloat16=False):
     if _output_requires_grad(x, weight, bias):
@@ -43,6 +45,7 @@ def _warp_rows(x, hidden):
     return hidden <= _WARP_ROW_LIMIT and int(x.numel()) // hidden >= _WARP_ROWS_MIN
 
 
+@functools.lru_cache(maxsize=256)
 def _warp_rows_source(hidden, eps, affine):
     """A warp per row: the row in registers, both reductions by shuffles.
 
@@ -117,6 +120,7 @@ def _warp_rows_source(hidden, eps, affine):
     """
 
 
+@functools.lru_cache(maxsize=256)
 def _warp_rows_launch(hidden, pointers):
     return f"""
     long long rows = in0->num / {hidden};
@@ -124,31 +128,11 @@ def _warp_rows_launch(hidden, pointers):
     """
 
 
-@optional_kernel("nn.layer_norm.inference", ("cuda", "rocm_legacy", "corex_legacy"),
-                 dtypes=("float16", "bfloat16", "float32"),
-                 supports=_supports_layer_norm_inference)
-def _layer_norm_no_grad_cuda(
-        x, normalized_shape, weight, bias, eps, *, allow_bfloat16=False):
-    hidden = int(normalized_shape[0])
-    scalar_affine = not isinstance(weight, jt.Var) and not isinstance(bias, jt.Var)
-    eps_value = float(eps)
-    if scalar_affine:
-        scale_value = float(weight)
-        offset_value = float(bias)
-        scale_literal = f"{scale_value:.9e}f"
-        offset_literal = f"{offset_value:.9e}f"
-        if _warp_rows(x, hidden):
-            affine = ("", f"* {scale_literal} + {offset_literal}",
-                      f"* {scale_value!r} + {offset_value!r}")
-            return jt.code(
-                x.shape, x.dtype, [x],
-                cuda_src=_warp_rows_source(hidden, eps_value, affine)
-                + _warp_rows_launch(hidden, "in0_p, out0_p"))
-        y = jt.code(
-            x.shape,
-            x.dtype,
-            [x],
-            cuda_src=f"""
+@functools.lru_cache(maxsize=256)
+def _block_rows_source_scalar(eps_value, hidden, offset_literal, scale_literal):
+    # Formatted once per configuration: the source is a pure function
+    # of these, and a BERT-base forward built it 25 times.
+    return f"""
             __device__ __forceinline__ float warp_sum(float value) {{
                 for (int offset = 16; offset > 0; offset >>= 1)
                     value += __shfl_down_sync(0xffffffff, value, offset);
@@ -285,23 +269,14 @@ def _layer_norm_no_grad_cuda(
             }}
             int rows = in0->num / {hidden};
             kernel<<<rows, 128>>>(in0_p, out0_p, {hidden});
-            """,
-        )
-        return y
-    if _warp_rows(x, hidden):
-        affine = ("in1_type* weight, in2_type* bias, ",
-                  "* static_cast<float>(weight[j]) + static_cast<float>(bias[j])",
-                  "* static_cast<double>(weight[j]) + static_cast<double>(bias[j])")
-        y = jt.code(
-            x.shape, x.dtype, [x, weight, bias],
-            cuda_src=_warp_rows_source(hidden, eps_value, affine)
-            + _warp_rows_launch(hidden, "in0_p, in1_p, in2_p, out0_p"))
-        return _stop_grad_outputs(y)
-    y = jt.code(
-        x.shape,
-        x.dtype,
-        [x, weight, bias],
-        cuda_src=f"""
+            """
+
+
+@functools.lru_cache(maxsize=256)
+def _block_rows_source(eps_value, hidden):
+    # Formatted once per configuration: the source is a pure function
+    # of these, and a BERT-base forward built it 25 times.
+    return f"""
         __device__ __forceinline__ float warp_sum(float value) {{
             for (int offset = 16; offset > 0; offset >>= 1)
                 value += __shfl_down_sync(0xffffffff, value, offset);
@@ -448,6 +423,52 @@ def _layer_norm_no_grad_cuda(
         int rows = in0->num / {hidden};
         kernel<<<rows, 128>>>(
             in0_p, in1_p, in2_p, out0_p, {hidden});
-        """,
-    )
+        """
+
+
+@optional_kernel("nn.layer_norm.inference", ("cuda", "rocm_legacy", "corex_legacy"),
+                 dtypes=("float16", "bfloat16", "float32"),
+                 supports=_supports_layer_norm_inference)
+def _layer_norm_no_grad_cuda(
+        x, normalized_shape, weight, bias, eps, *, allow_bfloat16=False):
+    hidden = int(normalized_shape[0])
+    scalar_affine = not isinstance(weight, jt.Var) and not isinstance(bias, jt.Var)
+    eps_value = float(eps)
+    if scalar_affine:
+        scale_value = float(weight)
+        offset_value = float(bias)
+        scale_literal = f"{scale_value:.9e}f"
+        offset_literal = f"{offset_value:.9e}f"
+        if _warp_rows(x, hidden):
+            affine = ("", f"* {scale_literal} + {offset_literal}",
+                      f"* {scale_value!r} + {offset_value!r}")
+            return jt.code(
+                x.shape, x.dtype, [x],
+                cuda_src=_warp_rows_source(hidden, eps_value, affine)
+                + _warp_rows_launch(hidden, "in0_p, out0_p"))
+        y = jt.code(
+            x.shape,
+            x.dtype,
+            [x],
+            cuda_src=_block_rows_source_scalar(eps_value, hidden, offset_literal, scale_literal),
+        )
+        return y
+    y = jt.code(x.shape, x.dtype, [x, weight, bias],
+                cuda_src=_affine_source(hidden, eps_value, _warp_rows(x, hidden)))
     return _stop_grad_outputs(y)
+
+
+@functools.lru_cache(maxsize=256)
+def _affine_source(hidden, eps_value, warp):
+    """The kernel for a Var weight and bias: a warp a row, or a block.
+
+    Also what the native module call builds a `LayerNorm`'s inference
+    operator from (`src/bindings/pyjt/py_module_call.cc`).
+    """
+    if warp:
+        affine = ("in1_type* weight, in2_type* bias, ",
+                  "* static_cast<float>(weight[j]) + static_cast<float>(bias[j])",
+                  "* static_cast<double>(weight[j]) + static_cast<double>(bias[j])")
+        return (_warp_rows_source(hidden, eps_value, affine)
+                + _warp_rows_launch(hidden, "in0_p, in1_p, in2_p, out0_p"))
+    return _block_rows_source(eps_value, hidden)

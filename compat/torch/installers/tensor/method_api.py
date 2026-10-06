@@ -2,7 +2,7 @@
 from importlib import import_module
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
 from ...context import get_install_context
-from ...types import _make_cpu_resident, _make_cuda_resident, _var_is_cpu_resident
+from ...types import _PYTHON_SCALAR_DTYPES, _make_cpu_resident, _make_cuda_resident, _var_is_cpu_resident
 from ....stub_policy import degraded as _degraded, unimplemented as _unimplemented
 from ..core import _promote_pair
 
@@ -132,7 +132,9 @@ def _assign_data_owner(view, value, extra_path=()):
     for base, index in reversed(bases):
         updated = base.setitem(index, updated)
 
-    owner_was_trainable = not owner.is_stop_grad()
+    # `requires_grad`, not the stop-grad bit: `requires_grad_(False)` need not
+    # set it, and reading the bit alone unfroze a frozen tensor on assignment.
+    owner_was_trainable = bool(owner.requires_grad)
     owner.assign(updated)
     _restore_trainable_state(owner, owner_was_trainable)
 
@@ -224,10 +226,24 @@ def _ip(self, value):
     if _assign_data_owner(self, value):
         return self
     target = self
-    was_trainable = not target.is_stop_grad()
+    # As above: a frozen tensor stays frozen through an in-place write.
+    was_trainable = bool(target.requires_grad)
+    # ...unless the written value itself requires grad: torch then makes the
+    # target a non-leaf of that graph (`out = zeros(); out.index_add_(0, i, h)`
+    # must backpropagate into `h`). A value built under no_grad is stop-grad,
+    # so the frozen-under-no_grad case above is unaffected. Read before the
+    # assignment, which hands the target's flags over to the value's Var.
+    gains_grad = (not was_trainable and isinstance(value, _NativeVar)
+                  and not value.is_stop_grad() and bool(value.requires_grad))
     target.assign(value)
     if was_trainable and target.is_stop_grad():
         target.start_grad()
+    elif gains_grad and not target.is_stop_grad():
+        # The native setter only clears the reversible requires-grad-disabled
+        # bit here (the Var is not stop-grad), so the graph edge is kept; the
+        # Python property would also register a non-leaf as a backward leaf.
+        _context = get_install_context(_owner.jt)
+        _context.state["tensor_native_api"]["_native_requires_grad"].__set__(target, True)
     elif not was_trainable and not target.is_stop_grad():
         target.stop_grad()
     return self
@@ -551,7 +567,7 @@ def _data_get(self):
 
 def _data_set(self, value):
     src = value if isinstance(value, _NativeVar) else _owner.jt.array(value)
-    was_trainable = not self.is_stop_grad()
+    was_trainable = bool(self.requires_grad)
     # torch's `x.data = y` *replaces* x's data, shape and dtype; it does not
     # copy elements into x's existing buffer. `assign` is the in-place
     # primitive used by `x.foo_()`: it writes x's values into y's storage and
@@ -620,6 +636,9 @@ def _to(self, *args, **kwargs):
             # .to(other) copies other's dtype AND device.
             ds = _jittor_dtype_name(a.dtype)
             dev = a.device
+        elif type(a) is type and a in _PYTHON_SCALAR_DTYPES:
+            # `.to(int)` is torch's int64; it used to match no branch and be dropped.
+            ds = _PYTHON_SCALAR_DTYPES[a]
         elif _owner._is_index(a):
             # A bare int can only mean a device index, and it used to match none
             # of these branches and be **dropped**: `.to(1)` returned the tensor
@@ -1485,11 +1504,35 @@ _BINARY_APIS = {
 }
 
 
+def _fill_captured_state(self, val):
+    """Fill state a step capture replays in its own buffer; True if done.
+
+    `_ip` rebinds the tensor to a newly computed one. For state a capture
+    keeps (`_capture_owned`), the capture still holds the old buffer, so the
+    new one is a second copy for as long as the capture lives: a static KV
+    cache reset before every `generate` held two caches through the prompt.
+    A setitem over the whole tensor fills the old buffer in place instead.
+    Only a constant fill without a gradient: one that read the tensor itself
+    could read what it is overwriting.
+    """
+    if (not self._capture_owned() or not self.shape
+            or not (_owner.jt.flags.no_grad or self.is_stop_grad())
+            or getattr(self, "_torch_data_owner", None) is not None):
+        return False
+    value = _owner.jt.array(val).cast(self.dtype)
+    self.assign(self.setitem((slice(None),) * len(self.shape), value))
+    return True
+
+
 def _api_fill(self, val):
+    if _fill_captured_state(self, val):
+        return self
     return _ip(self, _owner.jt.ones(self.shape, self.dtype) * val)
 
 
 def _api_zero(self):
+    if _fill_captured_state(self, 0):
+        return self
     return _ip(self, _owner.jt.zeros(self.shape, self.dtype))
 
 

@@ -20,7 +20,7 @@ import math
 import jittor as jt
 from jittor._core.dtypes import dtype_name as _dtype_name
 from jittor._runtime.backend_libraries import library_resource
-from jittor._runtime.dispatch import optional_kernel
+from jittor._runtime.dispatch import native_rule, optional_kernel
 from jittor.nn.functional._layout import channels_last_source, channels_last_view, records_no_grad
 from jittor.nn.functional.activation import offer_activation
 
@@ -126,17 +126,9 @@ def _group_norm_cuda_cls(shape, num_groups, eps, vector=1, act=""):
         }}
         """
 
-    class GroupNormCUDA(jt.Function):
-        def execute(self, x, weight, bias):
-            # Only the two per-group statistics are carried to the backward,
-            # as torch's native_group_norm does; the backward recomputes xhat
-            # from x reading the same bytes a stored copy would.
-            y, mean, rstd, partial = jt.code(
-                [x.shape, (rows,), (rows,), (3 * row_parts,)],
-                [x.dtype, "float32", "float32", "float32"],
-                [x, weight, bias],
-                cuda_header=header,
-                cuda_src=f"""
+    # Formatted once per class, not on every call: 4.4 of the 18.9 us an
+    # apply took (a DDPM UNet calls one 65 times a step).
+    forward_src = f"""
                 __global__ static void group_norm_statistics(
                         const in0_type* x, float* partial) {{
                     typedef cub::BlockReduce<JtBnWelford, {_THREADS}> BlockReduce;
@@ -185,24 +177,8 @@ def _group_norm_cuda_cls(shape, num_groups, eps, vector=1, act=""):
                 {_launch("group_norm_apply", "in0_p, in1_p, in2_p, out1_p, out2_p, out0_p",
                          ("in0_p", "out0_p"), total, vector)}
                 CHECK(0 == cudaGetLastError());
-                """,
-            )
-            self.saved = x, mean, rstd, weight, bias
-            return y
-
-        def grad(self, grad_y):
-            # One pass for the sums, `group_norm_backward_plane_sums`; then
-            # per channel its weight and bias gradients, over samples and
-            # chunks, and per (sample, group) row the two means the input
-            # gradient needs -- its channels' plane sums weighted by the
-            # channel's weight (`group_norm_backward_finish`).
-            x, mean, rstd, weight, bias = self.saved
-            grad_x, grad_weight, grad_bias, partial, coef = jt.code(
-                [grad_y.shape, weight.shape, weight.shape, (2 * plane_parts,), (2 * rows,)],
-                [grad_y.dtype, weight.dtype, weight.dtype, "float32", "float32"],
-                [grad_y, x, mean, rstd, weight, bias],
-                cuda_header=header,
-                cuda_src=f"""
+                """
+    backward_src = f"""
                 __global__ static void group_norm_backward_plane_sums(
                         const in0_type* grad_y, const in1_type* x, const float* mean,
                         const float* rstd, const in4_type* weight, const in5_type* bias,
@@ -299,7 +275,36 @@ def _group_norm_cuda_cls(shape, num_groups, eps, vector=1, act=""):
                          "in0_p, in1_p, in2_p, in3_p, in4_p, in5_p, out4_p, out0_p",
                          ("in0_p", "in1_p", "out0_p"), total, vector)}
                 CHECK(0 == cudaGetLastError());
-                """,
+                """
+
+    class GroupNormCUDA(jt.Function):
+        def execute(self, x, weight, bias):
+            # Only the two per-group statistics are carried to the backward,
+            # as torch's native_group_norm does; the backward recomputes xhat
+            # from x reading the same bytes a stored copy would.
+            y, mean, rstd, partial = jt.code(
+                [x.shape, (rows,), (rows,), (3 * row_parts,)],
+                [x.dtype, "float32", "float32", "float32"],
+                [x, weight, bias],
+                cuda_header=header,
+                cuda_src=forward_src,
+            )
+            self.saved = x, mean, rstd, weight, bias
+            return y
+
+        def grad(self, grad_y):
+            # One pass for the sums, `group_norm_backward_plane_sums`; then
+            # per channel its weight and bias gradients, over samples and
+            # chunks, and per (sample, group) row the two means the input
+            # gradient needs -- its channels' plane sums weighted by the
+            # channel's weight (`group_norm_backward_finish`).
+            x, mean, rstd, weight, bias = self.saved
+            grad_x, grad_weight, grad_bias, partial, coef = jt.code(
+                [grad_y.shape, weight.shape, weight.shape, (2 * plane_parts,), (2 * rows,)],
+                [grad_y.dtype, weight.dtype, weight.dtype, "float32", "float32"],
+                [grad_y, x, mean, rstd, weight, bias],
+                cuda_header=header,
+                cuda_src=backward_src,
             )
             return grad_x, grad_weight, grad_bias
 
@@ -635,6 +640,7 @@ def _group_norm_nhwc_training(source, num_groups, weight, bias, eps):
     return y
 
 
+@native_rule("group_norm")
 def _supports_group_norm(x, num_groups, weight, bias, eps):
     if not (
         isinstance(weight, jt.Var)

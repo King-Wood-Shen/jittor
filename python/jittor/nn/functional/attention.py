@@ -143,6 +143,12 @@ def _repeated_heads(tensor):
     return unsqueezed.reshape((b, heads, length, dim)), group
 
 
+#: The `nn.fused_attention` kernel that answered the last call this module
+#: answered with one, for a caller that remembers the route (the Torch
+#: frontend's `scaled_dot_product_attention`); the caller clears it.
+LAST_FUSED_KERNEL = [None]
+
+
 def scaled_dot_product_attention(
     query,
     key,
@@ -188,13 +194,13 @@ def scaled_dot_product_attention(
     if probability < 0.0 or probability > 1.0:
         raise ValueError("dropout probability must be between 0 and 1")
     if attn_mask is not None:
+        # Names are names: `_jittor_dtype_name` of one is itself, and it was
+        # asked five more times here on every call.
         mask_dtype = _jittor_dtype_name(attn_mask.dtype)
-        if _jittor_dtype_name(mask_dtype) != "bool" and "float" not in _jittor_dtype_name(mask_dtype):
+        if mask_dtype != "bool" and "float" not in mask_dtype:
             raise AssertionError("only bool and floating attention masks are supported")
-        allowed_mask_dtypes = {query_dtype}
-        if _jittor_dtype_name(query_dtype) in {"bfloat16", "float16", "float64"}:
-            allowed_mask_dtypes.add("float32")
-        if _jittor_dtype_name(mask_dtype) != "bool" and _jittor_dtype_name(mask_dtype) not in allowed_mask_dtypes:
+        if mask_dtype != "bool" and mask_dtype != query_dtype and not (
+                mask_dtype == "float32" and query_dtype in ("bfloat16", "float16", "float64")):
             raise RuntimeError("attention mask dtype must match query dtype or be float32")
     fast = try_dispatch(
         "nn.scaled_dot_product_attention", query, key, value,
@@ -204,10 +210,14 @@ def scaled_dot_product_attention(
     # A fused kernel never writes the [..., Lq, Lk] scores to memory; see
     # backends/cuda/kernels/nn/cudnn_attention_cuda.py. It declines what it
     # cannot run, and everything below is the path for that.
-    fused = try_dispatch(
+    fused_kernel = select_kernel(
         "nn.fused_attention", query, key, value,
         attn_mask=attn_mask, dropout_p=probability, is_causal=is_causal, scale=scale)
+    fused = None if fused_kernel is None else fused_kernel(
+        query, key, value,
+        attn_mask=attn_mask, dropout_p=probability, is_causal=is_causal, scale=scale)
     if fused is not None:
+        LAST_FUSED_KERNEL[0] = fused_kernel
         return fused
     query_length = int(query.shape[-2])
     scale_factor = 1.0 / math.sqrt(int(query.shape[-1])) if scale is None else scale

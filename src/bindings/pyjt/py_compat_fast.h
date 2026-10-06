@@ -40,8 +40,11 @@ PyObject* fast_getitem(PyObject* self, PyObject* index);
 // `__rmul__`, `__truediv__` and `__rtruediv__` as captured before the frontend
 // replaced them (slot wrappers; anything else leaves that operator on the
 // Python path), and `mark_cpu_like` is the frontend's `_mark_cpu_like`.
+// `widen_scalar_division`: take a floating tensor over a Python float here,
+// widened as `_true_division` does (everywhere but ACL).
 // @pyjt(_compat_fast_bind_binary)
-void compat_fast_bind_binary(PyObject* natives, PyObject* mark_cpu_like);
+void compat_fast_bind_binary(PyObject* natives, PyObject* mark_cpu_like,
+                             bool widen_scalar_division=false);
 
 // `tensor <op> other` for the common case of `method_api._promoting_binary`
 // and `_true_division`: a Var of the same dtype (not unsigned; floating for a
@@ -51,6 +54,14 @@ void compat_fast_bind_binary(PyObject* natives, PyObject* mark_cpu_like);
 // operator takes the call.
 // @pyjt(_fast_binary)
 PyObject* fast_binary(PyObject* self, PyObject* other, int code);
+
+// `nn.gelu(x)` (exact) as its Python body builds it, operator for operator:
+// `0.5 * x * (1.0 + erf(x * 0.7071067811865476))`, x widened to float32 for a
+// half type and the result cast back, each product and sum taken as
+// `_fast_binary` takes it. None when the binary operators are not bound, x is
+// not floating, a kernel is registered for "nn.gelu", or any step declines.
+// @pyjt(_fast_gelu)
+PyObject* fast_gelu(PyObject* x);
 
 // `tensor.view(*shape)` / `reshape(*shape)` of a dense tensor, shape given as
 // ints or one tuple or list of them: the reshape op, recorded as a storage
@@ -67,5 +78,11 @@ PyObject* fast_unsqueeze(PyObject* self, int64 dim);
 // recorded as a transpose view. None when a transpose kernel is registered.
 // @pyjt(_fast_transpose)
 PyObject* fast_transpose(PyObject* self, int64 dim0, int64 dim1);
+
+// `tensor.permute(axes)` / `transpose(*axes)` for a permutation of exact,
+// in-range, distinct non-negative ints, built as `_fast_transpose` builds it.
+// None for anything else, and `jittor.transpose` reports it.
+// @pyjt(_fast_permute)
+PyObject* fast_permute(PyObject* self, PyObject* axes);
 
 } // namespace jittor

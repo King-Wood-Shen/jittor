@@ -4,7 +4,10 @@
 #include "core/var_slices.h"
 #include "bindings/pyjt/py_kernel_select.h"
 #include "bindings/pyjt/py_tensor_frontend.h"
+#include "bindings/pyjt/py_type_lifetime.h"
 #include "ops/op_register.h"
+#include "ops/composite/code_op.h"
+#include <cstring>
 #include "runtime/device.h"
 #include "runtime/backend.h"
 #include <stdexcept>
@@ -12,14 +15,26 @@
 
 namespace jittor {
 
+DECLARE_FLAG(bool, no_grad);
+DECLARE_FLAG(int, amp_reg);
+
 namespace {
 // Per frontend type: its dtype table, and the entries already looked up by
-// native name. A type is never freed while referenced here.
+// native name. Dropped when the type is collected.
 struct DtypeTable {
     PyObject* table = nullptr;
     std::unordered_map<string, PyObject*> by_name;
 };
 std::unordered_map<PyTypeObject*, DtypeTable> dtype_tables;
+
+void forget_dtype_table(PyObject* type) {
+    auto found = dtype_tables.find((PyTypeObject*)type);
+    if (found == dtype_tables.end()) return;
+    DtypeTable entry = move(found->second);
+    dtype_tables.erase(found);
+    for (auto& cached : entry.by_name) Py_DECREF(cached.second);
+    Py_DECREF(entry.table);
+}
 } // namespace
 
 PyObject* frontend_dtype(PyObject* self) {
@@ -31,7 +46,12 @@ PyObject* frontend_dtype(PyObject* self) {
         DtypeTable entry;
         entry.table = PyObject_GetAttrString((PyObject*)type, "_frontend_dtype_objects");
         if (!entry.table) throw std::runtime_error("frontend type without a dtype table");
-        Py_INCREF(type);
+        try {
+            on_type_collected((PyObject*)type, forget_dtype_table);
+        } catch (...) {
+            Py_DECREF(entry.table);
+            throw;
+        }
         found = dtype_tables.emplace(type, move(entry)).first;
     }
     auto& entry = found->second;
@@ -191,7 +211,11 @@ enum BinaryCode { B_ADD, B_RADD, B_SUB, B_RSUB, B_MUL, B_RMUL, B_TRUEDIV, B_RTRU
 binaryfunc binary_slots[B_COUNT] = {};
 bool binary_reflected[B_COUNT] = {};
 PyObject* mark_cpu_like_fn = nullptr;
+// Whether a scalar divisor widens the division, as `_true_division` does on
+// every backend but ACL (which has no float64 arithmetic).
+bool widen_division = false;
 auto make_unary = op_constructor<VarPtr, Var*, NanoString>("unary");
+auto make_array = op_constructor<VarPtr, const void*, NanoVector, NanoString>("array");
 auto make_reshape = op_constructor<VarPtr, Var*, NanoVector>("reshape");
 auto make_transpose = op_constructor<VarPtr, Var*, NanoVector>("transpose");
 
@@ -231,7 +255,8 @@ PyObject* wrap_like(PyObject* self, VarHolder* holder) {
 }
 } // namespace
 
-void compat_fast_bind_binary(PyObject* natives, PyObject* mark_cpu_like) {
+void compat_fast_bind_binary(PyObject* natives, PyObject* mark_cpu_like, bool widen_scalar_division) {
+    widen_division = widen_scalar_division;
     if (!PyTuple_Check(natives) || PyTuple_GET_SIZE(natives) != B_COUNT)
         throw std::runtime_error("_compat_fast_bind_binary needs one native per operator");
     for (int i = 0; i < B_COUNT; i++) {
@@ -248,6 +273,37 @@ void compat_fast_bind_binary(PyObject* natives, PyObject* mark_cpu_like) {
     mark_cpu_like_fn = mark_cpu_like;
 }
 
+namespace {
+// `_true_division` for a floating tensor over a Python float, op for op: the
+// quotient is taken in float32 for half precision and float64 for float32 --
+// the divisor a 0-d array of that dtype -- and cast back. In Python it built
+// those three operators through a `result_type`, two dtype promotions and
+// three install-context lookups, 21 us a call; every diffusers ResnetBlock2D
+// ends in one (`/ self.output_scale_factor`), 45 a DDPM UNet forward.
+PyObject* scalar_division(PyObject* self, PyObject* other, NanoString own) {
+    PyObject* out;
+    if (own == ns_float64) {
+        out = binary_slots[B_TRUEDIV](self, other);
+    } else {
+        NanoString wide = own == ns_float32 ? ns_float64 : ns_float32;
+        double value = PyFloat_AS_DOUBLE(other);
+        float narrow = (float)value;
+        Var* x = GET_RAW_PTR(VarHolder, self)->var;
+        PyObjHolder a(wrap_like(self, new VarHolder(make_unary(x, wide))));
+        PyObjHolder b(wrap_like(self, new VarHolder(make_array(
+            wide == ns_float64 ? (const void*)&value : (const void*)&narrow, {}, wide))));
+        out = binary_slots[B_TRUEDIV](a.obj, b.obj);
+    }
+    if (!out || out == Py_NotImplemented || !is_var(out)) return out;
+    Var* result = GET_RAW_PTR(VarHolder, out)->var;
+    if (result->dtype() != own) {
+        PyObjHolder uncast(out);
+        out = wrap_like(self, new VarHolder(make_unary(result, own)));
+    }
+    return mark_like(out, self, other);
+}
+} // namespace
+
 PyObject* fast_binary(PyObject* self, PyObject* other, int code) {
     if (code < 0 || code >= B_COUNT || !binary_slots[code] || !mark_cpu_like_fn
             || !is_var(self))
@@ -259,9 +315,12 @@ PyObject* fast_binary(PyObject* self, PyObject* other, int code) {
         if (GET_RAW_PTR(VarHolder, other)->var->dtype() != own) return none();
         if (division ? !(is_floating(own) || own.is_complex()) : is_uint(own)) return none();
     } else if (division) {
-        // A scalar divisor widens half and single precision on the Python
-        // path (`_true_division`); leave that to it.
-        return none();
+        // A float divisor of a floating tensor, as `_true_division` widens
+        // it; anything else -- an int, a reflected division -- stays there.
+        if (code != B_TRUEDIV || !widen_division || !PyFloat_CheckExact(other)
+                || !is_floating(own))
+            return none();
+        return scalar_division(self, other, own);
     } else if (PyFloat_CheckExact(other)) {
         if (!is_floating(own)) return none();
         scalar = true;
@@ -285,6 +344,97 @@ PyObject* fast_binary(PyObject* self, PyObject* other, int code) {
         }
     }
     return mark_like(out, self, other);
+}
+
+namespace {
+auto make_code = op_constructor<VarPtr, NanoVector, NanoString, vector<Var*>&&, string&&,
+    vector<string>&&, string&&, string&&, vector<string>&&, string&&, DataMap&&, string&&>("code");
+
+// The body below as one kernel, in the same order and precision: float32
+// throughout, the input widened and the result narrowed as `.float32()` and
+// `.cast()` would. Taken for the output of a code operator -- a Linear's, in
+// a transformer's MLP -- where the elementwise chain has nothing on its input
+// side to fuse with, under no_grad on CUDA: one operator to build and launch
+// instead of five.
+const string& gelu_source() {
+    static const string source = R"(
+    __global__ static void jt_gelu(const in0_type* __restrict__ x, out0_type* __restrict__ y,
+                                   long long n) {
+        long long stride = (long long)gridDim.x * blockDim.x;
+        for (long long i = (long long)blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride) {
+            float v = static_cast<float>(x[i]);
+            y[i] = static_cast<out0_type>((0.5f * v) * (1.0f + erff(v * 0.7071067811865476f)));
+        }
+    }
+    long long n = in0->num;
+    long long blocks = (n + 255) / 256;
+    if (blocks > 65536) blocks = 65536;
+    jt_gelu<<<(unsigned)blocks, 256>>>(in0_p, out0_p, n);
+    )";
+    return source;
+}
+} // namespace
+
+PyObject* fast_gelu(PyObject* x) {
+    if (!is_var(x) || !binary_slots[B_MUL] || !binary_slots[B_RMUL] || !binary_slots[B_RADD]
+            || !mark_cpu_like_fn || kernel_op_registered("nn.gelu"))
+        return none();
+    Var* var = GET_RAW_PTR(VarHolder, x)->var;
+    NanoString own = var->dtype();
+    if (!is_floating(own)) return none();
+    bool low = own == ns_float16 || own == ns_bfloat16;
+    Op* producer = var->input();
+    // A CUDA kernel source: only where the accelerator is CUDA (`use_cuda` is
+    // also set on ACL).
+    if (own != ns_float64 && !amp_reg && runtime_flag_use_cuda()
+            && accelerator_backend_id() == BackendId::Cuda && producer
+            && producer->is_op(op_ids::code()) && var->num > 0 && var->is_contiguous()
+            && (no_grad || var->is_stop_grad())) {
+        PyTensorFrontendScope scope(x, nullptr, 0, false);
+        unique_ptr<VarHolder> out(new VarHolder(make_code(var->shape, own, {var},
+            "", {}, "", string(gelu_source()), {}, "", {}, "")));
+        out->stop_grad();
+        return to_py_object<VarHolder*>(out.release());
+    }
+    static PyObject* half = PyFloat_FromDouble(0.5);
+    static PyObject* one = PyFloat_FromDouble(1.0);
+    static PyObject* inv_sqrt2 = PyFloat_FromDouble(0.7071067811865476);
+    // Owned references, any of which may be null (a step that declined).
+    struct Ref {
+        PyObject* obj = nullptr;
+        ~Ref() { Py_XDECREF(obj); }
+        // A declined step (None) becomes null; an error stays an error.
+        bool take(PyObject* out) {
+            obj = out;
+            if (out && out != Py_None && is_var(out)) return true;
+            Py_XDECREF(out);
+            obj = nullptr;
+            return false;
+        }
+    } compute, scaled, inner, erf, shifted, out;
+    auto bail = []() { return PyErr_Occurred() ? nullptr : none(); };
+    if (low) {
+        compute.obj = wrap_like(x, new VarHolder(
+            make_unary(GET_RAW_PTR(VarHolder, x)->var, ns_float32)));
+    } else {
+        Py_INCREF(x);
+        compute.obj = x;
+    }
+    if (!compute.obj) return nullptr;
+    if (!scaled.take(fast_binary(compute.obj, half, B_RMUL))) return bail();
+    if (!inner.take(fast_binary(compute.obj, inv_sqrt2, B_MUL))) return bail();
+    erf.obj = wrap_like(inner.obj, new VarHolder(
+        make_unary(GET_RAW_PTR(VarHolder, inner.obj)->var, ns_erf)));
+    if (!erf.obj) return nullptr;
+    if (!shifted.take(fast_binary(erf.obj, one, B_RADD))) return bail();
+    if (!out.take(fast_binary(scaled.obj, shifted.obj, B_MUL))) return bail();
+    if (!low) {
+        PyObject* result = out.obj;
+        out.obj = nullptr;
+        return result;
+    }
+    return wrap_like(out.obj, new VarHolder(
+        make_unary(GET_RAW_PTR(VarHolder, out.obj)->var, own)));
 }
 
 namespace {
@@ -344,17 +494,11 @@ PyObject* fast_unsqueeze(PyObject* self, int64 dim) {
     return storage_view(self, target);
 }
 
-PyObject* fast_transpose(PyObject* self, int64 dim0, int64 dim1) {
-    if (!is_var(self)) return none();
-    auto* holder = GET_RAW_PTR(VarHolder, self);
+namespace {
+// `jittor.transpose(self, axes)` for a valid permutation.
+PyObject* transpose_by(PyObject* self, VarHolder* holder, NanoVector axes) {
     int ndim = holder->var->shape.size();
-    if (ndim == 0) return none();
-    if (dim0 < 0) dim0 += ndim;
-    if (dim1 < 0) dim1 += ndim;
-    if (dim0 < 0 || dim0 >= ndim || dim1 < 0 || dim1 >= ndim) return none();
     if (kernel_op_registered("tensor.transpose")) return none();
-    NanoVector axes;
-    for (int i = 0; i < ndim; i++) axes.push_back(i == dim0 ? dim1 : i == dim1 ? dim0 : i);
     PyTensorFrontendScope scope(self, nullptr, 0, false);
     // A transpose of a transpose is one transpose of the source, and none at
     // all when the two cancel; see `jittor.transpose`.
@@ -381,6 +525,38 @@ PyObject* fast_transpose(PyObject* self, int64 dim0, int64 dim1) {
     unique_ptr<VarHolder> out(new VarHolder(make_transpose(base->var, axes)));
     out->set_transpose_view_of(base, axes);
     return to_py_object<VarHolder*>(out.release());
+}
+} // namespace
+
+PyObject* fast_transpose(PyObject* self, int64 dim0, int64 dim1) {
+    if (!is_var(self)) return none();
+    auto* holder = GET_RAW_PTR(VarHolder, self);
+    int ndim = holder->var->shape.size();
+    if (ndim == 0) return none();
+    if (dim0 < 0) dim0 += ndim;
+    if (dim1 < 0) dim1 += ndim;
+    if (dim0 < 0 || dim0 >= ndim || dim1 < 0 || dim1 >= ndim) return none();
+    NanoVector axes;
+    for (int i = 0; i < ndim; i++) axes.push_back(i == dim0 ? dim1 : i == dim1 ? dim0 : i);
+    return transpose_by(self, holder, axes);
+}
+
+PyObject* fast_permute(PyObject* self, PyObject* axes) {
+    if (!is_var(self) || !(PyTuple_Check(axes) || PyList_Check(axes))) return none();
+    auto* holder = GET_RAW_PTR(VarHolder, self);
+    int ndim = holder->var->shape.size();
+    if (ndim == 0 || PySequence_Fast_GET_SIZE(axes) != ndim) return none();
+    PyObject** items = PySequence_Fast_ITEMS(axes);
+    NanoVector order;
+    uint64 seen = 0;
+    for (int i = 0; i < ndim; i++) {
+        if (!PyLong_CheckExact(items[i])) return none();
+        long value = PyLong_AsLong(items[i]);
+        if (value < 0 || value >= ndim || (seen >> value & 1)) { PyErr_Clear(); return none(); }
+        seen |= uint64(1) << value;
+        order.push_back(value);
+    }
+    return transpose_by(self, holder, order);
 }
 
 } // namespace jittor

@@ -1,6 +1,7 @@
 from ...fidelity import Fidelity, register_api_bindings
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
 import collections as _collections
+from collections.abc import MutableMapping as _MutableMapping
 import functools as _functools
 import weakref
 import os
@@ -44,6 +45,7 @@ _ORIG_MODULE_NAMED_BUFFERS = nn.Module.named_buffers
 _ORIG_MODULE_NAMED_MODULES = nn.Module.named_modules
 _ORIG_MODULE_LOAD_STATE_DICT = nn.Module.load_state_dict
 _ORIG_MODULE_PARAMETERS = nn.Module.parameters
+_ORIG_MODULE_PARAMETER_MAP = nn.Module.__dict__["_parameters"].fget
 
 
 # torch models define forward(); jittor calls execute(). Make the base
@@ -62,8 +64,9 @@ def _forward_alias(self, *args, **kwargs):
 
 
 #: Per-class answer from ``_prefer_forward``. Module level so the answer is
-#: computed once per class per process rather than once per install.
-_dispatch_cache = {}
+#: computed once per class per process rather than once per install; weak, so
+#: a class made at run time (a module defined in a function) can be collected.
+_dispatch_cache = weakref.WeakKeyDictionary()
 
 
 # Central dispatch fix: an HF module may SUBCLASS a jittor builtin (e.g.
@@ -287,7 +290,8 @@ def _named_parameters(self, prefix="", recurse=True, remove_duplicate=True):
     """Torch's ``named_parameters``: an iterator, with prefix/dedup."""
     reg = get_tensor_state(jt).leaf_params
     seen = set()
-    for name, v in self._iter_named_vars("parameters", recurse):
+    for name, v in self._iter_named_vars(
+            "parameters", recurse, remove_duplicate=False):
         if remove_duplicate and id(v) in seen:
             continue
         seen.add(id(v))
@@ -304,7 +308,12 @@ def _named_parameters(self, prefix="", recurse=True, remove_duplicate=True):
 def _named_buffers(self, prefix="", recurse=True, remove_duplicate=True):
     """Torch's ``named_buffers``, which defaults ``recurse=True``."""
     seen = set()
-    for name, v in _ORIG_MODULE_NAMED_BUFFERS(self, recurse=recurse):
+    native_named_vars = getattr(self, "_named_vars", None)
+    if callable(native_named_vars):
+        items = native_named_vars("buffers", recurse=recurse, remove_duplicate=False)
+    else:
+        items = _ORIG_MODULE_NAMED_BUFFERS(self, recurse=recurse)
+    for name, v in items:
         if remove_duplicate and id(v) in seen:
             continue
         seen.add(id(v))
@@ -360,13 +369,11 @@ def _state_source_to_var(value):
 
 
 def _preserve_target_dtypes_for_load(root, state_dict):
-    """Cast each source value to the dtype of the live destination."""
-    # torch.load_state_dict(assign=False), the default used by TRELLIS.2,
-    # copies checkpoint values into existing parameters/buffers and keeps
-    # the destination dtype.  Jittor's native load replaces through update(),
-    # so a bf16 target can be widened to fp32 when the loader had to widen a
-    # BF16 safetensor through numpy. Cast the source to the live target dtype
-    # before delegating to native load_state_dict.
+    """Match source dtype and placement to the live destination."""
+    # torch.load_state_dict(assign=False) copies checkpoint values into
+    # existing parameters/buffers, preserving both destination dtype and
+    # device. Jittor's native load replaces through update(), so normalize
+    # both before delegating.
     if not isinstance(state_dict, dict):
         return state_dict
     converted = None
@@ -380,11 +387,25 @@ def _preserve_target_dtypes_for_load(root, state_dict):
         if src.shape != target.shape:
             continue
         target_dtype = _jittor_dtype_name(target.dtype)
-        if _jittor_dtype_name(src.dtype) == target_dtype:
+        if _jittor_dtype_name(src.dtype) != target_dtype:
+            src = src.cast(target_dtype)
+        target_backend = int(target.placement_backend)
+        target_index = int(target.device_id)
+        source_backend = int(src.placement_backend)
+        source_index = int(src.device_id)
+        if target_backend >= 0 and (
+                source_backend != target_backend
+                or (target_backend > 0 and source_index != target_index)):
+            if target_backend == 0:
+                src = _make_cpu_resident(src)
+            else:
+                src = _make_cuda_resident(
+                    src, force=True, device=target.device)
+        if src is value:
             continue
         if converted is None:
             converted = dict(state_dict)
-        converted[key] = src.cast(target_dtype)
+        converted[key] = src
     return state_dict if converted is None else converted
 
 
@@ -513,7 +534,7 @@ class _ParamList:
             try:
                 self._produce()
             except StopIteration:
-                pass
+                break  # the walk is done; `_produce` has dropped the source
         return self._items
 
     def __iter__(self):
@@ -593,6 +614,18 @@ def _register_leaf_params(params):
                   "these parameters will not receive .grad from a "
                   "loss.backward() that runs without an optimizer")
 
+
+def _parameter_map_get(self):
+    override = vars(self).get("_torch_parameter_mapping_override")
+    if override is not None:
+        return override
+    return _ORIG_MODULE_PARAMETER_MAP(self)
+
+
+def _parameter_map_set(self, value):
+    if not isinstance(value, _MutableMapping):
+        raise TypeError("Module._parameters must be assigned a mutable mapping")
+    object.__setattr__(self, "_torch_parameter_mapping_override", value)
 
 def _parameters(self, recurse=True):
     """Torch's ``parameters()``: iterable *and* indexable. See `_ParamList`."""
@@ -1022,9 +1055,12 @@ def _get_parameter(self, target):
     # `requires_grad` cannot classify it -- a buffer registered from a torch
     # factory is not stop_grad either, so asking that question returned
     # buffers from `get_parameter`, which torch answers with AttributeError.
-    # The module's own parameter listing is the authority; buffers are tracked
-    # separately, by name (see Module.register_buffer).
-    if isinstance(v, jt.Var) and target in {n for n, _ in self.named_parameters()}:
+    # The leaf module's own registry is authoritative. A global
+    # named_parameters() lookup deduplicates tied weights, so a valid alias
+    # such as lm_head.weight disappears behind embed_tokens.weight.
+    parameters = getattr(mod, "_parameters", {})
+    if (isinstance(v, jt.Var) and leaf in parameters
+            and parameters[leaf] is v):
         return v
     raise AttributeError(f"`{target}` is not a parameter")
 
@@ -1040,8 +1076,9 @@ def _get_buffer(self, target):
     if not hasattr(mod, leaf):
         raise AttributeError(f"`{target}` is not a buffer")
     v = getattr(mod, leaf)
-    names = {n for n, _ in self.named_buffers()}
-    if isinstance(v, jt.Var) and target in names:
+    buffers = getattr(mod, "_buffers", {})
+    if (isinstance(v, jt.Var) and leaf in buffers
+            and buffers[leaf] is v):
         return v
     raise AttributeError(f"`{target}` is not a buffer")
 
@@ -1098,8 +1135,8 @@ register_fidelity(
 register_fidelity(
     "torch.nn.Module.named_parameters", _named_parameters, Fidelity.APPROXIMATE,
     "Yields (name, Var) for trainable Vars reachable by attribute walk. "
-    "recurse= and prefix= honored; remove_duplicate= is accepted and always "
-    "de-duplicates. Order follows attribute definition order, which matches "
+    "recurse=, prefix= and remove_duplicate= honored. Order follows attribute "
+    "definition order, which matches "
     "torch for modules built in __init__ but is not guaranteed for modules "
     "assembled dynamically.")
 register_fidelity(
@@ -1155,6 +1192,11 @@ register_fidelity(
     "bridged optimizer's zero_grad when one is active. Returns None.")
 
 
+def _module_extra_repr(self):
+    """Return Torch Module's empty default without inspecting its initializer."""
+    return ""
+
+
 def _install_module_methods(nn, registry=None):
     """Bind the torch-compatible ``nn.Module`` methods; all are module level.
 
@@ -1174,6 +1216,7 @@ def _install_module_methods(nn, registry=None):
     _pipeline_state["mark"] = 0
 
     M.execute = _execute
+    M.extra_repr = _module_extra_repr
     if not hasattr(M, "forward"):
         M.forward = _forward_alias
     M._dispatch_call = _call
@@ -1181,6 +1224,19 @@ def _install_module_methods(nn, registry=None):
     from ...types import active_device_context as _active_device_context
     from jittor.nn.functional import matrix as _matrix
     from jittor.nn.modules.linear import Linear as _NativeLinear
+    from jittor.nn.modules.dropout import Dropout as _NativeDropout
+    from jittor.nn.modules.convolution import Conv as _NativeConv
+    from jittor.nn.modules.normalization import BatchNorm as _NativeBatchNorm
+    from jittor.nn.backends import cudnn as _cudnn_backend
+    from jittor.nn.functional import normalization as _normalization
+    from jittor.backends.cuda.kernels.cublas import lt_linear_cuda as _lt_linear
+    from jittor.backends.cuda.kernels.nn import layer_norm_cuda as _layer_norm_cuda
+    from jittor.nn.modules.normalization import LayerNorm as _NativeLayerNorm
+    from jittor.nn.modules.activation import _FunctionModule as _NativeFunctionModule
+    from jittor.nn.functional import activation as _activation
+    from jittor._core import arg_policy as _arg_policy
+    from jittor.nn.modules.normalization import GroupNorm as _NativeGroupNorm
+    from jittor.backends.cuda.kernels.nn import group_norm_cuda as _group_norm_cuda
     # What `_dispatch_module_call` consults, so the native call can run it:
     # see `module_call_bind` in src/bindings/pyjt/py_module_call.h.
     _dispatch_parts = {
@@ -1190,6 +1246,31 @@ def _install_module_methods(nn, registry=None):
         "matmul_kernel": _matrix._cublas_matmul,
         "rms_norm_inference": _rms_norm_cuda.__wrapped__,
         "rms_norm_source": _rms_norm_source,
+        "dropout_execute": _NativeDropout.execute,
+        "function_module_execute": _NativeFunctionModule.execute,
+        "nn_namespace": jt.nn,
+        "relu_function": _activation.relu,
+        "silu_function": _activation.silu,
+        "group_norm_execute": _NativeGroupNorm.execute,
+        "group_norm_function": _normalization.group_norm,
+        "group_norm_kernel": getattr(_group_norm_cuda._group_norm_cuda, "__wrapped__", None),
+        "group_norm_nhwc_source": _group_norm_cuda._group_norm_nhwc_source,
+        "group_norm_activations": _group_norm_cuda._ACTIVATIONS,
+        "group_norm_nhwc_build": jt.core._group_norm_nhwc_build,
+        "partial": _functools.partial,
+        "residual_offers": _activation._RESIDUAL_OFFERS,
+        "arg_policy_warned": _arg_policy._warned,
+        "conv_execute": _NativeConv.execute,
+        "conv_cudnn_kernel": getattr(_cudnn_backend._try_cudnn_conv2d, "__wrapped__", None),
+        "cudnn_backend": _cudnn_backend,
+        "conv_filter_key": _cudnn_backend._FILTER_OHWI,
+        "batch_norm_execute": _NativeBatchNorm.execute,
+        "bn_coefficients_key": _normalization._EVAL_COEFFICIENTS,
+        "lt_linear_header": _lt_linear._HEADER,
+        "lt_linear_source": _lt_linear._source,
+        "layer_norm_execute": _NativeLayerNorm.execute,
+        "layer_norm_inference": _layer_norm_cuda._layer_norm_no_grad_cuda.__wrapped__,
+        "layer_norm_source": _layer_norm_cuda._affine_source,
         "acl_possible": bool(getattr(jt.compiler, "has_acl", 0)),
     }
     jt.core._module_call_bind(M, _call, _dispatch_module_call, _published_ids,
@@ -1202,6 +1283,7 @@ def _install_module_methods(nn, registry=None):
     M.named_buffers = _named_buffers
     M.named_modules = _named_modules
     M.load_state_dict = _load_state_dict
+    M._parameters = property(_parameter_map_get, _parameter_map_set)
     M.parameters = _parameters
     M.train = _train
     M.eval = _eval
@@ -1237,3 +1319,5 @@ def _install_module_methods(nn, registry=None):
     register_api_bindings(M, 'torch.nn.Module',
         ('__setattr__', 'buffers', 'cpu', 'cuda', 'double', 'eval', 'execute', 'float', 'forward', 'get_buffer', 'get_execution_pipelining', 'get_parameter', 'get_submodule', 'half', 'load_state_dict', 'named_buffers', 'named_modules', 'named_parameters', 'npu', 'parameters', 'register_parameter', 'set_execution_pipelining', 'to', 'to_empty', 'train', 'type', 'zero_grad') + tuple(()),
         Fidelity.APPROXIMATE, 'Module state and parameter management over native holders; Torch lazy iterator, meta, and layout semantics are approximate')
+    register_api_bindings(M, 'torch.nn.Module', ('extra_repr',),
+        Fidelity.EXACT, 'Torch Module default extra_repr is empty; explicit subclass overrides retain normal MRO precedence')

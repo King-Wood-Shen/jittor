@@ -9,6 +9,7 @@
 #ifdef HAS_ACCELERATOR
 #include "core/event_queue.h"
 #endif
+#include "runtime/async_exec.h"
 #include "runtime/device.h"
 #include "runtime/backend_streams.h"
 #include "runtime/executor_entry.h"
@@ -60,14 +61,13 @@ static inline void check_input_is_backed(Var* v, Op* op) {
 }
 
 
-static inline void propergate_needed_flags(FusedOp& fused_op) {
-    auto& ops = fused_op.ops;
+static void propagate_needed_flags(const vector<Op*>& ops, const FusedOp& fused) {
     for (int i=ops.size()-1; i>=0; i--) {
         bool has_need = 0;
         auto op = ops[i];
         for (auto o : op->outputs())
             if (o->flag(VarFlags::_needed_by_backward) &&
-                !fused_op.var_stays_in_memory((Node*)o)) {
+                !fused.var_stays_in_memory((Node*)o)) {
                 has_need = 1;
             }
         if (has_need)
@@ -75,6 +75,10 @@ static inline void propergate_needed_flags(FusedOp& fused_op) {
                 i->set_flag(VarFlags::_needed_by_backward);
             }
     }
+}
+
+static inline void propergate_needed_flags(FusedOp& fused_op) {
+    propagate_needed_flags(fused_op.ops, fused_op);
 }
 
 
@@ -209,9 +213,9 @@ DEFINE_FLAG(int, keep_graph, 0, "Leave a batch's nodes unfinished so the same gr
 // the policy switch for re-running a repeated inference graph instead of
 // rebuilding it. It lives beside `keep_graph` because that is the mechanism it
 // drives.
-DEFINE_FLAG(int, auto_graph_replay, 1, "Re-run a repeated inference graph instead of rebuilding it every call. Applies only under no_grad, only to a call whose inputs are Vars whose total size is under `auto_graph_replay_bytes`, only after the same shapes have been seen twice in a row, and recorded as a device graph only up to `auto_graph_replay_retain_bytes`; anything else, and anything the capture cannot serve, runs normally. 0 disables it.");
+DEFINE_FLAG(int, auto_graph_replay, 1, "Re-run a repeated inference graph instead of rebuilding it every call. Applies only under no_grad, only to the outermost module call, only to a call whose Var inputs total under `auto_graph_replay_bytes`, only after the same shapes have been seen twice in a row, and recorded as a device graph only up to `auto_graph_replay_retain_bytes`. A call that also passes objects -- a KV cache -- is captured with the in-place updates it makes to them, and only while their host-side state stays the same (see graph_replay.py). Anything else, and anything the capture cannot serve, runs normally. 0 disables it.");
 DEFINE_FLAG(int64, auto_graph_replay_bytes, 4<<20, "How large the inputs of a call may be before it is left to run normally. Replay removes graph construction, which costs the same whatever the tensors weigh, and adds a copy of the inputs and outputs, which does not -- so input size is the cheap proxy for which of the two wins. Measured at 4 MB: a 2048x1024 four-layer mlp forward (8 MB of input, device-bound) replays 0.49 -> 0.52 ms and stays out; a 256x1024 one (1 MB) 0.14 -> 0.05 ms, ResNet-50 at batch 1 (0.6 MB) 5.9 -> 0.7 ms and an SD1.5 UNet denoising step (0.3 MB) 42 -> 20 ms go in. At the earlier 64 KB only the decode-sized calls did. It does not bound what a capture retains -- see `auto_graph_replay_retain_bytes`.");
-DEFINE_FLAG(int64, auto_graph_replay_retain_bytes, 256<<20, "The largest graph the automatic policy records as a device graph. A capture replays through the executor, which frees intermediates as it goes with keep_graph=2, while a recording re-issues fixed pointers and so keeps every buffer for as long as the capture lives, and the size of a call's inputs says nothing about that: an SD1.5 VAE decode takes a 32 KB latent and allocates 6.2 GB, where it peaks at 0.5 GB. Measured as everything the pools hand out during the eager call that precedes a capture -- workspaces included, since a recording bakes their addresses in too: ResNet-50 at batch 1 hands out 118 MB, most of it cuDNN workspace, and replays 2.0 -> 0.7 ms recorded. Above it the capture still replays, through the executor. 0 removes the bound. An explicit jt.graph_replay is not bounded.");
+DEFINE_FLAG(int64, auto_graph_replay_retain_bytes, 256<<20, "The largest graph the automatic policy records as a device graph. A capture replays through the executor, which frees intermediates as it goes with keep_graph=2, while a recording re-issues fixed pointers and so keeps every buffer for as long as the capture lives, and the size of a call's inputs says nothing about that: an SD1.5 VAE decode takes a 32 KB latent and allocates 6.2 GB, where it peaks at 0.5 GB. Measured as the most the eager call that precedes a capture holds at once beyond what was live before it -- workspaces included, since a recording bakes their addresses in too -- which is what a recording keeps: it hands a block the call frees to a later allocation of the same recording. Counting every byte the call was handed instead refused BERT-base inference at batch 1 (640 MiB handed out, 12 MiB kept). Above it the capture still replays, through the executor. 0 removes the bound. An explicit jt.graph_replay is not bounded.");
 
 // `keep_graph == 2`: a kept var's memory goes once the batch has made its last
 // use of it; the node stays, unfinished, and the next run of the graph
@@ -499,6 +503,14 @@ static bool has_reuse_candidate(FusedOp& fused) {
     return false;
 }
 
+static int64 largest_reuse_candidate(FusedOp& fused) {
+    int64 bytes = 0;
+    for (auto& info : fused.vars)
+        if (info.type == 2 && info.var->size >= reuse_min_bytes && !info.var->mem_ptr)
+            bytes = std::max<int64>(bytes, info.var->size);
+    return bytes;
+}
+
 // Whether `v` shares its storage with nothing but the value its tape wraps.
 // A `jt.Function`'s output is a tape: no kernel, the storage of what the
 // Function computed, which only the tape reads -- and the tape's backward does
@@ -585,6 +597,138 @@ static bool has_stream_candidate(FusedOp& fused) {
     return false;
 }
 
+// What finishing a segment does to the graph: the outputs it wrote stop
+// keeping their inputs pending. Shared by the calling thread, which does it as
+// each segment ends, and the async worker, which queues it (see below).
+static void finish_fused_outputs(const vector<Var*>& outputs) {
+    for (Var* var : outputs) {
+        if (var->flag(VarFlags::_kept)) continue;
+        var->finish_pending_liveness();
+    }
+}
+
+static void finish_unfused(Op* op, vector<Var*>& outputs_bk) {
+    for (Var* var : op->outputs())
+        if (var->flag(VarFlags::_kept)) return;
+    // release liveness when op is finished
+    // outputs may change during free, we need to backup it;
+    outputs_bk.clear();
+    for (Var* var : op->outputs()) {
+        /* only free not need_free output var.
+        For example o1, o2 = op1(i1)
+        o2 is not used, so its f:b:p liveness == 0
+        when o1 is freed, op2 will be freed, o2 will be freed too.
+        so no need to free o2 again.
+        */
+        if (!var->need_free())
+            outputs_bk.push_back(var);
+        else {
+            // TODO: will this cause bug?
+            var->flags.set(NodeFlags::_finished);
+        }
+    }
+    op->finish_pending_liveness();
+    for (Var* var : outputs_bk)
+        var->finish_pending_liveness();
+}
+
+DEFINE_FLAG(int64, async_release_lag_bytes, 16<<20, "On the async worker (see `async_execution`), how much memory the releases it has queued behind its launches may hold back before it waits for the graph lock to apply them; they are otherwise applied whenever the lock is free. An output that could take over a dying input's memory waits for the lock too when it is a quarter of this or more, rather than being allocated afresh.");
+
+namespace {
+// The async worker's graph bookkeeping, applied behind its launches.
+//
+// A batch on the worker shares the graph with the Python thread, which holds
+// the graph lock inside every binding while the batch is in flight. Taking it
+// around every operator -- to release what the previous segment used last, and
+// to finish what this one wrote -- had the worker wait out the Python thread's
+// bindings 0.9 ms of a 3.0 ms ResNet-50 inference step at batch 1, and the
+// Python thread wait on the worker in turn, until the step was no faster than
+// with no worker at all. A launch reads none of that bookkeeping (a segment is
+// loaded from the batch's own snapshot), so the worker launches without the
+// lock and queues the releases and finishes in their order. The queue is
+// applied whenever the lock happens to be free, before anything reads
+// liveness again (the dying-input reuse), once the releases it holds back
+// pass `async_release_lag_bytes`, and when the loop is over -- on an
+// exception too.
+struct DeferredGraphWork {
+    struct Item {
+        int released_segment = -1;  // the batch's hold on what this segment used last
+        Op* op = nullptr;           // an operator to finish
+        vector<Op*> fused_ops;      // or a fused segment to finish: its operators
+        vector<Var*> outputs;       // and the outputs it wrote
+    };
+    ExecPlan& plan;
+    FusedOp& fused;
+    vector<Item> items;
+    size_t front = 0;
+    int64 lag_bytes = 0;
+    vector<Var*> outputs_bk;
+
+    DeferredGraphWork(ExecPlan& plan, FusedOp& fused) : plan(plan), fused(fused) {}
+    bool empty() const { return front == items.size(); }
+
+    void release(int segment) {
+        if (plan.release_after[segment].empty()) return;
+        items.emplace_back();
+        items.back().released_segment = segment;
+        for (int index : plan.release_after[segment])
+            lag_bytes += plan.all_vars[index]->size;
+    }
+    void finish(Op* op) {
+        items.emplace_back();
+        items.back().op = op;
+    }
+    void finish(FusedOp& segment) {
+        items.emplace_back();
+        items.back().fused_ops = segment.ops;
+        for (Var* var : segment.outputs()) items.back().outputs.push_back(var);
+    }
+    // The caller holds the graph lock.
+    void apply() {
+        while (front < items.size()) {
+            Item& item = items[front++];
+            if (item.released_segment >= 0) {
+                for (int index : plan.release_after[item.released_segment])
+                    (*plan.batch_hold)[index].free_liveness();
+            } else if (item.op) {
+                finish_unfused(item.op, outputs_bk);
+            } else {
+                propagate_needed_flags(item.fused_ops, fused);
+                finish_fused_outputs(item.outputs);
+            }
+        }
+        items.clear();
+        front = 0;
+        lag_bytes = 0;
+    }
+    // Apply what is queued if the lock is free, and keep holding it then.
+    bool try_apply_and_hold() {
+        if (!graph_mutation_mutex().try_lock()) return false;
+        apply();
+        return true;
+    }
+    void apply_now() {
+        std::lock_guard<GraphMutationMutex> graph(graph_mutation_mutex());
+        apply();
+    }
+    // Between operators: when the lock is free, or when waiting for it is
+    // cheaper than the memory the queued releases keep.
+    void step() {
+        if (empty()) return;
+        if (try_apply_and_hold()) graph_mutation_mutex().unlock();
+        else if (lag_bytes > async_release_lag_bytes) apply_now();
+    }
+    ~DeferredGraphWork() {
+        if (empty()) return;
+        try {
+            apply_now();
+        } catch (const std::exception& error) {
+            LOGe << "Applying the async batch's graph bookkeeping failed:" << error.what();
+        }
+    }
+};
+} // namespace
+
 void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
                    vector<Var*>& vars, bool device_sync, int entry_device) {
     ExecutionBackendScope backend_scope(plan.backend);
@@ -641,20 +785,31 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
     // copied because running the operator may reuse the shared key buffer.
     // One buffer for the batch, so the copy is not an allocation per op.
     string prepared_jit_key;
+    const bool on_worker = on_async_worker();
+    // On the worker the loop runs without the graph lock; see
+    // DeferredGraphWork. Declared in this order so that on the way out the
+    // lock is back before the queue is applied.
+    DeferredGraphWork deferred(plan, fused_op);
+    unique_ptr<GraphLockSuspend> loop_unlocked;
+    if (on_worker) loop_unlocked.reset(new GraphLockSuspend());
     for (uint rid=0; rid<queue.size(); rid++) {
         // Segment rid-1 has run, whichever `continue` it left by: nothing later
         // in the batch uses the vars scheduled after it, so their memory goes
         // now rather than when the whole batch is done. The last segment's are
         // dropped with the hold itself.
-        if (rid && plan.batch_hold)
-            for (int index : plan.release_after[rid - 1]) {
+        if (rid && plan.batch_hold) {
+            if (on_worker) deferred.release(rid - 1);
+            else for (int index : plan.release_after[rid - 1]) {
                 if (keep_graph == 2) release_kept_storage(plan.all_vars[index], kept_released, kept_pinned, kept_waiting);
                 (*plan.batch_hold)[index].free_liveness();
             }
+        }
         // Every input a segment took over has been released by now.
-        if (PREDICT_BRANCH_NOT_TAKEN(reuse_dying_inputs == 2))
+        if (PREDICT_BRANCH_NOT_TAKEN(reuse_dying_inputs == 2)) {
+            if (on_worker && reused_inputs.size()) deferred.apply_now();
             for (Var* v : reused_inputs)
                 ASSERT(!v->mem_ptr) << "an output took over" << v << "whose memory stayed";
+        }
         reused_inputs.clear();
         // One trace record per launched operator; see step_trace.h.
         StepTraceOpScope trace_op;
@@ -734,10 +889,36 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
                 swap_epoch.mark(var);
             }
         } else {
+            // Only where a fused op is one generated kernel, each element read
+            // before it is written (`reads_before_writing`). A backend without
+            // generated device kernels (ACL) runs the group as a sequence of
+            // library calls, and a later one may still read the input the
+            // output has taken over.
             bool reuse = reuse_dying_inputs && is_fused_op && keep_graph != 1 && plan.batch_hold
-                && has_reuse_candidate(fused_op);
+                && has_reuse_candidate(fused_op)
+                && (requested_backend == BackendId::Cpu
+                    || backend_ops(requested_backend).execution.supports_generated_device_kernels);
             bool stream = stream_dying_inputs && is_fused_op && keep_graph != 1 && plan.batch_hold
                 && requested_backend == BackendId::Cuda && has_stream_candidate(fused_op);
+            // These read liveness: on the worker, only with the queue applied
+            // under the lock. When the Python thread has it, the segment goes
+            // without them rather than wait -- unless the output that would
+            // then be allocated afresh is a quarter of
+            // `async_release_lag_bytes` or more. A Qwen3-0.6B prefill
+            // otherwise peaked 24 MiB higher; waiting for every reuse instead
+            // (or a smaller lag) slowed a batch-1 ResNet-50 step 2.29 ->
+            // 2.42 ms, whose largest activation is 1.6 MB.
+            bool holding = false;
+            if (on_worker && (reuse || stream)) {
+                holding = deferred.try_apply_and_hold();
+                if (!holding && reuse
+                        && largest_reuse_candidate(fused_op) * 4 >= async_release_lag_bytes) {
+                    graph_mutation_mutex().lock();
+                    deferred.apply();
+                    holding = true;
+                }
+                if (!holding) reuse = stream = false;
+            }
             if (reuse || stream) {
                 vector<Var*> last_used;
                 for (int index : plan.release_after[rid]) last_used.push_back(plan.all_vars[index]);
@@ -747,6 +928,7 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
                 if (stream) fused_op.streamed_inputs = dying_stream_mask(fused_op, last_used, kept_pinned);
                 if (reuse) reuse_dying_inputs_of(fused_op, last_used, kept_pinned, allocator, reused_inputs);
             }
+            if (holding) graph_mutation_mutex().unlock();
             for (auto* var : op->outputs()) {
                 // the return value used to be discarded: a CPU OOM reached the
                 // generated kernel as a null pointer and crashed there
@@ -874,13 +1056,22 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
         #endif
         LOGvvv << "Finished Op(" >> op->name() << rid >> 
             "/" >> queue.size() >> ") output:" << op->outputs();
+        // A batch is never kept on the worker (`may_run_async`).
+        if (on_worker) {
+            if (is_fused_op) deferred.finish(fused_op);
+            else deferred.finish(op);
+            deferred.step();
+            continue;
+        }
         if (is_fused_op) {
             propergate_needed_flags(fused_op);
-            for (Var* var : op->outputs()) {
-                if (keep_graph) { var->set_flag(VarFlags::_kept); continue; }
-                if (var->flag(VarFlags::_kept)) continue;
-                var->finish_pending_liveness();
+            if (keep_graph) {
+                for (Var* var : op->outputs()) var->set_flag(VarFlags::_kept);
+                continue;
             }
+            vector<Var*> outputs;
+            for (Var* var : op->outputs()) outputs.push_back(var);
+            finish_fused_outputs(outputs);
             continue;
         }
         // Leave everything alive and re-runnable; see the `keep_graph` flag
@@ -891,32 +1082,7 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
                 var->set_flag(VarFlags::_kept);
             continue;
         }
-        {
-            bool kept = false;
-            for (Var* var : op->outputs())
-                if (var->flag(VarFlags::_kept)) { kept = true; break; }
-            if (kept) continue;
-        }
-        // release liveness when op is finished
-        // outputs may change during free, we need to backup it;
-        outputs_bk.clear();
-        for (Var* var : op->outputs()) {
-            /* only free not need_free output var.
-            For example o1, o2 = op1(i1)
-            o2 is not used, so its f:b:p liveness == 0
-            when o1 is freed, op2 will be freed, o2 will be freed too.
-            so no need to free o2 again.
-            */
-            if (!var->need_free())
-                outputs_bk.push_back(var);
-            else {
-                // TODO: will this cause bug?
-                var->flags.set(NodeFlags::_finished);
-            }
-        }
-        op->finish_pending_liveness();
-        for (Var* var : outputs_bk)
-            var->finish_pending_liveness();
+        finish_unfused(op, outputs_bk);
         } catch (const std::exception& e) {
             // log memory info
             display_memory_info(__FILELINE__, false, true);
@@ -935,6 +1101,10 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
             }
             check_op_async_error(op, is_fused_op, e, logf, jit_src_path);
         }
+    }
+    if (on_worker) {
+        loop_unlocked.reset();
+        deferred.apply();
     }
     // The last segment's vars are otherwise released with the hold, which
     // frees nothing for a kept var: its node is still alive.
