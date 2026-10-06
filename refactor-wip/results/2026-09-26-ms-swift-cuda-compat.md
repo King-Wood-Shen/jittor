@@ -2427,3 +2427,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 LoHa adapter 公开 infer CLI
 
 - 10836原生/候选同一RTX4090 worker顺序完成，两条8-token公开非流式greedy JSONL逐字段相等；10837独立审计两进程strict CUDA、shim标记真、fallback0，限定LoHa adapter加载的公开infer CLI L4入口合同PASS。训练/完整恢复不由该推理入口升级，L5、stream、长上下文not-run。详见`refactor-wip/results/2026-10-07-qwen2-loha-public-infer-cli.md`及`_state/ms-swift-cuda/20261007-qwen2-loha-public-infer-cli`；完整矩阵未完成。
+
+### 2026-10-07 Qwen2 LoKr adapter 公开 infer CLI
+
+- 10851原生/候选同一RTX4090 worker顺序完成，两条8-token公开非流式greedy JSONL逐字段相等；10855独立审计两进程strict CUDA、shim标记真、fallback0，限定LoKr adapter加载的公开infer CLI L4入口合同PASS。历史LoKr新进程恢复logits非逐值精确限制不变；训练/完整恢复、L5、stream、长上下文不升级或not-run。详见`refactor-wip/results/2026-10-07-qwen2-lokr-public-infer-cli.md`及`_state/ms-swift-cuda/20261007-qwen2-lokr-public-infer-cli`；完整矩阵未完成。
