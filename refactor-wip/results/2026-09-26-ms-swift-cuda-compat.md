@@ -2361,3 +2361,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 公开 seq_cls CLI 双卡全参数纯 FP32
 - 原生10654、严格CUDA候选10655均经真实Qwen2固定零分类头公开CLI、双RTX4090/NCCL、每卡batch2、494.0355M全参数SGD1e-5完成三步及checkpoint-3；独立worker10656比较三步loss相同、grad norm最大相对差2.326e-7、acc相同，291最终权重最大差9.095e-12、整体L2差3.298e-11，双方各174张量FP32可见更新，候选main和两个rank全程fallback0。
 - 候选用原生torchrun控制平面启动Jittor rank，仅计此固定双卡公共CLI限定L4数值路径；纯Jittor launcher、双卡恢复、随机头、AdamW/LoRA/BF16、L5 not-run。详情见`refactor-wip/results/2026-10-07-qwen2-public-seqcls-fullparam-ddp-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-seqcls-fullparam-ddp-fp32；完整矩阵未完成。
+
+### 2026-10-07 Qwen2 公开 seq_cls 双卡全参数纯 FP32 新进程恢复
+- 原生10659、严格CUDA候选10660各完成固定零头真实Qwen2公开CLI双卡全参数SGD连续三步及从checkpoint-2新进程恢复第三步；独立worker10661比较。原生恢复291权重精确相同，候选恢复最大差3.469e-18、整体L2差8.888e-18；两侧各自第3步loss/grad norm/acc与optimizer/scheduler字典一致，跨后端权重最大差9.095e-12，候选两阶段main和两rank共12条标记全部fallback0。
+- 限定原生torchrun控制面、固定数据、纯FP32无动量SGD双卡分类有效轨迹恢复；optimizer state为空，RNG内容/通用数据游标未证明，不宣称完整通用L3。纯Jittor launcher、AdamW/BF16/LoRA、随机头、L5 not-run。详情见`refactor-wip/results/2026-10-07-qwen2-public-seqcls-fullparam-ddp-resume-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-seqcls-fullparam-ddp-resume-fp32；完整矩阵未完成。
