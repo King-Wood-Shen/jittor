@@ -98,7 +98,7 @@ struct AdamwLaunch {
 };
 
 struct AdamwStep {
-    float step_size, correction, decay, beta1, beta2, eps;
+    float step_size, correction, decay, beta1, beta2, one_minus_beta1, one_minus_beta2, eps;
 };
 
 // One element. The casts round through the parameter's type exactly where the
@@ -106,21 +106,22 @@ struct AdamwStep {
 __device__ __forceinline__ void adamw_element(const AdamwStep& s, float grad, float& p,
                                               float& m, float& v) {
     const float param = float(T(p * s.decay));
-    const float moment = s.beta1 * m + (1.f - s.beta1) * grad;
-    const float variance = s.beta2 * v + (1.f - s.beta2) * grad * grad;
+    const float moment = s.beta1 * m + s.one_minus_beta1 * grad;
+    const float variance = s.beta2 * v + s.one_minus_beta2 * grad * grad;
     m = float(T(moment));
     v = float(T(variance));
     p = param - m * s.step_size / (sqrtf(v) / s.correction + s.eps);
 }
 
 __global__ void fused_adamw_kernel(AdamwLaunch launch, const float* step, float lr,
-                                   bool lr_in_step, bool skip_in_step, float beta1,
-                                   float beta2, float weight_decay, float eps) {
+                                   bool lr_in_step, bool skip_in_step, double beta1,
+                                   double beta2, float weight_decay, float eps) {
     // The step's scalars, once per block. Every thread used to compute them,
     // and in double: two `pow`s per thread, 1.5e8 of them for a 0.6B-parameter
     // model, on parts where double runs at 1/64 the float rate -- the update
     // took 46 ms where its memory traffic needs 18.
     __shared__ float shared_step_size, shared_correction, shared_decay;
+    __shared__ float shared_one_minus_beta1, shared_one_minus_beta2;
     __shared__ bool shared_skip;
     if (threadIdx.x == 0) {
         // A two-element step carries the learning rate as well: a captured
@@ -135,14 +136,17 @@ __global__ void fused_adamw_kernel(AdamwLaunch launch, const float* step, float 
         // In double, as the per-parameter path computes them on the host:
         // 1 - 0.999^t in float keeps about three digits for small t.
         const double n = *step;
-        shared_step_size = (float)(rate / (1.0 - pow((double)beta1, n)));
-        shared_correction = (float)sqrt(1.0 - pow((double)beta2, n));
+        shared_step_size = (float)(rate / (1.0 - pow(beta1, n)));
+        shared_correction = (float)sqrt(1.0 - pow(beta2, n));
+        shared_one_minus_beta1 = (float)(1.0 - beta1);
+        shared_one_minus_beta2 = (float)(1.0 - beta2);
         shared_decay = 1.f - rate * weight_decay;
     }
     __syncthreads();
     if (shared_skip) return;
     const AdamwStep scalars{shared_step_size, shared_correction, shared_decay,
-                            beta1, beta2, eps};
+                            (float)beta1, (float)beta2, shared_one_minus_beta1,
+                            shared_one_minus_beta2, eps};
     // A block per kPerBlock consecutive elements of one tensor, the whole
     // launch's worth of them at once. A grid of eight blocks per SM walking
     // them moved 771 GB/s of the update's traffic on a 4090, this 805 -- what
@@ -203,7 +207,7 @@ void FusedAdamwOp::jit_run() {
         if (!launch.count) return;
         launch.first_block[launch.count] = blocks;
         fused_adamw_kernel<<<blocks, kThreads>>>(launch, step_ptr, (float)lr, lr_in_step,
-                                                 skip_in_step, (float)beta1, (float)beta2,
+                                                 skip_in_step, beta1, beta2,
                                                  (float)weight_decay, (float)eps);
         launch.count = 0;
         blocks = 0;

@@ -55,5 +55,34 @@ class TestFusedAdamwCuda(unittest.TestCase):
                                            err_msg="%s[%d]" % (name, i))
 
 
+    def test_large_gradient_three_step_state_uses_original_betas(self):
+        """A float32-rounded 0.999 changes the second moment measurably."""
+        gradients = np.array([4096.0, -2048.0, 256.0, -64.0], dtype=np.float32)
+        initial = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+        hyper = dict(lr=1e-3, b1=0.9, b2=0.999, wd=0.01, eps=1e-8)
+        reference_p = initial.astype(np.float64)
+        reference_m = np.zeros(4, dtype=np.float64)
+        reference_v = np.zeros(4, dtype=np.float64)
+        with jt.flag_scope(use_cuda=1):
+            p = jt.array(initial)
+            m = jt.zeros(4, dtype="float32")
+            v = jt.zeros(4, dtype="float32")
+            g = jt.array(gradients)
+            for step_number in range(1, 4):
+                step = jt.array(float(step_number)).stop_grad()
+                p, m, v = jt.fused_adamw([p], [m], [v], [g], step,
+                                         hyper["lr"], hyper["b1"], hyper["b2"],
+                                         hyper["wd"], hyper["eps"])
+                reference_p, reference_m, reference_v = _adamw(
+                    reference_p, reference_m, reference_v,
+                    gradients.astype(np.float64), float(step_number), **hyper)
+                reference_p = reference_p.astype(np.float32).astype(np.float64)
+                reference_m = reference_m.astype(np.float32).astype(np.float64)
+                reference_v = reference_v.astype(np.float32).astype(np.float64)
+                np.testing.assert_allclose(m.numpy(), reference_m, rtol=1e-7, atol=2e-5)
+                np.testing.assert_allclose(v.numpy(), reference_v, rtol=4e-7, atol=2e-3)
+                np.testing.assert_allclose(p.numpy(), reference_p, rtol=1e-5, atol=1e-5)
+
+
 if __name__ == "__main__":
     unittest.main()
