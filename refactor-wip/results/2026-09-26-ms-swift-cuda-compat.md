@@ -2403,3 +2403,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 训练后全参数 checkpoint 公开 deploy 双客户端限定 L5
 - 原生10769、严格CUDA候选10770在同一cscg-qh09 RTX4090顺序运行真实swift.cli.main deploy，双客户端短文本请求各预热2轮、稳态10轮；独立worker10771复核20条稳态回复、请求区间交叠、同GPU、候选分发器及服务进程共4条fallback0标记。原生/候选双请求区间中位0.174866/0.172835秒，比0.988381；completion token吞吐91.5359/92.3955 token/s，比1.009390；整卡显存2382/4817 MiB。
 - 仅计该训练后checkpoint、固定双客户端greedy 8-token非流式本机HTTP限定L5；微小时间差不作普遍速度优势，客户端并发不证明内部合批。更高并发、过载/取消/超时、并发流式、长上下文、峰值显存not-run。详见refactor-wip/results/2026-10-07-qwen2-public-trained-deploy-concurrent-l5.md及_state/ms-swift-cuda/20261007-qwen2-public-trained-deploy-concurrent-l5；完整矩阵未完成。
+
+### 2026-10-07 Qwen2 训练后全参数 checkpoint 公开 Python 推理 API
+- 原生10777、严格CUDA候选10781通过真实ms-swift TransformersEngine/InferRequest/RequestConfig Python API加载各自Qwen2全参数三步checkpoint-3，并生成两条greedy短文本回复；独立worker10783复核文本、结束原因、token用量与彼此及此前原生HTTP服务逐字段一致，模型参数均在cuda:0。候选进程导入前严格scope和forbid_backend_fallbacks生效，start/end两条标记均fallback0。
+- 仅计该训练后checkpoint、纯FP32、短文本非流式greedy Python入口限定L4；stream、logprobs、长上下文、adapter、L5性能not-run。详见refactor-wip/results/2026-10-07-qwen2-public-trained-checkpoint-python-api.md及_state/ms-swift-cuda/20261007-qwen2-public-trained-checkpoint-python-api；完整矩阵未完成。
