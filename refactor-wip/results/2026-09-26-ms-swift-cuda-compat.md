@@ -2372,3 +2372,6 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 
 ### 2026-10-07 Qwen2 公开 seq_cls 双卡恢复 RNG 内容审计
 - 独立Slurm worker10676完成已有10659/10660实验的checkpoint-3 RNG内容逐项比较：原生与候选各自连续/新进程恢复的rank0和rank1，python、numpy、cpu、cuda四键均值相同，overall_same=true。10674原生torch.load不能读取候选纯pickle格式，修正读取协议后通过。该结果补强固定数据、无动量SGD双卡分类限定L3；跨后端RNG算法及通用DataLoader游标仍未验证。详情补入`refactor-wip/results/2026-10-07-qwen2-public-seqcls-fullparam-ddp-resume-fp32.md`，原始日志在同名_state目录。
+
+### 2026-10-07 Qwen2 公开因果 SFT 双卡全参数恢复 RNG 内容审计
+- 独立Slurm worker10682审计已有10550–10553连续/新进程恢复checkpoint-3：原生和严格CUDA候选各自rank0/rank1的python、numpy、cpu、cuda四类RNG保存状态逐值相同，四组overall_same=true。该结果补强固定数据无动量SGD双卡因果SFT限定恢复状态，不证明跨后端RNG算法或通用数据游标。详情补入`refactor-wip/results/2026-10-07-qwen2-public-causal-fullparam-ddp-resume-fp32.md`及同名_state目录；完整矩阵仍未完成。
