@@ -2278,3 +2278,8 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-06 真实 Qwen2 双卡 EmbeddingTrainer InfoNCE
 - 原生 10101 与严格 CUDA 候选 10118 均完成单机双 RTX 4090、NCCL/DDP、真实 Qwen2-0.5B FP32/eager 私有 EmbeddingTrainer InfoNCE、仅 model.norm.weight 的三步 SGD；10118 初次验收脚本因动态尾批误判失败，10126 独立 FP64 公式按实际全局组数 4/2/4 复核通过。两 rank 共 36 字段原生对齐、12 项公式通过、参数更新跨 rank 一致、candidate fallback0。
 - 首轮候选 10105 在 Accelerate 默认无 hook 路径无条件导入 ddp_comm_hooks 时失败，现由 Torch 兼容层提供导入图，非默认压缩与 PowerSGD 显式拒绝。Worker 回归 10128：38 passed、40 subtests passed；导入/fail-fast 通过。详细根因、job、设备、产物与 L0-L5 边界见 refactor-wip/results/2026-10-06-qwen2-embedding-infonce-ddp.md。L3/L4/L5、全参数/LoRA、BF16、非均匀负例等仍未覆盖，不将旧 5852 短用例外推为真实模型双卡通过。
+
+### 2026-10-06 真实 Qwen2 双卡 EmbeddingTrainer 有状态 checkpoint L3
+- 无动量基线：原生 10135、严格 CUDA 候选 10137 均 COMPLETED0；10168 独立校验两 rank 跨后端72字段、恢复轨迹72字段、24项 FP64 InfoNCE、参数同步与六阶段 fallback0 通过。首版原生10133仅因测试保留策略删除checkpoint-2导致最终文件检查失败，已在独立v2实验修正。
+- 有状态 SGD momentum=0.9：原生10172、候选10174均 COMPLETED0；10176独立复核相同72+72字段和24项公式，严格CUDA、六阶段 fallback0，checkpoint-2两侧290个模型张量及scheduler、双rank RNG、optimizer状态均存在，新进程第3步轨迹与连续训练一致。10187读出两侧非零896维动量缓冲，最大绝对差8.94e-8。候选10173因仅分配默认8GiB主机内存而OOM，重提时按既有成功作业分配64GiB后通过，失败日志保留。
+- 限定真实双卡FP32/eager、均匀负例、仅model.norm.weight与SGD动量路径 L3 PASS；公开训练CLI/launcher L4和预热稳态性能L5仍not-run，全参数/LoRA、BF16、其他优化器或模型不外推。完整证据见 `refactor-wip/results/2026-10-06-qwen2-embedding-ddp-checkpoint-l3.md`，原始产物在 `_state/ms-swift-cuda/20261006-qwen2-embedding-ddp-resume-v2` 与 `...-momentum-resume`。原30修改加2未跟踪补丁保持原样。
