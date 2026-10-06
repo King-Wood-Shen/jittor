@@ -2379,3 +2379,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 训练后全参数 checkpoint 的公开 infer
 - 复用已通过的纯FP32全参数SGD/梯度累积2三步SFT checkpoint；原生10686和严格CUDA候选10690从各自checkpoint-3经`swift.cli.main infer`、Transformers engine在同一RTX4090运行，独立10703逐字段比较两条提示的保存结果均完全相同，共16个生成token。候选主/子进程四条start/end标记均use_cuda1、shim marker真、fallback0；日志确认各自checkpoint路径及cuda:0设备映射。10689仅首次JIT重建退出，重启后通过。
 - 只计真实模型训练后全参数checkpoint公开非流式greedy加载/生成的限定L4；中间logits、其他checkpoint/模型/tuner、stream和服务未核验，L5十次稳态not-run。详情见`refactor-wip/results/2026-10-07-qwen2-public-fullparam-checkpoint-infer.md`及_state/ms-swift-cuda/20261007-qwen2-public-fullparam-checkpoint-infer；完整矩阵未完成。
+
+### 2026-10-07 Qwen2 训练后全参数 checkpoint 公开 deploy 服务
+- 原生10707与严格CUDA候选10711复用各自真实Qwen2纯FP32全参数三步checkpoint，经`swift.cli.main deploy`本机127.0.0.1启动Transformers服务；同一worker上的health、models和两条chat/completions请求完成。10712独立比较文本、结束原因和token用量逐值一致，两条各生成8 token；同一cscg-qh09 RTX4090。候选分发器与实际Uvicorn服务进程均在启动和请求后记录shim marker真、use_cuda1、fallback0。
+- 首版10708虽响应一致，测试bootstrap只覆盖分发器，不能算严格服务；10710补采协议失败，10711修正测试bootstrap覆盖服务进程后通过。仅计该训练后checkpoint、短文本非流式greedy本机HTTP服务限定L4；stream、并发、认证、长上下文、L5十次稳态not-run。详情见`refactor-wip/results/2026-10-07-qwen2-public-trained-checkpoint-deploy.md`及_state/ms-swift-cuda/20261007-qwen2-public-trained-checkpoint-deploy，完整矩阵未完成。
