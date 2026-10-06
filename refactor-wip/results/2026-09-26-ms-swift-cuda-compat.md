@@ -2317,3 +2317,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 - 原生10471/候选10472公共入口均完成，但原始因果checkpoint缺少新分类头，随机初值不同，首步loss6.5576/2.2469；10485比较失败。ms-swift的init_strategy=zero只处理非有限/极端参数，不能固定正常随机头。
 - worker构造真实缓存290键基座软链加显式零初始化3×896分类头的分片checkpoint，未修改原权重。测试索引与safetensors元数据两次阻断后，原生10493、严格CUDA候选10498及独立比较10499通过：三步loss最大差1.192e-7、grad norm最大相对差4.510e-7、最终score权重最大差1.118e-8且非零，acc相同、291模型键、完整checkpoint文件、父子进程fallback0。
 - 只计固定头真实Qwen单卡seq_cls公开CLI纯FP32限定L4；随机头默认初始化、全参数/LoRA、恢复、双卡、L5仍not-run或未通过。详见`refactor-wip/results/2026-10-07-qwen2-public-seqcls-cli-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-seqcls-cli-fp32；完整矩阵未完成。
+
+### 2026-10-07 Qwen2 公开因果 SFT CLI 双卡显式 FP32
+- 原生10506、严格CUDA候选10507经公开`python -m swift.cli.main sft`与NPROC_PER_NODE=2，真实Qwen2、四条固定对话、每卡batch2、仅norm可训练SGD三步完成；10510独立比较loss最大差2.620e-6、grad norm最大相对差4.373e-6、最终权重最大差4.768e-7且双方非零更新，290模型键/global_step3/双rank RNG文件，候选主进程及两rank fallback0。
+- 候选用原生torchrun控制平面启动Jittor rank进程，只计该固定双卡公共CLI限定L4数值路径；纯Jittor启动器、双卡CLI恢复、全参数/LoRA、BF16、L5 not-run。详情见`refactor-wip/results/2026-10-07-qwen2-public-causal-ddp-cli-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-causal-ddp-cli-fp32；历史公开Embedding双卡失败不变，全矩阵未完成。
