@@ -14,3 +14,9 @@
 10055 的 338 秒生成时间包含首次 JIT 和缓存构建，不能作为 L5 稳态性能。已安装的 `swift` console script 在本隔离 venv 中不存在，故该二进制包装入口维持 not-run；stream、server/client、其他模型、BF16 和训练入口同样不由此结果覆盖。
 
 原始数据、`prompts.jsonl`、worker、bootstrap、审计脚本、Slurm 日志和父子进程 fallback 记录均在 `/home/xinshen/projects/ms-swift-cuda/jittor-lab/_state/ms-swift-cuda/20261006-qwen2-public-infer-cli`。原工作树 30 个脏补丁及 2 个未跟踪路径未触碰。
+
+## 流式文本分支（独立配置）
+
+10086 原生和 10087 候选在 cscg-qh13 RTX 4090 GPU-3b3bba8a-5ea1-f84a-beb4-a9443a4f5e13（driver 580.178.04）顺序运行同一公开分发器，只把 `--stream` 改为 `true`。两侧均 COMPLETED0，各保存两条官方 JSONL，总共 16 个新 token。10092 在 Slurm worker 独立审计两份 JSONL 全字段一致、候选父/子进程各自起止 `use_cuda=1`、shim 标记真、fallback0，输出 `QWEN2_PUBLIC_CLI_STREAM_PASS 2 2 fallback=0`。流式响应文本与上方非流式固定提示相同，但本分支的独立结论来自流式原生/候选直接对照。
+
+此处仅覆盖流式文本，不请求 logprobs，不触及已跳过的 TinyLlama streaming logprob。候选 140 秒窗口包含此前未编译的流式 CUDA kernel，不能列为 L5。原始证据在同一未版本化运行目录的 `*-stream*` 文件中；其他模型、并发、server/client 和 token ID 仍未验证。

@@ -2270,3 +2270,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 - 10047 原生与 10055 严格 CUDA 候选分别经 `python -m swift.cli.main infer` 官方分发器和子进程加载真实缓存 Qwen2-0.5B；两条固定离线 JSONL 提示的输出逐字段一致，均生成 16 token。10074 独立 worker 审计通过；候选父/子进程 CUDA 与 shim 标记真、fallback0。
 - 首轮 10049 因测试用 sitecustomize 递归进入 `jittor_utils.query_cuda_cc` 取消，第二轮限定 bootstrap 作用进程后通过。完整证据和 L4 边界见 `refactor-wip/results/2026-10-06-qwen2-public-infer-cli.md`，原始文件在 `_state/ms-swift-cuda/20261006-qwen2-public-infer-cli`。
 - 仅官方分发器模块入口及非流式两提示文本对齐通过；安装的 `swift` 可执行文件、token ID、stream、服务及 CLI 稳态性能未验证，不把含首次 JIT 的 338 秒作为 L5。
+
+### 2026-10-06 真实 Qwen2 公开 infer 分发器流式文本
+- 10086 原生与 10087 严格 CUDA 候选经同一 `swift.cli.main infer` 分发器、相同真实 Qwen2-0.5B 缓存和两条固定 JSONL 提示，只将 stream 改为 true；两侧均 COMPLETED0，保存的响应逐字段一致、16 个新 token。10092 独立审计父子进程 CUDA/shim 标记及 fallback0 通过。
+- 流式文本限定 L4 PASS；未请求 logprobs，已跳过的 TinyLlama streaming logprob 不重启。首次流式 kernel JIT 时长不记为 L5，完整索引见 `refactor-wip/results/2026-10-06-qwen2-public-infer-cli.md`。
