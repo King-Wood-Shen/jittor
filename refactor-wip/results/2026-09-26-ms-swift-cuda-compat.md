@@ -2345,3 +2345,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 公开因果 SFT CLI 全参数纯 FP32 梯度累积 2
 - 原生10618与严格CUDA候选10619均经真实Qwen2公共CLI、494.0328M全参数、单卡微批2、累积2、SGD1e-5完成三个optimizer step及checkpoint-3；10623独立worker比较。三步loss最大差9.537e-7、grad norm最大相对差2.123e-6、token_acc相同；290最终权重最大差7.451e-9、全体L2差5.433e-8，双方更新L2约0.001200762，246张量出现FP32可见变化。候选主/子进程严格CUDA、fallback0。
 - 仅计该固定单卡纯FP32全参数SGD梯度累积公共入口限定L4；L3新进程累积恢复和L5性能not-run，AdamW/BF16/LoRA/双卡累积亦not-run。详情见`refactor-wip/results/2026-10-07-qwen2-public-causal-fullparam-gradaccum-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-causal-fullparam-gradaccum-fp32；完整矩阵未完成。
+
+### 2026-10-07 Qwen2 公开因果 SFT 全参数纯 FP32 梯度累积 2 新进程恢复
+- 原生10629、严格CUDA候选10630各完成真实Qwen2公开CLI全参数、单卡微批2累积2、SGD连续三步及从checkpoint-2新进程恢复第三步；独立worker10631比较。原生恢复290权重精确一致；候选恢复最大差3.725e-9、整体L2差7.187e-9、loss差2.384e-7、grad norm相同；两侧各自optimizer/scheduler字典相等，跨后端最终权重最大差7.451e-9，候选两阶段父子进程全程fallback0。
+- 限定固定数据纯FP32无动量SGD的有效训练轨迹恢复；optimizer state为空，RNG内容/通用数据游标未证明，不宣称通用L3。AdamW、BF16、LoRA、双卡累积恢复、L5 not-run。详情见`refactor-wip/results/2026-10-07-qwen2-public-causal-fullparam-gradaccum-resume-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-causal-fullparam-gradaccum-resume-fp32；完整矩阵未完成。
