@@ -1,8 +1,8 @@
 # ms-swift CUDA 兼容阶段记录
 
-- Status: 部分适配完成，完整矩阵未完成。真实Qwen2-0.5B FP32公开加载/前向/缓存解码、多个私有Trainer三步数值分支，以及固定公开Engine场景的十次稳态性能已有原生/严格CUDA证据；默认fused AdamW、InfoNCE QQ、Reward BF16、完整恢复、全参数训练及缺权重模型仍未通过或未执行。
-- Date: 2026-10-05
-- Current validation baseline: 6f0615a4f926a824b177440f32174a669bdb0d4c；原有30个已修改文件补丁保留；skill与spawn测试仍为2个未跟踪路径，本报告已单独提交。
+- Status: 部分适配完成，完整矩阵未完成。真实 Qwen2-0.5B FP32 公开加载、前向、缓存解码、多个私有 Trainer 三步数值分支及固定公开 Engine 的稳态性能已有原生与严格 CUDA 证据；默认 fused AdamW 已修复并在限定奖励路径通过，单评分头 RewardTrainer 同进程/新进程恢复达到限定 L3。InfoNCE QQ、Reward BF16、LoRA/全参数及分布式恢复、全参数训练和缺权重模型仍未通过或未执行。
+- Date: 2026-10-06
+- Current validation baseline: 700070d58；原有 30 个已修改文件补丁与 2 个未跟踪路径保留；本报告的历史结果按各段记录的 SHA 独立归属。
 - Owner: Jittor compatibility maintenance
 - Review when: CUDA BF16 attention fused 后端、shim bootstrap/import order、依赖版本或 Slurm job 变化
 
@@ -2260,3 +2260,8 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 - 双方scores、BF16 margin、delta及logsigmoid输入x逐值一致；native的F.logsigmoid输出dtype为BF16，值[-1.0703125,-1.671875]，候选输出dtype为FP32，值[-1.0690290928,-1.6695915461]。native逐阶段重放的loss=1.375，与8036保存的native首批loss一致；候选逐阶段重放loss=1.3693103790，与8036训练时保存的候选loss=1.3828125并不相同，故单独的重放不能解释Trainer上下文里的全部误差。
 - 首个可确认的独立算子断点是BF16输入经compat/torch/installers/nn/functional.py::_api_F_logsigmoid后被提升为FP32，违反该路径原生输出BF16的dtype契约。表达式里的标量字面量/算子提升是静态可见的候选机制，但具体提升阶段及Trainer上下文另一差异尚未验证，不能宣称已修复或数值通过。
 - 8030、8031、8035、8036与8122已构成此BF16问题五轮尝试；按上限暂停，不继续重提。原始逐阶段脚本、native/shim JSON及日志、slurm-8122.log位于_state/ms-swift-cuda/20261005-qwen2-reward-bf16-loss-stage；连同先前autocast前向偏差及训练上下文loss不一致均列为未覆盖。后续若获准修复，应先保持F.logsigmoid的BF16输出及原生舍入，再独立核验Trainer上下文；本项仍为失败/跳过，完整适配矩阵未完成。
+
+### 2026-10-06 真实 Qwen2 RewardTrainer FP32 checkpoint L3 限定路径
+- 集成基线 `700070d58` 上，真实缓存 Qwen2-0.5B 公共 seq_cls 加载和私有 RewardTrainer，仅训练 score.weight；连续三步对比两步保存后同进程/新进程恢复第三步。原生先跑、候选严格 CUDA 后跑；候选 fallback0。
+- 原生 9988/9991、新进程候选 9990/10010、同进程原生 10013、候选 10015/10016 均完成；既定前向/反向门槛、独立 FP64 AdamW 复核、scheduler/RNG/数据游标及 291 个模型状态张量审计通过（10020）。10007 探索性逐位近似比较因保存前独立运行已有 CUDA 梯度微小差异而失败，诊断见 10008；不宣称 bitwise 一致。
+- 限定路径 L3 PASS；LoRA/全参数/BF16/其他模型与分布式恢复仍未验证。完整证据与限制见 `refactor-wip/results/2026-10-06-qwen2-reward-checkpoint-l3.md`；原始文件在 `_state/ms-swift-cuda/20261006-qwen2-reward-checkpoint-l3`。原工作树脏补丁未触碰，未将排队或跳过项目记为通过。
