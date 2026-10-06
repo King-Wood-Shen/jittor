@@ -15,6 +15,7 @@ import numpy as np
 import jittor as jt
 
 from ..context import registry_for
+from ..ddp_comm_hooks import install_ddp_comm_hooks
 from ..fidelity import Fidelity, register_api_bindings
 from ...diagnostics import EXPECTED, swallowed
 from ...transaction import set_env, set_flag
@@ -1046,6 +1047,7 @@ def _install_distributed(g, registry=None):
         setattr(dist, sub, mod)
 
     dist.algorithms.__path__ = getattr(dist.algorithms, "__path__", [])
+    install_ddp_comm_hooks(_modules, dist.algorithms)
     const_mod = _modules.get("torch.distributed.constants")
     if const_mod is None:
         const_mod = _types.ModuleType("torch.distributed.constants")

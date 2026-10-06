@@ -2274,3 +2274,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-06 真实 Qwen2 公开 infer 分发器流式文本
 - 10086 原生与 10087 严格 CUDA 候选经同一 `swift.cli.main infer` 分发器、相同真实 Qwen2-0.5B 缓存和两条固定 JSONL 提示，只将 stream 改为 true；两侧均 COMPLETED0，保存的响应逐字段一致、16 个新 token。10092 独立审计父子进程 CUDA/shim 标记及 fallback0 通过。
 - 流式文本限定 L4 PASS；未请求 logprobs，已跳过的 TinyLlama streaming logprob 不重启。首次流式 kernel JIT 时长不记为 L5，完整索引见 `refactor-wip/results/2026-10-06-qwen2-public-infer-cli.md`。
+
+### 2026-10-06 真实 Qwen2 双卡 EmbeddingTrainer InfoNCE
+- 原生 10101 与严格 CUDA 候选 10118 均完成单机双 RTX 4090、NCCL/DDP、真实 Qwen2-0.5B FP32/eager 私有 EmbeddingTrainer InfoNCE、仅 model.norm.weight 的三步 SGD；10118 初次验收脚本因动态尾批误判失败，10126 独立 FP64 公式按实际全局组数 4/2/4 复核通过。两 rank 共 36 字段原生对齐、12 项公式通过、参数更新跨 rank 一致、candidate fallback0。
+- 首轮候选 10105 在 Accelerate 默认无 hook 路径无条件导入 ddp_comm_hooks 时失败，现由 Torch 兼容层提供导入图，非默认压缩与 PowerSGD 显式拒绝。Worker 回归 10128：38 passed、40 subtests passed；导入/fail-fast 通过。详细根因、job、设备、产物与 L0-L5 边界见 refactor-wip/results/2026-10-06-qwen2-embedding-infonce-ddp.md。L3/L4/L5、全参数/LoRA、BF16、非均匀负例等仍未覆盖，不将旧 5852 短用例外推为真实模型双卡通过。
