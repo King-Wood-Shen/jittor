@@ -2383,3 +2383,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 训练后全参数 checkpoint 公开 deploy 服务
 - 原生10707与严格CUDA候选10711复用各自真实Qwen2纯FP32全参数三步checkpoint，经`swift.cli.main deploy`本机127.0.0.1启动Transformers服务；同一worker上的health、models和两条chat/completions请求完成。10712独立比较文本、结束原因和token用量逐值一致，两条各生成8 token；同一cscg-qh09 RTX4090。候选分发器与实际Uvicorn服务进程均在启动和请求后记录shim marker真、use_cuda1、fallback0。
 - 首版10708虽响应一致，测试bootstrap只覆盖分发器，不能算严格服务；10710补采协议失败，10711修正测试bootstrap覆盖服务进程后通过。仅计该训练后checkpoint、短文本非流式greedy本机HTTP服务限定L4；stream、并发、认证、长上下文、L5十次稳态not-run。详情见`refactor-wip/results/2026-10-07-qwen2-public-trained-checkpoint-deploy.md`及_state/ms-swift-cuda/20261007-qwen2-public-trained-checkpoint-deploy，完整矩阵未完成。
+
+### 2026-10-07 Qwen2 训练后全参数 checkpoint 公开 deploy 限定 L5
+- 原生10716、严格CUDA候选10717在同一cscg-qh09 RTX4090顺序运行真实swift.cli.main deploy；各预热2次、固定8-token HTTP请求稳态10次，独立worker10719逐响应复核内容及用量一致，候选CLI/服务两进程启动和请求后共4条严格CUDA标记均fallback0。原生/候选中位响应延迟0.176526/0.166794秒，比0.944871；串行completion token吞吐45.3154/47.9532 token/s，比1.058210；整卡显存2382/4817 MiB，候选多一个占408 MiB的CUDA分发器进程。
+- 仅计该训练后checkpoint、单提示、非流式greedy、8-token串行本机HTTP合同限定L5；并发、stream、长上下文、其他模型/配置、峰值显存not-run，观察到的速度比不外推。详见refactor-wip/results/2026-10-07-qwen2-public-trained-deploy-l5.md及_state/ms-swift-cuda/20261007-qwen2-public-trained-deploy-l5；完整矩阵未完成。
