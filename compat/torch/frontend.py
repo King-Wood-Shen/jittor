@@ -110,6 +110,9 @@ def _placement_request(backend, device, like=None, default_placement=True):
     name = "cuda" if numeric_index else (getattr(device, "type", None) or str(device).split(":", 1)[0])
     if name == "cpu":
         return 0, 0
+    if name == "meta":
+        # Metadata-only checkpoint inspection does not need device storage.
+        return None
     if name not in ("cuda", "npu"):
         raise NotImplementedError("native Tensor placement does not support device %r" % str(device))
     registered = set(backend.core.registered_backends()) - {"cpu"}

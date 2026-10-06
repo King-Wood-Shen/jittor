@@ -465,6 +465,8 @@ def _invert(self):
 
 
 def _device(self):
+    if getattr(self, "_torch_force_meta", False):
+        return _owner.device("meta")
     if self.placement_backend >= 0:
         if self.placement_backend == 0:
             return _owner.device("cpu")
@@ -1528,6 +1530,29 @@ def _api_fill(self, val):
     if _fill_captured_state(self, val):
         return self
     return _ip(self, _owner.jt.ones(self.shape, self.dtype) * val)
+
+
+def _api_fill_diagonal(self, fill_value, wrap=False):
+    """Fill the shared diagonal with a scalar, retaining the Tensor object."""
+    shape = tuple(self.shape)
+    if len(shape) < 2:
+        raise RuntimeError("dimensions must larger than 1")
+    if len(shape) > 2 and len(set(shape)) != 1:
+        raise RuntimeError("all dimensions of input must be of equal length")
+
+    if len(shape) == 2 and wrap and shape[0] > shape[1] and shape[1]:
+        columns = shape[1]
+        step = columns + 1
+        length = (shape[0] * columns + step - 1) // step
+        linear = _owner.jt.arange(length, dtype="int64") * step
+        indices = (linear // columns, linear % columns)
+    else:
+        length = min(shape)
+        diagonal = _owner.jt.arange(length, dtype="int64")
+        indices = (diagonal,) * len(shape)
+    if length:
+        self[indices] = fill_value
+    return self
 
 
 def _api_zero(self):

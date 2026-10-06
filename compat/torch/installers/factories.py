@@ -66,7 +66,12 @@ def _invoke_factory(name, args, kwargs):
     from ..frontend import tensor_frontend
     like = args[0] if args and (name.endswith("_like") or name in _TENSOR_FIRST_ARGUMENT) else None
     with tensor_frontend(context.target_namespace.Var, device=kwargs.get("device"), like=like):
-        return implementation(*args, **kwargs)
+        result = implementation(*args, **kwargs)
+    requested = kwargs.get("device")
+    if (getattr(requested, "type", None) or str(requested).split(":", 1)[0]) == "meta":
+        # Checkpoint inspection reads shape and dtype without materializing data.
+        result._torch_force_meta = True
+    return result
 
 
 def arange(*args, **kwargs):
