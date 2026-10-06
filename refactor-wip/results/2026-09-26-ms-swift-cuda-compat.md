@@ -2289,3 +2289,6 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 - 原生 10196/10202 与修复后严格 CUDA 候选 10237/10249：两提示文本、token IDs、完成 token 数 15/32 和 stop/length 原因完全一致；10250 独立复核、fallback0。固定公开 Python Engine 32-token L4 PASS。10 次同步稳态：原生中位 0.654976s、71.7248 tok/s、2428 MiB；候选 0.643072s、73.0841 tok/s、3382 MiB。同节点同型号但 GPU UUID 不同，微小速差不作因果归因；显存为进程瞬时占用。旧 10198 因生成工作量不同作废。详情见 `refactor-wip/results/2026-10-06-qwen2-engine-stop-l5.md`，原始证据在 `_state/ms-swift-cuda/20261006-qwen2-transformers-engine-l5`。全矩阵仍未完成。
 
 - 补充有效结构门禁 10256：显式确认 shim marker 后，严格 CUDA/零 fallback 下二元提升 12 tests 与 Torch API 结构 4 tests 共 16/16 PASS；布局检查 PASS。10254 因测试启动顺序误载原生 torch 的接口缺失报告无效，诊断记录见上述明细。
+
+### 2026-10-06 真实 Qwen2 公开 Embedding SFT CLI 限定 L4
+- 原生 10276 与严格 CUDA 候选 10277 均经 `python -m swift.cli.main sft` 公共分发器及其子进程，在真实 Qwen2-0.5B 上用离线四条不同 InfoNCE 样本、整批四条、FP32/eager、仅 model.norm.weight、SGD 0.01 完成三步并保存完整 checkpoint。10281 独立复核三步 loss 最大差 0.0010362、梯度范数最大相对差 0.008126、896 维更新权重最大差 2.861e-6、290 个模型状态键及 optimizer/scheduler/RNG 文件；候选父子进程 strict CUDA、shim marker 真、fallback0。该限定公共训练入口 L4 PASS。首轮 10262/10264 半批 loss 不一致，未记录逐步采样索引，不能称半批默认采样通过；CLI 双卡、其他 tuner/dtype/优化器、恢复及 L5 仍 not-run。详情见 `refactor-wip/results/2026-10-06-qwen2-embedding-sft-cli-l4.md`，原始证据在 `_state/ms-swift-cuda/20261006-qwen2-public-embedding-sft-cli`。
