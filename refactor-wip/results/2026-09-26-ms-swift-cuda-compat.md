@@ -2375,3 +2375,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 
 ### 2026-10-07 Qwen2 公开因果 SFT 双卡全参数恢复 RNG 内容审计
 - 独立Slurm worker10682审计已有10550–10553连续/新进程恢复checkpoint-3：原生和严格CUDA候选各自rank0/rank1的python、numpy、cpu、cuda四类RNG保存状态逐值相同，四组overall_same=true。该结果补强固定数据无动量SGD双卡因果SFT限定恢复状态，不证明跨后端RNG算法或通用数据游标。详情补入`refactor-wip/results/2026-10-07-qwen2-public-causal-fullparam-ddp-resume-fp32.md`及同名_state目录；完整矩阵仍未完成。
+
+### 2026-10-07 Qwen2 训练后全参数 checkpoint 的公开 infer
+- 复用已通过的纯FP32全参数SGD/梯度累积2三步SFT checkpoint；原生10686和严格CUDA候选10690从各自checkpoint-3经`swift.cli.main infer`、Transformers engine在同一RTX4090运行，独立10703逐字段比较两条提示的保存结果均完全相同，共16个生成token。候选主/子进程四条start/end标记均use_cuda1、shim marker真、fallback0；日志确认各自checkpoint路径及cuda:0设备映射。10689仅首次JIT重建退出，重启后通过。
+- 只计真实模型训练后全参数checkpoint公开非流式greedy加载/生成的限定L4；中间logits、其他checkpoint/模型/tuner、stream和服务未核验，L5十次稳态not-run。详情见`refactor-wip/results/2026-10-07-qwen2-public-fullparam-checkpoint-infer.md`及_state/ms-swift-cuda/20261007-qwen2-public-fullparam-checkpoint-infer；完整矩阵未完成。
