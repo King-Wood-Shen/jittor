@@ -2369,3 +2369,6 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 公开因果 SFT 全参数变长数据游标恢复阻断
 - 原生10668完成12条不同变长样本的全参数FP32/SGD/梯度累积2连续三步和checkpoint-2新进程恢复，第三步loss/grad相同。严格CUDA候选10669前两步完成且fallback0，但第三步反向在Jittor Core `nano_vector.h:41 slice overflow`失败，候选恢复未运行，比较10670取消。
 - 实验脚本只设`dataset_shuffle=false`，两侧训练日志均为`train_dataloader_shuffle=True`；前两步loss分歧发生在未控制实际batch顺序的合同下，不能判模型数值失败或成功。Core非法Slice上游操作未知，历史同类问题已达五轮上限，不再重试。通用数据游标恢复L3 blocked/not-run；详见`refactor-wip/results/2026-10-07-qwen2-public-causal-fullparam-cursor-resume-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-causal-fullparam-cursor-resume-fp32。
+
+### 2026-10-07 Qwen2 公开 seq_cls 双卡恢复 RNG 内容审计
+- 独立Slurm worker10676完成已有10659/10660实验的checkpoint-3 RNG内容逐项比较：原生与候选各自连续/新进程恢复的rank0和rank1，python、numpy、cpu、cuda四键均值相同，overall_same=true。10674原生torch.load不能读取候选纯pickle格式，修正读取协议后通过。该结果补强固定数据、无动量SGD双卡分类限定L3；跨后端RNG算法及通用DataLoader游标仍未验证。详情补入`refactor-wip/results/2026-10-07-qwen2-public-seqcls-fullparam-ddp-resume-fp32.md`，原始日志在同名_state目录。
