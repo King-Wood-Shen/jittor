@@ -2387,3 +2387,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 训练后全参数 checkpoint 公开 deploy 限定 L5
 - 原生10716、严格CUDA候选10717在同一cscg-qh09 RTX4090顺序运行真实swift.cli.main deploy；各预热2次、固定8-token HTTP请求稳态10次，独立worker10719逐响应复核内容及用量一致，候选CLI/服务两进程启动和请求后共4条严格CUDA标记均fallback0。原生/候选中位响应延迟0.176526/0.166794秒，比0.944871；串行completion token吞吐45.3154/47.9532 token/s，比1.058210；整卡显存2382/4817 MiB，候选多一个占408 MiB的CUDA分发器进程。
 - 仅计该训练后checkpoint、单提示、非流式greedy、8-token串行本机HTTP合同限定L5；并发、stream、长上下文、其他模型/配置、峰值显存not-run，观察到的速度比不外推。详见refactor-wip/results/2026-10-07-qwen2-public-trained-deploy-l5.md及_state/ms-swift-cuda/20261007-qwen2-public-trained-deploy-l5；完整矩阵未完成。
+
+### 2026-10-07 Qwen2 训练后全参数 checkpoint 公开 deploy 流式服务
+- 原生10724、严格CUDA候选10725在同一cscg-qh09 RTX4090顺序运行真实swift.cli.main deploy，两个stream=true短文本请求均完成SSE多chunk与[DONE]。独立worker10730逐事件比对model/choices/usage/object一致，累积文本与此前原生非流式响应一致；两条分别生成8 token。候选分发器与实际服务进程启动及请求后共4条标记均use_cuda1、shim marker真、fallback0。
+- 仅计该训练后checkpoint、短文本单客户端greedy流式HTTP限定L4；流式L5首token延迟/吞吐、并发、中断重连、长上下文、其他模型与tuner均not-run。历史TinyLlama streaming logprob未重启。详见refactor-wip/results/2026-10-07-qwen2-public-trained-deploy-stream.md及_state/ms-swift-cuda/20261007-qwen2-public-trained-deploy-stream；完整矩阵未完成。
