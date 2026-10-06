@@ -2283,3 +2283,9 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 - 无动量基线：原生 10135、严格 CUDA 候选 10137 均 COMPLETED0；10168 独立校验两 rank 跨后端72字段、恢复轨迹72字段、24项 FP64 InfoNCE、参数同步与六阶段 fallback0 通过。首版原生10133仅因测试保留策略删除checkpoint-2导致最终文件检查失败，已在独立v2实验修正。
 - 有状态 SGD momentum=0.9：原生10172、候选10174均 COMPLETED0；10176独立复核相同72+72字段和24项公式，严格CUDA、六阶段 fallback0，checkpoint-2两侧290个模型张量及scheduler、双rank RNG、optimizer状态均存在，新进程第3步轨迹与连续训练一致。10187读出两侧非零896维动量缓冲，最大绝对差8.94e-8。候选10173因仅分配默认8GiB主机内存而OOM，重提时按既有成功作业分配64GiB后通过，失败日志保留。
 - 限定真实双卡FP32/eager、均匀负例、仅model.norm.weight与SGD动量路径 L3 PASS；公开训练CLI/launcher L4和预热稳态性能L5仍not-run，全参数/LoRA、BF16、其他优化器或模型不外推。完整证据见 `refactor-wip/results/2026-10-06-qwen2-embedding-ddp-checkpoint-l3.md`，原始产物在 `_state/ms-swift-cuda/20261006-qwen2-embedding-ddp-resume-v2` 与 `...-momentum-resume`。原30修改加2未跟踪补丁保持原样。
+
+### 2026-10-06 Qwen2 公开 Engine 32-token 停止修复和稳态性能
+- 真实 Qwen2-0.5B FP32/eager batch2 greedy 32-token 首轮发现候选在 `<|im_end|>` 后继续生成：Torch shim 的 `int64 & bool` 错算为 uint8，使 PAD token 151643 截断为 91。Torch Tensor 位与运算改走既有 `result_type` 提升，最小 CUDA PAD 复现 10230 与新回归 10248、二元提升类 10251 均通过。
+- 原生 10196/10202 与修复后严格 CUDA 候选 10237/10249：两提示文本、token IDs、完成 token 数 15/32 和 stop/length 原因完全一致；10250 独立复核、fallback0。固定公开 Python Engine 32-token L4 PASS。10 次同步稳态：原生中位 0.654976s、71.7248 tok/s、2428 MiB；候选 0.643072s、73.0841 tok/s、3382 MiB。同节点同型号但 GPU UUID 不同，微小速差不作因果归因；显存为进程瞬时占用。旧 10198 因生成工作量不同作废。详情见 `refactor-wip/results/2026-10-06-qwen2-engine-stop-l5.md`，原始证据在 `_state/ms-swift-cuda/20261006-qwen2-transformers-engine-l5`。全矩阵仍未完成。
+
+- 补充有效结构门禁 10256：显式确认 shim marker 后，严格 CUDA/零 fallback 下二元提升 12 tests 与 Torch API 结构 4 tests 共 16/16 PASS；布局检查 PASS。10254 因测试启动顺序误载原生 torch 的接口缺失报告无效，诊断记录见上述明细。
