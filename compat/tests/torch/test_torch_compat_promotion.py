@@ -267,6 +267,21 @@ class TestBinaryOpPromotion(Base):
                                  f"{da}*{db} {dev}")
         both_devices(body)
 
+    def test_bitwise_and_preserves_integer_mask_dtype_for_generation(self):
+        def body(dev):
+            unfinished = mk("int64", (1, 1))
+            stopped = mk("bool", (True, False))
+            for remaining in (unfinished & ~stopped, ~stopped & unfinished):
+                self.assertEqual(dts(remaining), "int64", dev)
+                self.ae(remaining.numpy(), np.array([0, 1], dtype="int64"), dev)
+                pad = torch.tensor(151643, dtype=torch.int64)
+                next_tokens = mk("int64", (91, 315))
+                padded = next_tokens * remaining + pad * (1 - remaining)
+                self.assertEqual(dts(padded), "int64", dev)
+                self.ae(padded.numpy(), np.array([151643, 315], dtype="int64"), dev)
+
+        both_devices(body)
+
     def test_floordiv_promotes(self):
         # torch '//' follows the standard promotion lattice (unlike '/').
         def body(dev):

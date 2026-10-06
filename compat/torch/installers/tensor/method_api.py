@@ -1446,6 +1446,14 @@ def _tensor_rmul(self, other):
     return _promoting_binary(self, other, '__rmul__', True)
 
 
+def _tensor_and(self, other):
+    return _promoting_binary(self, other, '__and__', False)
+
+
+def _tensor_rand(self, other):
+    return _promoting_binary(self, other, '__rand__', True)
+
+
 def _tensor_floordiv(self, other):
     return _promoting_binary(self, other, '__floordiv__', False)
 
@@ -1495,6 +1503,8 @@ _BINARY_APIS = {
     '__rsub__': _tensor_rsub,
     '__mul__': _tensor_mul,
     '__rmul__': _tensor_rmul,
+    '__and__': _tensor_and,
+    '__rand__': _tensor_rand,
     '__floordiv__': _tensor_floordiv,
     '__rfloordiv__': _tensor_rfloordiv,
     '__mod__': _tensor_mod,
