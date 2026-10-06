@@ -2365,3 +2365,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 公开 seq_cls 双卡全参数纯 FP32 新进程恢复
 - 原生10659、严格CUDA候选10660各完成固定零头真实Qwen2公开CLI双卡全参数SGD连续三步及从checkpoint-2新进程恢复第三步；独立worker10661比较。原生恢复291权重精确相同，候选恢复最大差3.469e-18、整体L2差8.888e-18；两侧各自第3步loss/grad norm/acc与optimizer/scheduler字典一致，跨后端权重最大差9.095e-12，候选两阶段main和两rank共12条标记全部fallback0。
 - 限定原生torchrun控制面、固定数据、纯FP32无动量SGD双卡分类有效轨迹恢复；optimizer state为空，RNG内容/通用数据游标未证明，不宣称完整通用L3。纯Jittor launcher、AdamW/BF16/LoRA、随机头、L5 not-run。详情见`refactor-wip/results/2026-10-07-qwen2-public-seqcls-fullparam-ddp-resume-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-seqcls-fullparam-ddp-resume-fp32；完整矩阵未完成。
+
+### 2026-10-07 Qwen2 公开因果 SFT 全参数变长数据游标恢复阻断
+- 原生10668完成12条不同变长样本的全参数FP32/SGD/梯度累积2连续三步和checkpoint-2新进程恢复，第三步loss/grad相同。严格CUDA候选10669前两步完成且fallback0，但第三步反向在Jittor Core `nano_vector.h:41 slice overflow`失败，候选恢复未运行，比较10670取消。
+- 实验脚本只设`dataset_shuffle=false`，两侧训练日志均为`train_dataloader_shuffle=True`；前两步loss分歧发生在未控制实际batch顺序的合同下，不能判模型数值失败或成功。Core非法Slice上游操作未知，历史同类问题已达五轮上限，不再重试。通用数据游标恢复L3 blocked/not-run；详见`refactor-wip/results/2026-10-07-qwen2-public-causal-fullparam-cursor-resume-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-causal-fullparam-cursor-resume-fp32。
