@@ -2395,3 +2395,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 训练后全参数 checkpoint 公开流式 deploy 限定 L5
 - 原生10742、严格CUDA候选10743在同一cscg-qh09 RTX4090顺序运行真实swift.cli.main deploy SSE服务，固定单提示8-token请求各预热2次、稳态10次；独立worker10745逐次复核归一化chunk、文本、用量一致，候选分发器/服务进程启动及请求后共4条标记均fallback0。首内容事件中位延迟原生/候选0.060476/0.076775秒，比1.269503；完整响应中位0.202852/0.179645秒，比0.885596；串行completion token吞吐39.5166/43.4502 token/s，比1.099541；整卡显存2382/4817 MiB。
 - 仅计该训练后checkpoint、短文本单客户端greedy 8-token SSE合同限定L5；候选首事件较慢且显存更高，单次观察不外推。并发、长上下文、中断重连、其他模型与tuner、峰值显存not-run。详见refactor-wip/results/2026-10-07-qwen2-public-trained-deploy-stream-l5.md及_state/ms-swift-cuda/20261007-qwen2-public-trained-deploy-stream-l5；完整矩阵未完成。
+
+### 2026-10-07 Qwen2 训练后全参数 checkpoint 公开 deploy 双客户端
+- 原生10754、严格CUDA候选10756在同一cscg-qh09 RTX4090顺序运行真实swift.cli.main deploy，各三轮两客户端barrier同时发起非流式短文本请求；独立worker10759证实全部请求区间交叠、12条响应逐字段与原生单客户端参考一致，候选分发器及服务进程启动/请求后共4条标记均fallback0。
+- 仅计固定训练后checkpoint、双客户端短文本greedy HTTP入口限定L4；客户端重叠不证明服务内部合批。首轮候选约10秒含首次JIT，后两轮不足L5十次稳态要求；双客户端L5、过载/取消/超时、更多客户端及长上下文not-run。详见refactor-wip/results/2026-10-07-qwen2-public-trained-deploy-concurrent.md及_state/ms-swift-cuda/20261007-qwen2-public-trained-deploy-concurrent；完整矩阵未完成。
