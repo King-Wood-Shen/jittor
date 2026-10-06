@@ -1,6 +1,6 @@
 # 真实 Qwen2 公开 Embedding SFT 双卡入口：序列化修复与未通过的前向
 
-基线：Jittor 集成工作树 `4c96ab38330c4aa590f1a1c50d083696625a54fd` 起改，ms-swift `88d7279`，Python 3.11.15；真实缓存 Qwen2-0.5B，4 条离线不同组样本，FP32/eager，仅 `model.norm.weight` 可训练，SGD 0.01、三步、每卡 batch 2、NCCL 双 RTX 4090。原始命令、日志、输入/embedding NPZ、比较 JSON 和 checkpoint 均在 `_state/ms-swift-cuda/20261006-qwen2-public-embedding-ddp-cli`。Slurm 节点 cscg-qh15，两卡 UUID 为 `GPU-afd56a2e-3deb-3bd7-f122-1075e6de8956` 和 `GPU-6005c074-c2a4-a62b-e0b0-8b090cec31c9`；无 Ascend 或登录节点计算。
+基线：Jittor 集成工作树 `4c96ab38330c4aa590f1a1c50d083696625a54fd` 起改，ms-swift `88d7279`，Python 3.11.15；真实缓存 Qwen2-0.5B，4 条离线不同组样本，float32 权重加载/eager、CLI fp16=True（非纯 FP32 训练），仅 `model.norm.weight` 可训练，SGD 0.01、三步、每卡 batch 2、NCCL 双 RTX 4090。原始命令、日志、输入/embedding NPZ、比较 JSON 和 checkpoint 均在 `_state/ms-swift-cuda/20261006-qwen2-public-embedding-ddp-cli`。Slurm 节点 cscg-qh15，两卡 UUID 为 `GPU-afd56a2e-3deb-3bd7-f122-1075e6de8956` 和 `GPU-6005c074-c2a4-a62b-e0b0-8b090cec31c9`；无 Ascend 或登录节点计算。
 
 ## 可确认结果
 

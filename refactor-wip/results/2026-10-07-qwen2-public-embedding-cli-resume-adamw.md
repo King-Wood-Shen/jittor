@@ -1,6 +1,6 @@
 # 真实 Qwen2 公开 Embedding SFT CLI：AdamW 恢复可执行，跨后端参数未对齐
 
-基线 Jittor commit `c45e58dde3474b0965d076ff60188856b8cc9401`，ms-swift `88d7279`。所有导入、JIT、训练和比较均在 Slurm NVIDIA worker。真实缓存 Qwen2-0.5B，公开 `python -m swift.cli.main sft`，4 条固定离线 InfoNCE 组样本、batch4、FP32/eager，仅 `model.norm.weight` 可训练，AdamW lr=1e-4、weight_decay=0、constant scheduler，三步。原始脚本、日志、checkpoint 和比较在 `_state/ms-swift-cuda/20261006-qwen2-public-embedding-cli-resume-adamw`。
+基线 Jittor commit `c45e58dde3474b0965d076ff60188856b8cc9401`，ms-swift `88d7279`。所有导入、JIT、训练和比较均在 Slurm NVIDIA worker。真实缓存 Qwen2-0.5B，公开 `python -m swift.cli.main sft`，4 条固定离线 InfoNCE 组样本、batch4、float32 权重加载/eager、CLI fp16=True（非纯 FP32 训练），仅 `model.norm.weight` 可训练，AdamW lr=1e-4、weight_decay=0、constant scheduler，三步。原始脚本、日志、checkpoint 和比较在 `_state/ms-swift-cuda/20261006-qwen2-public-embedding-cli-resume-adamw`。
 
 原生 10364 与严格 CUDA 候选 10368 均 `COMPLETED 0`：连续三步保存 checkpoint-2/3；另起公开 CLI 进程从 checkpoint-2 恢复第 3 步，保存 checkpoint-3。候选双阶段父子进程 bootstrap 起止均为 `use_cuda=1`、shim marker 真、fallback0。候选首次 10367 仅在核心 `jit_utils` 重建后要求进程重启，尚未进入训练；10368 重试通过。
 

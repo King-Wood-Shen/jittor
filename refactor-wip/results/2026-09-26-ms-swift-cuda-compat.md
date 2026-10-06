@@ -2291,7 +2291,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 - 补充有效结构门禁 10256：显式确认 shim marker 后，严格 CUDA/零 fallback 下二元提升 12 tests 与 Torch API 结构 4 tests 共 16/16 PASS；布局检查 PASS。10254 因测试启动顺序误载原生 torch 的接口缺失报告无效，诊断记录见上述明细。
 
 ### 2026-10-06 真实 Qwen2 公开 Embedding SFT CLI 限定 L4
-- 原生 10276 与严格 CUDA 候选 10277 均经 `python -m swift.cli.main sft` 公共分发器及其子进程，在真实 Qwen2-0.5B 上用离线四条不同 InfoNCE 样本、整批四条、FP32/eager、仅 model.norm.weight、SGD 0.01 完成三步并保存完整 checkpoint。10281 独立复核三步 loss 最大差 0.0010362、梯度范数最大相对差 0.008126、896 维更新权重最大差 2.861e-6、290 个模型状态键及 optimizer/scheduler/RNG 文件；候选父子进程 strict CUDA、shim marker 真、fallback0。该限定公共训练入口 L4 PASS。首轮 10262/10264 半批 loss 不一致，未记录逐步采样索引，不能称半批默认采样通过；CLI 双卡、其他 tuner/dtype/优化器、恢复及 L5 仍 not-run。详情见 `refactor-wip/results/2026-10-06-qwen2-embedding-sft-cli-l4.md`，原始证据在 `_state/ms-swift-cuda/20261006-qwen2-public-embedding-sft-cli`。
+- 原生 10276 与严格 CUDA 候选 10277 均经 `python -m swift.cli.main sft` 公共分发器及其子进程，在真实 Qwen2-0.5B 上用离线四条不同 InfoNCE 样本、整批四条、float32 权重加载但 CLI fp16=True/eager、仅 model.norm.weight、SGD 0.01 完成三步并保存完整 checkpoint。10281 独立复核三步 loss 最大差 0.0010362、梯度范数最大相对差 0.008126、896 维更新权重最大差 2.861e-6、290 个模型状态键及 optimizer/scheduler/RNG 文件；候选父子进程 strict CUDA、shim marker 真、fallback0。该限定公共训练入口 L4 PASS。首轮 10262/10264 半批 loss 不一致，未记录逐步采样索引，不能称半批默认采样通过；CLI 双卡、其他 tuner/dtype/优化器、恢复及 L5 仍 not-run。详情见 `refactor-wip/results/2026-10-06-qwen2-embedding-sft-cli-l4.md`，原始证据在 `_state/ms-swift-cuda/20261006-qwen2-public-embedding-sft-cli`。
 
 ### 2026-10-06 真实 Qwen2 公开 Embedding SFT 双卡入口与序列化
 - 原生 10285、候选 10327 均完成三步真实 Qwen2-0.5B 双 RTX 4090/NCCL 公开 `swift.cli.main sft` 路径并保存 checkpoint；候选 rank strict CUDA/shim 标记真、fallback0。但 shim 缺少 `torch.distributed.run`，10327 的控制面借原生 torchrun，不能视为完整 shim launcher 适配。
@@ -2301,3 +2301,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 公开 Embedding SFT CLI AdamW 新进程恢复
 - 原生 10364、严格 CUDA 候选 10368 均完成真实 Qwen2-0.5B 公开 CLI 连续三步和从 checkpoint-2 新进程恢复第 3 步；各自 loss、grad norm、训练参数、AdamW 非零一二阶状态及 scheduler 轨迹在 1e-6 内一致，candidate 父子进程 fallback0。首次 10367 为训练前 JIT 重建退出，重启后通过。
 - 独立比较 10376–10380 五轮后停止：第 3 步跨后端 loss 差 0.00044632、grad norm 相对差 0.0027363，但 896 维训练权重最大差 0.00059795，超过固定 0.0001 阈值；optimizer moment 亦不同。公开 AdamW 更新 L2 失败，完整恢复 L3 blocked，L5 not-run，不把退出 0 或各自恢复成功计为数值适配。详情见 `refactor-wip/results/2026-10-07-qwen2-public-embedding-cli-resume-adamw.md`；原始证据在 `_state/ms-swift-cuda/20261006-qwen2-public-embedding-cli-resume-adamw`。
+
+### 2026-10-07 Qwen2 公开因果 SFT CLI 显式 FP32 限定 L4
+- 审计发现仅指定 `torch_dtype=float32` 的公开 SFT CLI 仍默认 `fp16=True`；此前单卡 Embedding 10276/10277、双卡 10285/10327、AdamW 恢复 10364/10368 的报告已将权重加载与训练精度标注分开，不能算纯 FP32。默认混合精度因果 SFT 10382/10383 运行成功但 10387 loss 最大差 0.00726342 > 0.005；关闭 logits_to_keep 的 10391/10392 对照未消除差异，该混合精度合同未通过。
+- 显式 `--fp16 false --bf16 false` 的原生 10393、候选 10394 和独立比较 10395 全部 COMPLETED0：真实缓存 Qwen2、公开 `swift.cli.main sft`、四条对话整批、仅 norm 可训练、SGD 三步；loss 最大差 9.54e-7、grad norm 最大相对差 6.89e-6、训练权重最大差 3.91e-8、两侧非零更新、token_acc 一致、strict CUDA/fallback0。限定纯 FP32 公共因果 SFT L4 PASS；全参数/LoRA、恢复、双卡和 L5 不外推。详见 `refactor-wip/results/2026-10-07-qwen2-public-causal-sft-cli-fp32.md`，原始证据在 `_state/ms-swift-cuda/20261007-qwen2-public-causal-sft-cli`。
