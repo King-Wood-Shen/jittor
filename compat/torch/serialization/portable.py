@@ -104,9 +104,10 @@ def _snapshot_tensors(obj):
     snapshot = _TensorSnapshots()
     snapshot.collect(obj)
     if snapshot.tensors:
-        # Fetch copies to host without moving the source sharing group.
-        jt.fetch(*snapshot.tensors, snapshot.capture)
-    jt.sync_all(True)
+        # The async callback may still be pending after sync_all on a
+        # nonzero NCCL rank. Fetch clones synchronously so the snapshot is
+        # complete without moving the live tensors off their devices.
+        snapshot.capture(*jt.fetch_sync([value.clone() for value in snapshot.tensors]))
     if len(snapshot.values) != len(snapshot.tensors):
         raise RuntimeError("checkpoint tensor fetch did not complete")
     return snapshot.values

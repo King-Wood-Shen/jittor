@@ -172,6 +172,23 @@ class TestSaveLoad(Base):
             self.assertEqual(e["step"], 7, f"non-tensor value survives {dev}")
         both_devices(body)
 
+    def test_save_load_rng_and_cuda_tensor_together(self):
+        if not jt.has_cuda:
+            self.skipTest("CUDA is unavailable")
+        with jt.flag_scope(use_cuda=1):
+            value = torch.tensor([1.25, -2.5], device="cuda")
+            original = {
+                "cpu_rng": torch.get_rng_state(),
+                "cuda_rng": torch.cuda.get_rng_state(),
+                "value": value,
+            }
+            path = self.path("rng_cuda.pkl")
+            torch.save(original, path)
+            loaded = torch.load(path, weights_only=False)
+            self.ae(loaded["cpu_rng"].numpy(), original["cpu_rng"].numpy())
+            self.ae(loaded["cuda_rng"].numpy(), original["cuda_rng"].numpy())
+            self.ae(loaded["value"].numpy(), np.array([1.25, -2.5], dtype=np.float32))
+
     def test_save_load_nested_list(self):
         rs = np.random.RandomState(2)
         a = rs.randn(2, 2).astype("float32")

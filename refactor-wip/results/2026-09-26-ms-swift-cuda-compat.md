@@ -2292,3 +2292,8 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 
 ### 2026-10-06 真实 Qwen2 公开 Embedding SFT CLI 限定 L4
 - 原生 10276 与严格 CUDA 候选 10277 均经 `python -m swift.cli.main sft` 公共分发器及其子进程，在真实 Qwen2-0.5B 上用离线四条不同 InfoNCE 样本、整批四条、FP32/eager、仅 model.norm.weight、SGD 0.01 完成三步并保存完整 checkpoint。10281 独立复核三步 loss 最大差 0.0010362、梯度范数最大相对差 0.008126、896 维更新权重最大差 2.861e-6、290 个模型状态键及 optimizer/scheduler/RNG 文件；候选父子进程 strict CUDA、shim marker 真、fallback0。该限定公共训练入口 L4 PASS。首轮 10262/10264 半批 loss 不一致，未记录逐步采样索引，不能称半批默认采样通过；CLI 双卡、其他 tuner/dtype/优化器、恢复及 L5 仍 not-run。详情见 `refactor-wip/results/2026-10-06-qwen2-embedding-sft-cli-l4.md`，原始证据在 `_state/ms-swift-cuda/20261006-qwen2-public-embedding-sft-cli`。
+
+### 2026-10-06 真实 Qwen2 公开 Embedding SFT 双卡入口与序列化
+- 原生 10285、候选 10327 均完成三步真实 Qwen2-0.5B 双 RTX 4090/NCCL 公开 `swift.cli.main sft` 路径并保存 checkpoint；候选 rank strict CUDA/shim 标记真、fallback0。但 shim 缺少 `torch.distributed.run`，10327 的控制面借原生 torchrun，不能视为完整 shim launcher 适配。
+- 10315 首次完整训练在 rank 1 保存 RNG 时触发 Torch shim 异步张量快照未完成并内存错误。10321 双卡最小复现，10322 同步抓取对照、10326 回归与双 rank 三次保存/加载通过。10352 广义 CUDA owner 回归发现直接 `jt.fetch_sync` 会把源张量迁至 CPU；产品修复改为同步抓取克隆。10357 owner 回归 10/10、10358 双 rank 各三次保存/加载、10361 定向回归 2/2 加双 rank 各三次保存/加载均 PASS，严格 CUDA、fallback0。
+- 10329 原生/候选 loss 三步最大绝对差 0.00803566，超过固定 0.005 门槛。10335–10348 五轮定位证明原始样本全局集合相同、rank 交换不解释误差、行序对齐后输入 ID/mask/label 逐值相同，而模型 embedding 相对 L2 误差 0.00838/0.00887；InfoNCE FP64 公式各自复现两侧损失。首个分歧在相同 collator 输入之后、损失公式之前的 Qwen 输出；具体层与加载状态未核验，按上限暂停。公开双卡数值 L1 失败、L2–L5 blocked；公开 CLI 恢复和 L5 not-run，不宣称全矩阵完成。完整索引见 `refactor-wip/results/2026-10-06-qwen2-public-embedding-ddp-cli.md`，原始产物在 `_state/ms-swift-cuda/20261006-qwen2-public-embedding-ddp-cli`。
