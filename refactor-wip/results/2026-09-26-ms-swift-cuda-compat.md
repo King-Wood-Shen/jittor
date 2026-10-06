@@ -2353,3 +2353,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 公开 seq_cls CLI 全参数纯 FP32
 - 原生10635、严格CUDA候选10636均经固定零分类头真实Qwen2公开CLI，494.0355M全参数SGD1e-5三步及checkpoint-3完成；独立worker10639对比三步loss完全相同、grad norm最大相对差2.323e-7、acc相同，291最终权重最大差1.592e-11、整体L2差3.951e-11，两侧各174张量FP32可见更新、分类头更新L2约3e-5，候选父子进程fallback0。10638仅因比较器无法直接读取BF16基座失败，修正后未重跑训练。
 - 限定固定头单卡纯FP32全参数SGD分类公共CLI数值L4；随机头、AdamW/LoRA/BF16、双卡、L3恢复及L5性能not-run。详情见`refactor-wip/results/2026-10-07-qwen2-public-seqcls-fullparam-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-seqcls-fullparam-fp32；完整矩阵未完成。
+
+### 2026-10-07 Qwen2 公开 seq_cls 全参数纯 FP32 新进程恢复
+- 原生10641与严格CUDA候选10642各完成固定零分类头真实Qwen2公开CLI全参数SGD连续三步、从checkpoint-2另起进程恢复第三步；独立worker10643复核。原生恢复291权重精确相同，候选恢复最大差1.735e-18、整体L2差5.968e-18；两侧各自loss/grad norm/acc及optimizer/scheduler字典一致，跨后端权重最大差1.592e-11，候选两阶段父子进程fallback0。
+- 限定固定数据纯FP32无动量SGD分类任务的新进程有效轨迹恢复；optimizer state为空，RNG内容与通用数据游标未证明，随机头/AdamW/BF16/双卡/L5 not-run。详情见`refactor-wip/results/2026-10-07-qwen2-public-seqcls-fullparam-resume-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-seqcls-fullparam-resume-fp32；完整矩阵未完成。
