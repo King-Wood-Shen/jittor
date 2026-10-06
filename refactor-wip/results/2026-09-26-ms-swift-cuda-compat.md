@@ -2337,3 +2337,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 公开因果 SFT CLI 双卡全参数纯 FP32 新进程恢复
 - 原生连续10550/重启10551、严格CUDA候选连续10552/重启10553均COMPLETED0；真实Qwen2、公开CLI、双GPU、494.0328M全部Trainable、SGD1e-5，从checkpoint-2另起进程完成第3步。10569独立比较：原生恢复290权重精确相同；候选恢复最大差1.863e-9、全体L2差6.813e-9，第三步loss差2.384e-7、grad norm相对差6.850e-8；双方各自optimizer/scheduler字典相等，跨后端权重最大差7.451e-9，候选主进程和双rank全程fallback0。
 - 10557原grad norm绝对差1e-5门槛失败，10568诊断实际范数约445、相对差6.850e-8；10569使用相对1e-6门槛通过。限定该FP32无动量SGD恢复的数值合同；optimizer state为空，仅核实两rank RNG文件存在，未证明通用RNG/数据游标恢复或完整L3。混合torchrun控制平面、纯Jittor启动器/AdamW/BF16/L5 not-run；详见`refactor-wip/results/2026-10-07-qwen2-public-causal-fullparam-ddp-resume-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-causal-fullparam-ddp-resume-fp32，完整矩阵未完成。
+
+### 2026-10-07 Qwen2 公开因果 SFT CLI 全参数纯 FP32 AdamW 数值与稳定性边界
+- 原生10574真实Qwen2公开CLI全494.0328M参数AdamW_torch三步训练及checkpoint-3完成，Slurm仅因脚本误查checkpoint-1返回FAILED1，未重复计算。候选10577在cscg-qh17第三步core grad_optional触发nano_vector.h:41非法Slice；10581(cscg-qh09)、10583/10598(同一cscg-qh17)三步COMPLETED0，严格CUDA/fallback0。同节点复跑成功，故障非节点必现，确切生成非法Slice的操作仍未知。
+- 10582/10584/10597/10610独立比较三个完成运行：三步loss最大差4.292e-6、grad norm最大相对差9.324e-6；290最终权重最大差不超过2.058e-6，双方更新L2约0.365981且290张量均可见变化；494032768元素AdamW一阶/二阶矩相对L2差范围1.679e-5–1.990e-5/2.367e-5–3.192e-5。仅记录完成运行的条件性数值对齐；四次候选有一次core反向故障，公开L4稳定性不判PASS，L5 blocked。AdamW新进程恢复、BF16、双卡not-run；详见`refactor-wip/results/2026-10-07-qwen2-public-causal-fullparam-adamw-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-causal-fullparam-adamw-fp32，完整矩阵未完成。
