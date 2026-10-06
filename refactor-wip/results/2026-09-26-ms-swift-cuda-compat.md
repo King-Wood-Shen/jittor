@@ -2407,3 +2407,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 训练后全参数 checkpoint 公开 Python 推理 API
 - 原生10777、严格CUDA候选10781通过真实ms-swift TransformersEngine/InferRequest/RequestConfig Python API加载各自Qwen2全参数三步checkpoint-3，并生成两条greedy短文本回复；独立worker10783复核文本、结束原因、token用量与彼此及此前原生HTTP服务逐字段一致，模型参数均在cuda:0。候选进程导入前严格scope和forbid_backend_fallbacks生效，start/end两条标记均fallback0。
 - 仅计该训练后checkpoint、纯FP32、短文本非流式greedy Python入口限定L4；stream、logprobs、长上下文、adapter、L5性能not-run。详见refactor-wip/results/2026-10-07-qwen2-public-trained-checkpoint-python-api.md及_state/ms-swift-cuda/20261007-qwen2-public-trained-checkpoint-python-api；完整矩阵未完成。
+
+### 2026-10-07 Qwen2 训练后全参数 checkpoint 公开 Python API 流式生成
+- 原生10788、严格CUDA候选10796通过真实TransformersEngine.infer(RequestConfig(stream=True))生成器加载各自Qwen2全参数三步checkpoint-3，迭代两条短文本请求；独立worker10799复核归一化逐事件model/object/choices/usage、累积文本、结束原因及用量与两侧及此前非流式Python API一致。候选模型参数cuda:0，导入前严格scope到退出的start/end标记均fallback0。
+- 仅计固定训练后checkpoint、FP32、greedy短文本Python迭代器限定L4，不等同HTTP SSE；流式L5、logprobs、长上下文、adapter、取消与并发生成器not-run。TinyLlama streaming logprob历史问题未重启。详见refactor-wip/results/2026-10-07-qwen2-public-trained-checkpoint-python-api-stream.md及_state/ms-swift-cuda/20261007-qwen2-public-trained-checkpoint-python-api-stream；完整矩阵未完成。
