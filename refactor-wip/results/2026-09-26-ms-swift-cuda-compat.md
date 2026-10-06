@@ -2308,3 +2308,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 
 ### 2026-10-07 Qwen2 公开 Embedding SFT CLI 显式 FP32 限定 L4
 - 原生 10400、严格 CUDA 候选 10402 真实 Qwen2-0.5B 公共 `swift.cli.main sft`，显式 `--fp16 false --bf16 false`、float32 权重、整批四组 InfoNCE、仅 norm 权重 SGD 三步均 COMPLETED0。10419 独立比较：loss 最大差 4.053e-6、grad norm 最大相对差 5.155e-6、896 维训练权重精确相同且双方非零更新，290 模型键与 optimizer/scheduler/RNG checkpoint 存在，父子进程 strict CUDA/fallback0。纯 FP32 单卡 Embedding CLI 限定 L4 PASS。10401 仅 JIT 重建退出、10418 为比较器路径错误；首次编译及不同 GPU 不作 L5。详见 `refactor-wip/results/2026-10-07-qwen2-public-embedding-sft-cli-fp32.md`，原始证据在 `_state/ms-swift-cuda/20261007-qwen2-public-embedding-sft-cli-fp32`。
+
+### 2026-10-07 Qwen2 公开因果 SFT CLI 纯 FP32 AdamW 限定恢复
+- 原生10420、严格CUDA候选10422均完成真实Qwen2公开CLI连续三步与新进程从checkpoint-2恢复第三步。各后端最终训练权重精确相同，候选AdamW一阶/二阶矩恢复差2.515e-8/1.164e-9；跨后端最终权重精确相同，loss差1.907e-6、grad norm相对差6.426e-6，候选父子进程fallback0。
+- 10430–10434五轮独立比较/诊断：候选恢复日志loss与连续差4.768e-6，原1e-6门槛失败，10432以1e-5限定数值合同通过；10433完整scheduler字典相等失败，10434查明原生`verbose=False`和候选`_is_initial=False`内部字段不同，但有效学习率/步数一致。限定数值恢复成立，完整checkpoint结构等价不成立；不外推通用L3、其他优化器/模型、双卡或L5。详情见`refactor-wip/results/2026-10-07-qwen2-public-causal-cli-resume-adamw-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-causal-cli-resume-adamw-fp32。
