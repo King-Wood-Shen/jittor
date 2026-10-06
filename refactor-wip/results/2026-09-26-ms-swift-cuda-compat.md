@@ -2312,3 +2312,8 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 公开因果 SFT CLI 纯 FP32 AdamW 限定恢复
 - 原生10420、严格CUDA候选10422均完成真实Qwen2公开CLI连续三步与新进程从checkpoint-2恢复第三步。各后端最终训练权重精确相同，候选AdamW一阶/二阶矩恢复差2.515e-8/1.164e-9；跨后端最终权重精确相同，loss差1.907e-6、grad norm相对差6.426e-6，候选父子进程fallback0。
 - 10430–10434五轮独立比较/诊断：候选恢复日志loss与连续差4.768e-6，原1e-6门槛失败，10432以1e-5限定数值合同通过；10433完整scheduler字典相等失败，10434查明原生`verbose=False`和候选`_is_initial=False`内部字段不同，但有效学习率/步数一致。限定数值恢复成立，完整checkpoint结构等价不成立；不外推通用L3、其他优化器/模型、双卡或L5。详情见`refactor-wip/results/2026-10-07-qwen2-public-causal-cli-resume-adamw-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-causal-cli-resume-adamw-fp32。
+
+### 2026-10-07 Qwen2 公开 seq_cls CLI 显式 FP32 限定 L4
+- 原生10471/候选10472公共入口均完成，但原始因果checkpoint缺少新分类头，随机初值不同，首步loss6.5576/2.2469；10485比较失败。ms-swift的init_strategy=zero只处理非有限/极端参数，不能固定正常随机头。
+- worker构造真实缓存290键基座软链加显式零初始化3×896分类头的分片checkpoint，未修改原权重。测试索引与safetensors元数据两次阻断后，原生10493、严格CUDA候选10498及独立比较10499通过：三步loss最大差1.192e-7、grad norm最大相对差4.510e-7、最终score权重最大差1.118e-8且非零，acc相同、291模型键、完整checkpoint文件、父子进程fallback0。
+- 只计固定头真实Qwen单卡seq_cls公开CLI纯FP32限定L4；随机头默认初始化、全参数/LoRA、恢复、双卡、L5仍not-run或未通过。详见`refactor-wip/results/2026-10-07-qwen2-public-seqcls-cli-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-seqcls-cli-fp32；完整矩阵未完成。
