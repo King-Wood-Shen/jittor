@@ -2265,3 +2265,8 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 - 集成基线 `700070d58` 上，真实缓存 Qwen2-0.5B 公共 seq_cls 加载和私有 RewardTrainer，仅训练 score.weight；连续三步对比两步保存后同进程/新进程恢复第三步。原生先跑、候选严格 CUDA 后跑；候选 fallback0。
 - 原生 9988/9991、新进程候选 9990/10010、同进程原生 10013、候选 10015/10016 均完成；既定前向/反向门槛、独立 FP64 AdamW 复核、scheduler/RNG/数据游标及 291 个模型状态张量审计通过（10020）。10007 探索性逐位近似比较因保存前独立运行已有 CUDA 梯度微小差异而失败，诊断见 10008；不宣称 bitwise 一致。
 - 限定路径 L3 PASS；LoRA/全参数/BF16/其他模型与分布式恢复仍未验证。完整证据与限制见 `refactor-wip/results/2026-10-06-qwen2-reward-checkpoint-l3.md`；原始文件在 `_state/ms-swift-cuda/20261006-qwen2-reward-checkpoint-l3`。原工作树脏补丁未触碰，未将排队或跳过项目记为通过。
+
+### 2026-10-06 真实 Qwen2 公开 infer 分发器限定 L4
+- 10047 原生与 10055 严格 CUDA 候选分别经 `python -m swift.cli.main infer` 官方分发器和子进程加载真实缓存 Qwen2-0.5B；两条固定离线 JSONL 提示的输出逐字段一致，均生成 16 token。10074 独立 worker 审计通过；候选父/子进程 CUDA 与 shim 标记真、fallback0。
+- 首轮 10049 因测试用 sitecustomize 递归进入 `jittor_utils.query_cuda_cc` 取消，第二轮限定 bootstrap 作用进程后通过。完整证据和 L4 边界见 `refactor-wip/results/2026-10-06-qwen2-public-infer-cli.md`，原始文件在 `_state/ms-swift-cuda/20261006-qwen2-public-infer-cli`。
+- 仅官方分发器模块入口及非流式两提示文本对齐通过；安装的 `swift` 可执行文件、token ID、stream、服务及 CLI 稳态性能未验证，不把含首次 JIT 的 338 秒作为 L5。
