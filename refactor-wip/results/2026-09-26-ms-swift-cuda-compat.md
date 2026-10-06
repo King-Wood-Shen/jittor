@@ -2333,3 +2333,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 公开因果 SFT CLI 双卡全参数纯 FP32
 - 原生10535/候选10537单步、原生10541/严格CUDA候选10542三步均经公开CLI与NPROC_PER_NODE=2，真实Qwen2、每卡batch2、494.0328M全部Trainable、SGD1e-5。10540与10544逐一比较290最终权重：三步最大差7.451e-9、整体差L2=5.416e-8，双方相对基座更新L2约0.001200762；246张量有FP32可见变化。10546逐步loss最大差1.192e-6、grad norm最大相对差2.191e-6，token_acc一致，两rank RNG存在，候选主进程及两rank fallback0。
 - 仅计原生torchrun控制平面+Jittor rank、固定真实模型FP32全参数SGD三步公共入口限定L4；AdamW、纯Jittor启动器、双卡全参数恢复、BF16、L5 not-run。详情见`refactor-wip/results/2026-10-07-qwen2-public-causal-fullparam-ddp-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-causal-fullparam-ddp-fp32。历史公开双卡Embedding失败不变，完整矩阵未完成。
+
+### 2026-10-07 Qwen2 公开因果 SFT CLI 双卡全参数纯 FP32 新进程恢复
+- 原生连续10550/重启10551、严格CUDA候选连续10552/重启10553均COMPLETED0；真实Qwen2、公开CLI、双GPU、494.0328M全部Trainable、SGD1e-5，从checkpoint-2另起进程完成第3步。10569独立比较：原生恢复290权重精确相同；候选恢复最大差1.863e-9、全体L2差6.813e-9，第三步loss差2.384e-7、grad norm相对差6.850e-8；双方各自optimizer/scheduler字典相等，跨后端权重最大差7.451e-9，候选主进程和双rank全程fallback0。
+- 10557原grad norm绝对差1e-5门槛失败，10568诊断实际范数约445、相对差6.850e-8；10569使用相对1e-6门槛通过。限定该FP32无动量SGD恢复的数值合同；optimizer state为空，仅核实两rank RNG文件存在，未证明通用RNG/数据游标恢复或完整L3。混合torchrun控制平面、纯Jittor启动器/AdamW/BF16/L5 not-run；详见`refactor-wip/results/2026-10-07-qwen2-public-causal-fullparam-ddp-resume-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-causal-fullparam-ddp-resume-fp32，完整矩阵未完成。
