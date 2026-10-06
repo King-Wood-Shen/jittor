@@ -2321,3 +2321,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 公开因果 SFT CLI 双卡显式 FP32
 - 原生10506、严格CUDA候选10507经公开`python -m swift.cli.main sft`与NPROC_PER_NODE=2，真实Qwen2、四条固定对话、每卡batch2、仅norm可训练SGD三步完成；10510独立比较loss最大差2.620e-6、grad norm最大相对差4.373e-6、最终权重最大差4.768e-7且双方非零更新，290模型键/global_step3/双rank RNG文件，候选主进程及两rank fallback0。
 - 候选用原生torchrun控制平面启动Jittor rank进程，只计该固定双卡公共CLI限定L4数值路径；纯Jittor启动器、双卡CLI恢复、全参数/LoRA、BF16、L5 not-run。详情见`refactor-wip/results/2026-10-07-qwen2-public-causal-ddp-cli-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-causal-ddp-cli-fp32；历史公开Embedding双卡失败不变，全矩阵未完成。
+
+### 2026-10-07 Qwen2 公开因果 SFT CLI 双卡显式 FP32 新进程恢复
+- 原生10512/10516、严格CUDA候选10513/10518分别完成双rank连续三步、checkpoint-2另起CLI进程恢复第三步；10520独立比较。各后端最终norm权重精确相同，原生恢复loss/grad差0，候选loss差4.768e-7、grad差1.490e-8；optimizer/scheduler各自全字典一致、两rank RNG存在，候选主进程和两rank全程fallback0。
+- 跨后端第3步loss差2.384e-6、grad norm相对差3.948e-6、norm最大差4.768e-7。仅计混合torchrun控制平面、固定Qwen、FP32单参数无动量SGD的公开双卡CLI限定L3；lm_head.weight缺失警告与共享词嵌入配置一并保留。AdamW/动量、全参数/LoRA、纯Jittor启动器、L5 not-run；详见`refactor-wip/results/2026-10-07-qwen2-public-causal-ddp-cli-fp32.md`及_state/ms-swift-cuda/20261007-qwen2-public-causal-ddp-cli-fp32。
