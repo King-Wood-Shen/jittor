@@ -2391,3 +2391,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 训练后全参数 checkpoint 公开 deploy 流式服务
 - 原生10724、严格CUDA候选10725在同一cscg-qh09 RTX4090顺序运行真实swift.cli.main deploy，两个stream=true短文本请求均完成SSE多chunk与[DONE]。独立worker10730逐事件比对model/choices/usage/object一致，累积文本与此前原生非流式响应一致；两条分别生成8 token。候选分发器与实际服务进程启动及请求后共4条标记均use_cuda1、shim marker真、fallback0。
 - 仅计该训练后checkpoint、短文本单客户端greedy流式HTTP限定L4；流式L5首token延迟/吞吐、并发、中断重连、长上下文、其他模型与tuner均not-run。历史TinyLlama streaming logprob未重启。详见refactor-wip/results/2026-10-07-qwen2-public-trained-deploy-stream.md及_state/ms-swift-cuda/20261007-qwen2-public-trained-deploy-stream；完整矩阵未完成。
+
+### 2026-10-07 Qwen2 训练后全参数 checkpoint 公开流式 deploy 限定 L5
+- 原生10742、严格CUDA候选10743在同一cscg-qh09 RTX4090顺序运行真实swift.cli.main deploy SSE服务，固定单提示8-token请求各预热2次、稳态10次；独立worker10745逐次复核归一化chunk、文本、用量一致，候选分发器/服务进程启动及请求后共4条标记均fallback0。首内容事件中位延迟原生/候选0.060476/0.076775秒，比1.269503；完整响应中位0.202852/0.179645秒，比0.885596；串行completion token吞吐39.5166/43.4502 token/s，比1.099541；整卡显存2382/4817 MiB。
+- 仅计该训练后checkpoint、短文本单客户端greedy 8-token SSE合同限定L5；候选首事件较慢且显存更高，单次观察不外推。并发、长上下文、中断重连、其他模型与tuner、峰值显存not-run。详见refactor-wip/results/2026-10-07-qwen2-public-trained-deploy-stream-l5.md及_state/ms-swift-cuda/20261007-qwen2-public-trained-deploy-stream-l5；完整矩阵未完成。
