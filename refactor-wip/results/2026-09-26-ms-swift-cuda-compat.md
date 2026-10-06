@@ -2415,3 +2415,7 @@ VeRA第三轮MRO诊断证明native SUPER_SKIP_PASS，shim SUPER_SKIP_FAIL。nn_f
 ### 2026-10-07 Qwen2 训练后全参数 checkpoint 公开 Python API 流式限定 L5
 - 原生10804、严格CUDA候选10805在同一cscg-qh09 RTX4090顺序运行真实TransformersEngine.infer(stream=True)生成器，固定8-token请求各预热2次、稳态10次并前后显式CUDA同步；独立worker10811复核全部归一化事件和统计，候选start/end严格CUDA标记均fallback0。原生/候选首内容中位0.062971/0.076348秒，比1.212430；完整迭代中位0.204408/0.181156秒，比0.886248；串行completion token吞吐39.2530/43.9195 token/s，比1.118882；单进程整卡显存2382/4404 MiB。
 - 仅计该训练后checkpoint、纯FP32、短文本greedy Python迭代器限定L5，不等同HTTP SSE；并发迭代器、长上下文、logprobs、adapter、峰值显存not-run。详见refactor-wip/results/2026-10-07-qwen2-public-trained-checkpoint-python-api-stream-l5.md及_state/ms-swift-cuda/20261007-qwen2-public-trained-checkpoint-python-api-stream-l5；完整矩阵未完成。
+
+### 2026-10-07 公开评测依赖与其他模型资源静态审计
+
+- `swift eval` 顶层所需 evalscope 不在当前隔离 venv；Qwen2.5、ModernBERT、Qwen3-Embedding 等缓存目录仅见元数据，当前搜索范围只有 Qwen2-0.5B 存在真实权重。上述两面均记 resource-blocked，L0–L5 not-run；未在登录节点导入或执行计算，亦未增加 Slurm 作业。解除条件和精确静态证据见 `refactor-wip/results/2026-10-07-ms-swift-surface-resource-audit.md`。全功能面矩阵未完成。
