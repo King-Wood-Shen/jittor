@@ -22,6 +22,7 @@
 #include "ops/composite/random_op.h"
 #include "ops/reduce_op.h"
 #include "ops/composite/arg_reduce_op.h"
+#include "ops/composite/argsort_op.h"
 #include "ops/binary_op.h"
 #include "ops/broadcast_to_op.h"
 #include "ops/composite/transpose_op.h"
@@ -30,6 +31,7 @@
 #include "ops/composite/fused_adamw_op.h"
 #include "ops/composite/fused_sgd_op.h"
 #include "ops/composite/mapped_matmul_op.h"
+#include "ops/composite/write_back_op.h"
 #include "core/fused_op.h"
 #include "ops/unary_op.h"
 #include "ops/ternary_op.h"
@@ -820,6 +822,18 @@ namespace jittor
                  runner.run();
              }
          }},
+        {"argsort", [](Op *op)
+         {
+             // CANN Sort writes (values, indices); ArgsortOp holds the
+             // indices in y and the sorted values in y_key.
+             auto *_op = static_cast<ArgsortOp *>(op);
+             AclExecutionRunner<SortOpRunner, false> runner(false, _op->dim, _op->descending);
+             runner.jt_name = "argsort";
+             runner.add(_op->x, true);
+             runner.add(_op->y_key, false);
+             runner.add(_op->y, false);
+             runner.run();
+         }},
         {"arg_reduce", [](Op *op)
          {
              auto _op = (ArgReduceOp *)op;
@@ -836,6 +850,32 @@ namespace jittor
         // backends publish. ACL has no separate capability op, so the core
         // `random` op reaches the same launcher under its own name.
         {"random", exec_acl_random},
+        {"write_back", [](Op *op)
+         {
+             // Each entry is a plain device-to-device copy: `values[i]` into
+             // the storage `written[i]` shares with `targets[i]` (set up in
+             // WriteBackOp::infer_shape, backend-agnostic). CUDA batches all
+             // entries into one fused kernel; ACL has no such primitive, so
+             // each entry is its own aclrtMemcpyAsync on the current ACL
+             // stream -- ordered with the rest of a captured step the same
+             // way every other op here is. dtype/shape were already
+             // USER_CHECKed at construction.
+             auto *_op = (WriteBackOp *)op;
+             for (uint i = 0; i < _op->targets.size(); ++i)
+             {
+                 const int64 bytes = _op->targets[i]->size;
+                 if (!bytes || _op->written[i]->mem_ptr == _op->values[i]->mem_ptr)
+                     continue;
+                 auto ret = aclrtMemcpyAsync(
+                     _op->written[i]->mem_ptr, bytes,
+                     _op->values[i]->mem_ptr, bytes,
+                     ACL_MEMCPY_DEVICE_TO_DEVICE, aclstream);
+                 if (ret != ACL_SUCCESS)
+                     throw std::runtime_error(
+                         "aclrtMemcpyAsync failed: " +
+                         acl_error_to_string(ret));
+             }
+         }},
     };
 
     static bool is_acl_random(const string &name)
@@ -862,6 +902,17 @@ namespace jittor
                 unsupported = acl_getitem_unsupported_reason(op);
             if (unsupported.empty() && op->name() == string("setitem"))
                 unsupported = acl_setitem_unsupported_reason(op);
+            if (op->name() == string("argsort"))
+            {
+                auto *sort = static_cast<ArgsortOp *>(op);
+                const auto dtype = sort->x->dtype();
+                if (dtype != ns_float16 && dtype != ns_float32 &&
+                    dtype != ns_int8 && dtype != ns_int16 &&
+                    dtype != ns_int32 && dtype != ns_int64 && dtype != ns_uint8)
+                    unsupported = "argsort requires a CANN Sort input dtype";
+                if (sort->y->dtype() != ns_int64)
+                    unsupported = "argsort ACL indices must be int64 before output cast";
+            }
             if (op->name() == string("arg_reduce"))
             {
                 auto *reduce = static_cast<ArgReduceOp *>(op);

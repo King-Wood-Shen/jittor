@@ -9,7 +9,7 @@ description: 在真实 NVIDIA CUDA 上按 ms-swift 公开入口及 L0-L5 覆盖�
 
 回答当前 ms-swift checkout 的公开训练、推理和生态入口在 Jittor torch shim 上能否保持原生 PyTorch CUDA 的设备、数值、梯度、状态及性能合同。单个 `ms_swift_lora_llama` 生态用例只属于入口烟测，不能代表整个 ms-swift。结论只适用于真实 NVIDIA CUDA；CPU 可作独立 oracle，不把 NPU、ROCm 或软件回退计入 CUDA 通过。
 
-开始前读仓库 `AGENTS.md`、`agent/manuals/collaboration.md`、`agent/manuals/project-context.md`、`../downstream-library-adaptation/SKILL.md`、`../transformers-torch-compat/SKILL.md` 与 `../github-collaboration-commit/SKILL.md`。以 `refactor-wip/results/2026-09-26-ms-swift-cuda-compat.md` 及最新实验目录为历史证据；历史 PASS 必须绑定原 SHA、运行键和验收层级，不自动继承到新基线。
+开始前读仓库 `AGENTS.md`、`agent/manuals/collaboration.md`、`agent/manuals/project-context.md`、`../downstream-library-adaptation/SKILL.md`、`../transformers-torch-compat/SKILL.md` 与 `../github-collaboration-commit/SKILL.md`。以历史提交 `fb23d894e:refactor-wip/results/2026-09-26-ms-swift-cuda-compat.md` 及最新实验目录为历史证据；历史 PASS 必须绑定原 SHA、运行键和验收层级，不自动继承到新基线。
 
 ## 先固定可复现范围
 
