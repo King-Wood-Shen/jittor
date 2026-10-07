@@ -11,11 +11,13 @@
 
 Slurm 11114 的独立原生 PyTorch CUDA oracle 与 11116 的严格候选依次在同一 worker 和同两张 GPU 完成公开 CLI 三步，均保存 checkpoint-3、optimizer、scheduler 及 `rng_state_0.pth`/`rng_state_1.pth`。rank 0/1 的 GPU UUID 分别为 `GPU-802213e4-8931-05eb-d8d4-071c591407d8`、`GPU-deaf0c66-ef84-f611-00d3-dd81224c380d`。候选主进程和两个 rank 启动、退出均记录 `use_cuda=1`、shim 标记真、fallback 0；rank 上的 `RANK/WORLD_SIZE/LOCAL_RANK` 与 `JT_NCCL_RANK/JT_NCCL_WORLD_SIZE` 为 `0或1/2/0或1` 与 `0或1/2`。11129 在 worker 上独立比较：三步 loss 每步绝对差 `2.38419e-7`，梯度范数最大相对差 `1.71095e-6`，token accuracy 全相同；最终 290 个模型键最大绝对差 `7.45058e-9`、整体差 L2 `5.50777e-8`，两侧各有 246 个张量发生 FP32 可见更新，更新 L2 分别为 `0.001200761541` 与 `0.001200761587`。
 
+Slurm 11211 在 Jittor `0c9810603d83b2aa53dd04051436a1265957ece7`（包含上游 `ffeb7bd80447ca78735e7cb96628ab88c1e9360b`）、ms-swift `88d727951203256baa564c643c651b6f8d90fd7e` 上，同一 worker 先运行独立原生 PyTorch、再运行严格 shim 的公开 CLI 一步梯度采集；11214 在 worker 上比较四份 rank 清单。两张 RTX 4090 的 UUID 为 `GPU-b0072d68-0103-2d5a-f6aa-07f7d6311356` 和 `GPU-dc9aeebd-1eae-0eee-47d1-97050e5f3252`。原生 rank0/rank1 及 shim rank0/rank1 各保存 290 个更新前的 FP32 CUDA 参数梯度；各运行时两 rank 梯度逐项完全一致。对应 rank 的原生与 shim 梯度最大绝对差 `2.59839e-7`，相对 L2 `5.23540e-6`。候选主进程和两个 rank 起止均记录 `use_cuda=1`、shim 标记真及 `fallback_count=0`；两个 rank 的 Torch/Jittor rank、world size 与本地 rank 一致。梯度文件、清单、脚本和 `gradient-comparison.json` 未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261007-qwen2-public-causal-fullparam-ddp-grad-qh17-ffeb/`。
+
 | 层 | 本配置状态 | 缺口 |
 | --- | --- | --- |
 | L0 | partial | 真实模型、tokenizer、数据、trainer 与双 rank 构造成功；初始状态键、逐项 dtype/设备未直接审计。 |
 | L1 | not-run | loss 与 token accuracy 来自训练日志；同权重同输入的 logits/hidden 逐张量前向对拍未运行。 |
-| L2 | blocked | 三步 loss、梯度范数和最终权重贴近，但全部 trainable 参数的逐项梯度与每步 optimizer 状态/更新未直接比较。输入为离散 token ID，不适用输入梯度。 |
+| L2 | blocked | 新增的一步双 rank 采集已直接比较全部 290 个 trainable 参数梯度，rank 内跨设备完全一致，原生与 shim 相对 L2 为 `5.23540e-6`；既有三步 loss、梯度范数和最终权重贴近。但第 2、3 步逐参数梯度与每步 optimizer 状态/更新仍未直接比较。输入为离散 token ID，不适用输入梯度。 |
 | L3 | blocked | 新进程恢复后一步的权重、日志、optimizer、scheduler 与双 rank RNG 已核对；同进程恢复及数据游标直接审计未运行。 |
 | L4 | blocked | 两侧确已通过公开 CLI 和原生 torchrun 控制平面端到端完成；前级验收尚未全部通过。纯 Jittor launcher 未运行。 |
 | L5 | blocked | 前级未通过；未执行两次预热及十次同步稳态双卡性能协议。 |
