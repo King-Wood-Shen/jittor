@@ -1,6 +1,6 @@
 # Qwen2-0.5B 公开全参数 SFT：新基线三步数值复验
 
-- 状态：公开 CLI 三步端到端数值诊断完成；严格 L0–L5 尚未逐级验收。
+- 状态：公开 CLI 三步数值与首次更新前逐参数裁剪后梯度对拍完成；严格 L0–L5 尚未逐级验收。
 - 日期：2026-10-07。
 - 基线：Jittor `24483d232`（包含上游 `ffeb7bd80`）、ms-swift `88d7279`、隔离 Python 3.11.15。
 - 验证范围：真实缓存 Qwen2-0.5B、单 RTX 4090、公开 `python -m swift.cli.main sft`、全参数 FP32、SGD 无动量、固定数据、三步、每步 batch 4、最大长度 64、学习率 1e-5、无 AMP 与梯度累积。
@@ -13,11 +13,13 @@ Slurm 作业 11014 在同一 GPU 上先原生 PyTorch、后严格 Jittor CUDA，
 | --- | --- | --- |
 | L0 | partial | 真实模型、tokenizer、数据集及训练器经公开入口构造；初始状态键、全部 dtype 与设备的逐项审计未运行。 |
 | L1 | not-run | 尚无同权重同输入的独立前向张量与逐层误差对拍。 |
-| L2 | blocked | 三步 loss/权重接近，但逐参数梯度、适用输入梯度和每步 optimizer 状态未直接比较。 |
+| L2 | blocked | 首次更新前 290 项裁剪后梯度已直接比较，三步 loss/最终权重接近；裁剪前及第 2、3 步梯度、逐步 optimizer 状态和更新轨迹未直接比较。输入为离散 token ID，不适用输入梯度。 |
 | L3 | blocked | 同进程和新进程恢复后的 RNG、游标、scheduler、global step 与后续轨迹未运行。 |
 | L4 | blocked | 公开 CLI 两侧确已完成三步并保存 checkpoint；前级验收未全通过，不能升级为 L4 PASS。 |
 | L5 | blocked | 前级未通过；未做真实尺寸的两次预热和十次同步稳态计时。 |
 
-这证明该固定配置的公开训练入口可完成并产生贴近原生的三步权重轨迹，不能代替每个 trainable 参数及适用输入梯度的直接对拍。无动量 SGD 的 optimizer 状态为空；RNG、通用数据游标、新进程恢复、BF16、AdamW、LoRA、双卡与 L5 均未由本次验证。因此严格矩阵中 L2 尚不完整，L3–L5 不升级为 PASS；不能以训练完成或总梯度范数推断全面兼容。
+在同一代码基线的后续运行键 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261007-qwen2-fullparam-grad-step1-ffeb/` 中，Slurm 11078 先完成独立原生 PyTorch 三步训练；11081 在同一 RTX 4090 上完成严格 shim 三步训练。两侧各在首次 `SGD.step` 前保存 290 个 CUDA 梯度张量（按 optimizer 参数组位置索引）；此时训练已执行最大范数 1.0 的梯度裁剪。11085 在 worker 上复核形状、dtype、CUDA 标记和两侧完整清单：最大绝对差 `3.52971e-7`，整体相对 L2 `5.50140e-6`；裁剪后梯度整体 L2 分别为 `1.00000002` 和 `1.00000067`。该次第 3 步 loss 差 `5.72205e-6`，最终权重 290 键最大差 `7.45058e-9`，两侧各 246 张量更新。候选父子进程开始、采样及退出的 `fallback_count` 均为 0，`use_cuda=1`。原始 `*.npy`、清单、脚本、两侧 checkpoint、`gradient-comparison.json`、`comparison3.json` 和 Slurm 日志均未版本化。
+
+11078 候选在训练前因多进程通信的 UNIX socket 路径过长失败；11081 使用较短的隔离 `TMPDIR` 后训练完成，但作业壳层读取了旧 checkpoint 路径而返回 1，11085 已独立确认实际 checkpoint 与梯度产物。两侧数据预处理均打印 NFS 临时文件清理警告，未阻止训练。梯度只直接采集首次裁剪后一步；无动量 SGD 的 optimizer 状态为空，但逐步状态和更新未直接审计。RNG、通用数据游标、新进程恢复、BF16、AdamW、LoRA、双卡与 L5 均未由本次验证。因此严格矩阵中 L2 尚不完整，L3–L5 不升级为 PASS。
 
 未版本化证据：`$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261007-qwen2-public-causal-fullparam-fp32-ffeb/` 中的 `worker3.sh`、`run.sh`、两侧日志、checkpoint-3、`compare3.py`、`comparison3.json` 和候选启动/退出标记。
