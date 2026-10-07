@@ -7,7 +7,7 @@
 - 维护者：ms-swift CUDA 适配。
 - 复查条件：修复 Core 自动 flush 相关存活管理并在当前基线完成原生/候选逐事件对拍与两次预热加 10 次同步稳态。
 
-上游已删除 `refactor-wip/`。本分支先前 42 份报告保留在 Git 提交 `fb23d894e` 的 `refactor-wip/results/`，原始日志与模型仍在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/`。例如 `git show fb23d894e:refactor-wip/results/2026-10-07-qwen2-public-infer-1k-context.md` 可查公开 CLI 千 token 非流式的原生对拍；其他报告涵盖 Qwen2 基座、embedding、分类、tuner、双卡训练、恢复和公开推理。历史 PASS 均只属于各自原 SHA；同步后这些功能面记为 **not-run**，需逐面复验。
+上游已删除 `refactor-wip/`。本分支先前 42 份报告保留在 Git 提交 `fb23d894e` 的 `refactor-wip/results/`，原始日志与模型仍在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/`。例如 `git show fb23d894e:refactor-wip/results/2026-10-07-qwen2-public-infer-1k-context.md` 可查公开 CLI 千 token 非流式的原生对拍；其他报告涵盖 Qwen2 基座、embedding、分类、tuner、双卡训练、恢复和公开推理。历史 PASS 均只属于各自原 SHA；未作新基线单项复验的功能面记为 **not-run**。公开 CLI 千 token 非流式复验见 `2026-10-07-qwen2-infer-1k-ffeb.md`。
 
 ## 长上下文流式结果
 
