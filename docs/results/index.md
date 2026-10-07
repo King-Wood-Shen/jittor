@@ -53,6 +53,6 @@
 | [Torch 兼容层在真实模型上对 PyTorch：差距表、显存与性能修复](2026-09-24-torch-compat-real-models.md) | 11 项全部跑通，几何平均 1.26x，进程显存峰值为 PyTorch 的 0.87–1.45 倍；余下差距在主机侧 | 2026-09-24 |
 | [性能/显存分析工具：审计与重写](2026-09-25-profiling-tools.md) | 已实现，RTX 4090 上验证；未合入 | 2026-09-25 |
 | [ms-swift CUDA 适配：基线同步与长上下文流式断点](2026-10-07-ms-swift-cuda-compat-sync.md) | 新基线完整性能协议段错误；长上下文流式 L4/L5 未通过 | 2026-10-07 |
-| [Qwen2-0.5B 公开 infer CLI 千 token 非流式复验](2026-10-07-qwen2-infer-1k-ffeb.md) | 新基线限定配置 L4 PASS；L5 not-run | 2026-10-07 |
+| [Qwen2-0.5B 公开 infer CLI 千 token 非流式复验](2026-10-07-qwen2-infer-1k-ffeb.md) | 新基线限定配置的公开入口输出一致；完整 L0/L1/L3 未验，L4/L5 blocked | 2026-10-07 |
 | [Qwen2-0.5B 公开全参数 SFT 双卡三步与恢复复验](2026-10-07-qwen2-causal-ddp-ffeb.md) | 原生 torchrun 控制平面与 Jittor 双 rank 的限定数值及新进程恢复诊断；完整 L0–L5 待验 | 2026-10-07 |
 | [Qwen2-0.5B 公开全参数 SFT 三步复验](2026-10-07-qwen2-causal-sft-ffeb.md) | 首步逐参数梯度、三步权重及新进程一步续训对齐；完整 L2–L4 待验 | 2026-10-07 |
