@@ -374,6 +374,7 @@ include docs/results/2026-09-19-torch-compat-runbook-verification.md
 include docs/results/2026-09-24-torch-compat-real-models.md
 include docs/results/2026-09-25-profiling-tools.md
 include docs/results/2026-10-07-ms-swift-cuda-compat-sync.md
+include docs/results/2026-10-07-qwen2-causal-ddp-ffeb.md
 include docs/results/2026-10-07-qwen2-causal-sft-ffeb.md
 include docs/results/2026-10-07-qwen2-infer-1k-ffeb.md
 include docs/results/index.md
