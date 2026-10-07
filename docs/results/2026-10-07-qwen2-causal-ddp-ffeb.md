@@ -1,6 +1,6 @@
 # Qwen2-0.5B 公开因果 SFT：双卡全参数新基线复验
 
-- 状态：固定 FP32/SGD 配置的公开 CLI 双卡三步及新进程一步恢复数值诊断完成；严格 L0–L5 尚未逐级验收。
+- 状态：固定 FP32/SGD 配置的公开 CLI 双卡三步及新进程一步恢复数值诊断完成；补做三步逐梯度扩展时原生 qh09 在模型构造前设备枚举失败，严格 L0–L5 尚未逐级验收。
 - 日期：2026-10-07。
 - 基线：Jittor `37591b485`（代码包含上游 `ffeb7bd80`）、ms-swift `88d727951`。Jittor 工作树干净；ms-swift 有既存未跟踪 `model_arch.jsonl`，本实验未使用或修改。
 - 范围：真实 Qwen2-0.5B、公开 `python -m swift.cli.main sft`、两张 RTX 4090、`NPROC_PER_NODE=2`、全参数 FP32、eager attention、SGD 无动量、每卡 batch 2、三步、固定四条数据、最大长度 64、学习率 `1e-5`。候选采用原生 `torch.distributed.run` 控制平面启动 Jittor 双 rank，不能据此宣称纯 Jittor launcher 兼容。
@@ -23,6 +23,8 @@ Slurm 11211 在 Jittor `0c9810603d83b2aa53dd04051436a1265957ece7`（包含上游
 | L5 | blocked | 前级未通过；未执行两次预热及十次同步稳态双卡性能协议。 |
 
 最初在另一节点运行的原生双卡尝试 11107/11108 于模型构造前失败；独立设备探针 11110 证明该节点的 PyTorch `device_count()` 报 2，但查询第二张卡属性触发 `CUDAContext.cpp` 的 `device=1, num_gpus=1` 断言。11113 在最终 worker 的两卡探针通过后才运行 11114/11116。候选与原生数据预处理均打印 NFS 临时文件清理警告，未阻止训练。首次 JIT 编译与原生训练耗时不构成 L5 性能数据；历史基线的双卡 PASS 不自动继承到此配置之外。
+
+后续扩展三步逐参数梯度的 Slurm 11278 在 qh09 原生阶段、模型构造前再次遇到 `device=1, num_gpus=1`。Slurm 分配及 `CUDA_VISIBLE_DEVICES=0,1` 均记录两张 RTX 4090，UUID 为 `GPU-441d4e27-c737-30fa-43d1-19eb707a66be` 与 `GPU-9bd8132a-6548-f4e0-545a-9b93a323f3e0`；rank 启动日志中两个 rank 均退出前未构造模型。该运行候选阶段没有执行，依赖比较 11279 因依赖失败取消，不能计作兼容性数据。首次错误、torchrun traceback 与 rank 日志未版本化，保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261007-qwen2-public-causal-fullparam-ddp-grad3-qh17-ffeb/`。独立原生设备枚举探针 11294 已针对同一 qh09 提交，等待调度；根因判明前不重试三步训练。此前成功的双卡训练与恢复证据保持有效，当前 L2 仍 blocked。
 
 ## 新进程双卡恢复：第 3 步至第 4 步
 
