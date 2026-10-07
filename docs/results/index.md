@@ -29,6 +29,7 @@
 2026-09-25-profiling-tools
 2026-10-07-ms-swift-cuda-compat-sync
 2026-10-07-qwen2-infer-1k-ffeb
+2026-10-07-qwen2-ia3-infer-ffeb
 2026-10-07-qwen2-causal-ddp-ffeb
 2026-10-07-qwen2-causal-sft-ffeb
 ```
@@ -54,5 +55,6 @@
 | [性能/显存分析工具：审计与重写](2026-09-25-profiling-tools.md) | 已实现，RTX 4090 上验证；未合入 | 2026-09-25 |
 | [ms-swift CUDA 适配：基线同步与长上下文流式断点](2026-10-07-ms-swift-cuda-compat-sync.md) | 新基线完整性能协议段错误；长上下文流式 L4/L5 未通过 | 2026-10-07 |
 | [Qwen2-0.5B 公开 infer CLI 千 token 非流式复验](2026-10-07-qwen2-infer-1k-ffeb.md) | 补齐完整序列 logits 与 hidden-state 对拍；状态恢复和完整 L0–L5 验收未完成 | 2026-10-07 |
+| [Qwen2-0.5B IA3 adapter 公开 infer](2026-10-07-qwen2-ia3-infer-ffeb.md) | 同一 adapter 下两条公开输出相同；逐参数设备、完整 logits 与恢复未验 | 2026-10-07 |
 | [Qwen2-0.5B 公开全参数 SFT 双卡三步与恢复复验](2026-10-07-qwen2-causal-ddp-ffeb.md) | 一步双卡逐参数梯度对拍完成；三步扩展在原生 qh09 设备枚举处失败；完整 L0–L5 待验 | 2026-10-07 |
 | [Qwen2-0.5B 公开全参数 SFT 三步复验](2026-10-07-qwen2-causal-sft-ffeb.md) | 首步逐参数梯度、三步权重及新进程一步续训对齐；完整 L2–L4 待验 | 2026-10-07 |
