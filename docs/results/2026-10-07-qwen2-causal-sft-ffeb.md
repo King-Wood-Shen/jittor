@@ -14,7 +14,7 @@ Slurm 作业 11014 在同一 GPU 上先原生 PyTorch、后严格 Jittor CUDA，
 | L0 | partial | 真实模型、tokenizer、数据集及训练器经公开入口构造；初始状态键、全部 dtype 与设备的逐项审计未运行。 |
 | L1 | not-run | 尚无同权重同输入的独立前向张量与逐层误差对拍。 |
 | L2 | blocked | 首次更新前 290 项裁剪后梯度已直接比较，三步 loss/最终权重接近；裁剪前及第 2、3 步梯度、逐步 optimizer 状态和更新轨迹未直接比较。输入为离散 token ID，不适用输入梯度。 |
-| L3 | blocked | 新进程从 checkpoint-3 续训一步并对齐 global step 与最终权重；同进程恢复，以及 optimizer、scheduler、RNG、数据游标的直接状态审计未运行。 |
+| L3 | blocked | 新进程从 checkpoint-3 续训一步并对齐 global step 与最终权重；optimizer 保存状态完全同构，scheduler 核心步数与学习率一致，RNG 四类条目均可加载；同进程恢复、RNG 值及数据游标的直接审计未运行。 |
 | L4 | blocked | 公开 CLI 两侧确已完成三步并保存 checkpoint；前级验收未全通过，不能升级为 L4 PASS。 |
 | L5 | blocked | 前级未通过；未做真实尺寸的两次预热和十次同步稳态计时。 |
 
@@ -22,6 +22,8 @@ Slurm 作业 11014 在同一 GPU 上先原生 PyTorch、后严格 Jittor CUDA，
 
 11078 候选在训练前因多进程通信的 UNIX socket 路径过长失败；11081 使用较短的隔离 `TMPDIR` 后训练完成，但作业壳层读取了旧 checkpoint 路径而返回 1，11085 已独立确认实际 checkpoint 与梯度产物。两侧数据预处理均打印 NFS 临时文件清理警告，未阻止训练。梯度只直接采集首次裁剪后一步；无动量 SGD 的 optimizer 状态为空，但逐步状态和更新未直接审计。RNG、通用数据游标、BF16、AdamW、LoRA、双卡与 L5 均未由这两次三步训练验证。因此严格矩阵中 L2 尚不完整，L3–L5 不升级为 PASS。
 
-后续新进程恢复运行键为 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261007-qwen2-fullparam-resume-ffeb/`。Slurm 11087 的原生 PyTorch CUDA 从原生 checkpoint-3 续训至 checkpoint-4；11088 的严格 shim CUDA 从候选 checkpoint-3 续训至 checkpoint-4，父子进程启动及退出均为 `use_cuda=1`、shim 标记真、fallback 0。11089 在 worker 上对拍：第 4 步 `global_step=4`，290 个模型权重键最大绝对差 `7.45058e-9`、整体差 L2 `6.49349e-8`；两侧各有 246 个权重张量继续更新，更新 L2 分别为 `0.000400253221` 与 `0.000400253236`；loss 差 `2.14577e-6`，token accuracy 一致。11087 的首次候选启动误用了梯度实验的 `sitecustomize`，未安装 shim 并在读候选 optimizer 文件时失败；该次结果作废，原始日志保留，11088 使用固定脚本独立重跑候选。此次仅对拍了新进程一步的模型输出轨迹，尚未直接逐项审计 checkpoint 内 optimizer、scheduler、RNG 和数据游标，也未测同进程恢复，因此 L3 仍 blocked。
+后续新进程恢复运行键为 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261007-qwen2-fullparam-resume-ffeb/`。Slurm 11087 的原生 PyTorch CUDA 从原生 checkpoint-3 续训至 checkpoint-4；11088 的严格 shim CUDA 从候选 checkpoint-3 续训至 checkpoint-4，父子进程启动及退出均为 `use_cuda=1`、shim 标记真、fallback 0。11089 在 worker 上对拍：第 4 步 `global_step=4`，290 个模型权重键最大绝对差 `7.45058e-9`、整体差 L2 `6.49349e-8`；两侧各有 246 个权重张量继续更新，更新 L2 分别为 `0.000400253221` 与 `0.000400253236`；loss 差 `2.14577e-6`，token accuracy 一致。11087 的首次候选启动误用了梯度实验的 `sitecustomize`，未安装 shim 并在读候选 optimizer 文件时失败；该次结果作废，原始日志保留，11088 使用固定脚本独立重跑候选。
+
+Slurm 11093 在各自运行时加载 checkpoint-4 的 `optimizer.pt`、`scheduler.pt` 与 `rng_state.pth`，候选加载时 fallback 0。两侧无动量 SGD 的 optimizer `state` 均为空，两个参数组的已保存字段和值完全相同；scheduler 的 `last_epoch=4`、`_step_count=5`、`base_lrs` 和 `_last_lr` 一致。scheduler 结构存在非核心字段差异：原生有 `verbose=false`，shim 有 `_is_initial=false`。RNG 两侧均保存并可加载 `python`、`numpy`、`cpu`、`cuda` 四类条目，但不同运行时的内部状态未做逐值等价断言；数据游标也未直接审计。同进程恢复未运行，因此 L3 仍 blocked。
 
 未版本化证据：`$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261007-qwen2-public-causal-fullparam-fp32-ffeb/` 中的 `worker3.sh`、`run.sh`、两侧日志、checkpoint-3、`compare3.py`、`comparison3.json` 和候选启动/退出标记。
