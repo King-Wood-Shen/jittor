@@ -62,4 +62,4 @@
 | [Qwen2-0.5B 公开全参数 SFT 三步复验](2026-10-07-qwen2-causal-sft-ffeb.md) | 首步逐参数梯度、三步权重及新进程一步续训对齐；完整 L2–L4 待验 | 2026-10-07 |
 | [Qwen2-0.5B 公开全参数 SFT 三步逐参数梯度对拍](2026-10-08-qwen2-causal-sft-grad3-4a7e.md) | 290 项全参数梯度三步对齐；状态、更新轨迹与恢复仍未完成 L0–L4 验收 | 2026-10-08 |
 | [Qwen2-0.5B 全参数 SFT 首批前向对拍](2026-10-08-qwen2-causal-sft-forward-c23a.md) | 固定 batch 的 logits/hidden/loss 对拍通过数值门槛；完整层级仍受限，诊断钩子在 backward 触发内部断言 | 2026-10-08 |
-| [Qwen2-0.5B PEFT LoRA 公开 SFT：初始化随机状态未对齐](2026-10-08-qwen2-peftlora-sft-init.md) | 公开三步 CLI 成功且候选 CUDA/零 fallback；相同 seed 的 CUDA `kaiming_uniform_` 输出不一致，不能验收同状态梯度轨迹 | 2026-10-08 |
+| [Qwen2-0.5B PEFT LoRA 公开 SFT：初始化随机状态未对齐](2026-10-08-qwen2-peftlora-sft-init.md) | 同 seed 的 CUDA `kaiming_uniform_` 输出不同；同状态直接 Transformers/PEFT logits 与 hidden 对拍通过，公开 CLI 的三步同状态轨迹仍未验收 | 2026-10-08 |
