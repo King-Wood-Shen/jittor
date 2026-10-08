@@ -35,6 +35,7 @@
 2026-10-07-qwen2-causal-sft-ffeb
 2026-10-08-qwen2-causal-sft-forward-c23a
 2026-10-08-qwen2-causal-sft-grad3-4a7e
+2026-10-08-qwen2-causal-sft-l0-audit
 2026-10-08-qwen2-peftlora-sft-init
 2026-10-08-qwen2-peftlora-adamw
 2026-10-08-qwen2-pt-fullparam-02498
@@ -67,6 +68,7 @@
 | [Qwen2-0.5B 公开全参数 SFT 双卡三步与恢复复验](2026-10-07-qwen2-causal-ddp-ffeb.md) | 一步双卡逐参数梯度对拍完成；三步扩展在原生 qh09 设备枚举处失败；完整 L0–L5 待验 | 2026-10-07 |
 | [Qwen2-0.5B 公开全参数 SFT 三步复验](2026-10-07-qwen2-causal-sft-ffeb.md) | 首步逐参数梯度、三步权重及新进程一步续训对齐；完整 L2–L4 待验 | 2026-10-07 |
 | [Qwen2-0.5B 公开全参数 SFT 三步逐参数梯度对拍](2026-10-08-qwen2-causal-sft-grad3-4a7e.md) | 290 项全参数梯度三步对齐；状态、更新轨迹与恢复仍未完成 L0–L4 验收 | 2026-10-08 |
+| [Qwen2-0.5B 公开 SFT 单卡初始参数 CUDA 审计](2026-10-08-qwen2-causal-sft-l0-audit.md) | 290 个 trainable 参数的 CUDA 初态跨运行时逐项相同；state-dict 参数名和后续层仍未验，L0 partial | 2026-10-08 |
 | [Qwen2-0.5B 全参数 SFT 首批前向对拍](2026-10-08-qwen2-causal-sft-forward-c23a.md) | 固定 batch 的 logits/hidden/loss 对拍通过数值门槛；完整层级仍受限，诊断钩子在 backward 触发内部断言 | 2026-10-08 |
 | [Qwen2-0.5B PEFT LoRA 公开 SFT：同状态三步对拍](2026-10-08-qwen2-peftlora-sft-init.md) | 固定 adapter 下 L0-L2 与公开 `swift sft` L4 通过；新进程恢复至 step 4 的 L3 为 partial，L5 blocked；随机初始化差异仍在 | 2026-10-08 |
 | [Qwen2-0.5B PEFT LoRA：AdamW 三步公开 SFT 对拍](2026-10-08-qwen2-peftlora-adamw.md) | 固定配置 L0/L1/L4 通过；三步梯度与更新数值对齐，optimizer step device 元数据差异使 L2 partial | 2026-10-08 |
