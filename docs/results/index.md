@@ -50,6 +50,7 @@
 2026-10-08-ms-swift-eval-dependency-block
 2026-10-08-torch-randomsampler-generator
 2026-10-08-qwen2-swiftlora-forward
+2026-10-08-qwen2-causal-transformersengine-api
 ```
 
 ## 按主题索引
@@ -94,3 +95,4 @@
 | [Qwen2-0.5B 公开全参数 DPO 三步 CUDA 对拍](2026-10-08-qwen2-dpo-full-cuda.md) | 原生三步成功；strict CUDA shim 首步反向触发 `NanoVector` 内部断言，DPO 该配置失败，根因待定位 | 2026-10-08 |
 | [Torch `RandomSampler` 显式 Generator CUDA 运行时对拍](2026-10-08-torch-randomsampler-generator.md) | 同 seed 跨 runtime 的样本顺序不同；各 runtime 内 generator 状态恢复可重放；仅测试 sampler API，不包含模型或 Swift CLI | 2026-10-08 |
 | [Qwen2-0.5B ms-swift 私有 Swift LoRA 固定状态前向](2026-10-08-qwen2-swiftlora-forward.md) | 当前基线下直接 `Swift.prepare_model` 前向通过数值门槛，严格 CUDA/零 fallback；L0 partial，训练/恢复/公开入口/性能未运行 | 2026-10-08 |
+| [Qwen2-0.5B causal LM `TransformersEngine` Python API CUDA 对拍](2026-10-08-qwen2-causal-transformersengine-api.md) | 固定两请求非流式生成在 31 步 logits、token IDs 和文本上对齐；L0/L1/L4/L5 通过、L2/L3 不适用、strict CUDA/零 fallback | 2026-10-08 |
