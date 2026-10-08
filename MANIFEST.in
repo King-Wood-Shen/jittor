@@ -384,6 +384,7 @@ include docs/results/2026-10-08-qwen2-causal-ddp-grad3-6c104.md
 include docs/results/2026-10-08-qwen2-causal-ddp-resume-7a18.md
 include docs/results/2026-10-08-qwen2-causal-sft-forward-c23a.md
 include docs/results/2026-10-08-qwen2-causal-sft-grad3-4a7e.md
+include docs/results/2026-10-08-qwen2-causal-sft-gradient-checkpointing-cuda.md
 include docs/results/2026-10-08-qwen2-causal-sft-l0-audit.md
 include docs/results/2026-10-08-qwen2-causal-transformersengine-api.md
 include docs/results/2026-10-08-qwen2-dpo-full-cuda.md

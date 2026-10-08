@@ -1729,6 +1729,17 @@ workaround.
 - Evidence: [Qwen2-0.5B public full-parameter DPO report](../../docs/results/2026-10-08-qwen2-dpo-full-cuda.md), Slurm 13175 native oracle and 13176 strict shim; raw traces under `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-qwen2-dpo-3step-v6/`.
 - Exit condition: isolate the failing graph path, add a minimal regression that fails before the fix, then pass the same three-step native/strict CUDA comparison with gradient/state evidence and zero fallback.
 
+## KI-COMPAT-011: Torch gradient checkpointing does not recompute activations
+
+- Severity: Medium (requested memory behavior is absent)
+- Status: Limitation; confirmed 2026-10-08 on the current CUDA ms-swift path
+- Owner: torch compatibility / autograd
+- Symptom: `torch.utils.checkpoint.checkpoint` executes the wrapped function directly under Jittor; activations remain live and `use_reentrant` has no effect. Training can produce numerically close updates, but memory savings are not provided.
+- Cause: Jittor currently has no compatible activation-checkpoint recomputation primitive; the wrapper is explicitly registered as approximate in `python/jittor/compat/torch/installers/data.py`.
+- Workaround: disable gradient checkpointing only when the model fits without the requested memory reduction; otherwise there is no verified equivalent path.
+- Evidence: [Qwen2-0.5B public SFT gradient-checkpointing report](../../docs/results/2026-10-08-qwen2-causal-sft-gradient-checkpointing-cuda.md), Slurm 13485; strict CUDA bootstrap reports zero fallback and the training log emits the pass-through warning.
+- Exit condition: implement recomputation with correct gradient/RNG behavior and demonstrate reduced activation memory plus native parity on a real CUDA model.
+
 ## KI-DIST-001: FSDP2 flat sharding peaks above the unsharded model
 
 - Severity: Limitation (memory; numerics are correct)
