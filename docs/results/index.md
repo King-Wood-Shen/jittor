@@ -48,6 +48,7 @@
 2026-10-08-qwen2-causal-ddp-resume-7a18
 2026-10-08-qwen2-dpo-full-cuda
 2026-10-08-ms-swift-eval-dependency-block
+2026-10-08-torch-randomsampler-generator
 ```
 
 ## 按主题索引
@@ -90,3 +91,4 @@
 | [Qwen2-0.5B 双卡公开 SFT checkpoint 恢复对拍](2026-10-08-qwen2-causal-ddp-resume-7a18.md) | 各 runtime 连续与 step-3→4 恢复的模型、优化器、scheduler、RNG 和末步指标对齐；sampler cursor 与前序层级证据不足，L3 partial | 2026-10-08 |
 | [ms-swift 公开 `swift eval`：依赖前置阻断](2026-10-08-ms-swift-eval-dependency-block.md) | Slurm worker 缺 `evalscope` 且代理拒绝连接；模型评估未运行，L0-L5 blocked/not-run | 2026-10-08 |
 | [Qwen2-0.5B 公开全参数 DPO 三步 CUDA 对拍](2026-10-08-qwen2-dpo-full-cuda.md) | 原生三步成功；strict CUDA shim 首步反向触发 `NanoVector` 内部断言，DPO 该配置失败，根因待定位 | 2026-10-08 |
+| [Torch `RandomSampler` 显式 Generator CUDA 运行时对拍](2026-10-08-torch-randomsampler-generator.md) | 同 seed 跨 runtime 的样本顺序不同；各 runtime 内 generator 状态恢复可重放；仅测试 sampler API，不包含模型或 Swift CLI | 2026-10-08 |
