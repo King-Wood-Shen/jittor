@@ -45,6 +45,7 @@
 2026-10-08-qwen2-pt-fullparam-02498
 2026-10-08-qwen2-causal-ddp-7a18-v4
 2026-10-08-qwen2-causal-ddp-grad3-6c104
+2026-10-08-ms-swift-eval-dependency-block
 ```
 
 ## 按主题索引
@@ -84,3 +85,4 @@
 | [Qwen2-0.5B 公开 `swift pt` 全参数 CUDA 三步对拍](2026-10-08-qwen2-pt-fullparam-02498.md) | 三步公开入口完成；checkpoint 290 键逐位一致，设备清单/梯度/optimizer 状态不足，L0-L2 partial | 2026-10-08 |
 | [Qwen2-0.5B 公开全参数 SFT：双卡 NCCL 三步新基线复验](2026-10-08-qwen2-causal-ddp-7a18-v4.md) | 双卡公开 CLI 与 290 键 checkpoint 对齐；step-3→4 恢复为 partial，逐参数梯度和 L5 未验，L0-L4 partial | 2026-10-08 |
 | [Qwen2-0.5B 公开全参数 SFT 双卡三步逐参数梯度补证](2026-10-08-qwen2-causal-ddp-grad3-6c104.md) | 三步全部梯度、rank 同步及末态权重对齐；输入身份与候选初态清单缺失，L0-L2 partial、L3 未运行、L4 partial、L5 blocked | 2026-10-08 |
+| [ms-swift 公开 `swift eval`：依赖前置阻断](2026-10-08-ms-swift-eval-dependency-block.md) | Slurm worker 缺 `evalscope` 且代理拒绝连接；模型评估未运行，L0-L5 blocked/not-run | 2026-10-08 |

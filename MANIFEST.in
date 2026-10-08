@@ -378,6 +378,7 @@ include docs/results/2026-10-07-qwen2-causal-ddp-ffeb.md
 include docs/results/2026-10-07-qwen2-causal-sft-ffeb.md
 include docs/results/2026-10-07-qwen2-ia3-infer-ffeb.md
 include docs/results/2026-10-07-qwen2-infer-1k-ffeb.md
+include docs/results/2026-10-08-ms-swift-eval-dependency-block.md
 include docs/results/2026-10-08-qwen2-causal-ddp-7a18-v4.md
 include docs/results/2026-10-08-qwen2-causal-ddp-grad3-6c104.md
 include docs/results/2026-10-08-qwen2-causal-sft-forward-c23a.md
