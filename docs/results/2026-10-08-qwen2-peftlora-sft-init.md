@@ -1,6 +1,6 @@
 # Qwen2-0.5B PEFT LoRA 公开 SFT：同状态三步对拍
 
-- 状态：固定配置 L0-L2、单卡公开 `swift sft` L4 通过；L3 新进程续训已部分验证（global_step、更新梯度及 adapter 轨迹对齐，未保存恢复后的输入以直接核对 dataloader 游标/RNG）；L5 blocked。LoRA 随机初始化本身仍不对齐，需用显式转入同一 adapter 状态建立 oracle；不代表 PEFT LoRA 或 ms-swift 整体兼容。
+- 状态：固定配置 L0-L2、单卡公开 `swift sft` L4 通过；L3 新进程续训已部分验证（step-3 恢复后的首批输入、RNG、scheduler、梯度及 adapter 轨迹对齐）；同进程恢复、buffer 和有持久逐参数状态的 optimizer 配置仍未验；L5 blocked。LoRA 随机初始化本身仍不对齐，需用显式转入同一 adapter 状态建立 oracle；不代表 PEFT LoRA 或 ms-swift 整体兼容。
 - 日期：2026-10-08。
 - Jittor 基线：`5def3f89d8de1ddc8d95d18778b10d08c72dbedc`（包含上游 `origin/2.0-refactor` 的 `26bf23f9a0c0e3e12838089ec67a9fb380cba9c2`）。
 - ms-swift checkout：`88d727951203256baa564c643c651b6f8d90fd7e`。
@@ -24,7 +24,7 @@
 | L0 | PASS（固定配置） | Slurm 12738 公开 CLI 构造完整模型、PEFT、tokenizer/data/trainer；386 项状态元数据相同且初始 SHA256 全等，全部 CUDA。随机初始化差异由显式相同 adapter checkpoint 消除。 |
 | L1 | PASS（固定配置） | Slurm 12738 原生与 shim 公开 CLI 首批实际输入完全一致，logits/loss 结构、有限值和误差通过；Slurm 12690/12692 另对相同 adapter 的直接 PEFT 前向与 25 组 hidden 通过。 |
 | L2 | PASS（三步固定轨迹） | Slurm 12738 对全部 96 个 trainable 参数三步逐项记录梯度及更新；误差见上。固定四条数据不 shuffle，SGD momentum=0，无持久逐参数 optimizer state。未覆盖输入梯度或其他 optimizer。 |
-| L3 | partial | Slurm 12799/12802 新进程从三步 checkpoint 恢复至 global_step 4；续训梯度与 adapter 对拍通过。未直接保存恢复后的 batch 输入与 RNG 状态，完整恢复合同未通过。 |
+| L3 | partial | Slurm 13455 新进程从 step-3 checkpoint 恢复后直接捕获首批 input IDs/labels/mask，三步 RNG 状态分别与各自 checkpoint 完全匹配，scheduler 核心状态、step-4 梯度及 adapter 对齐。配置使用 SGD(momentum=0)，逐参数 optimizer state 为空；shim scheduler 另含 `_is_initial` 字段。未测同进程恢复、buffer 或有持久 optimizer state 的配置。 |
 | L4 | PASS（单卡 `swift sft`） | Slurm 12738 两侧公开 CLI 均完成三步并保存 checkpoint；仅代表该 PEFT LoRA 固定配置。 |
 | L5 | blocked | L3 完整恢复合同仍不完整；本配置未运行性能协议。 |
 
@@ -33,6 +33,14 @@
 运行键 `20261008-peft-lora-l3-restore-ckpt3-r2` 在 cscg-qh17 RTX 4090（UUID `GPU-2fd350e6-8fcd-9385-4e5e-46405831cfa1`）先原生后严格 shim，通过公开 `swift sft --resume_from_checkpoint` 分别从既有三步 `checkpoint-3` 新进程恢复，目标 `max_steps=4`。两侧 checkpoint 均含 adapter、`trainer_state.json`、optimizer、scheduler 与 RNG 文件。原生与 shim 的 Trainer `global_step` 均从 3 续至 4、epoch 从 3 到 4；四条样本、关闭数据集与 dataloader shuffle，因此下一轮固定一个 batch。第 4 步 loss 分别为 `3.82575250` 与 `3.82575178`，96 个 trainable CUDA 梯度最大绝对差 `6.88713e-7`、最坏单参数相对 L2 `9.50411e-6`；第 4 步 adapter 跨运行最大绝对差 `1.86265e-9`、相对 L2 `6.01197e-6`。候选启动及 optimizer step 的 `use_cuda=1`、fallback 0。比较作业 12802 在同型号 GPU worker 完成。
 
 恢复层仍只记 **partial**：本次捕获器没有命中 Swift 覆盖的 `compute_loss`，故没有保存恢复后的首批 IDs/labels 或恢复前参数快照；固定数据顺序和 global_step/epoch 只能间接支撑游标，不能代替直接输入与 RNG 状态核对。该记录证明这组无 dropout、无 momentum、constant scheduler 的 LoRA CLI 配置可从新进程续一步并保持数值接近，不证明任意 dataloader、optimizer 或 RNG 恢复。首次尝试 12795 因 TMPDIR 路径过长导致 `AF_UNIX path too long`，发生在模型训练前；日志保留。原始比较文件位于未版本化目录 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-peft-lora-l3-restore-ckpt3-r2/`，失败记录位于 `.../r1/`。
+
+### 新进程恢复状态补充（Slurm 13455）
+
+运行键 `20261008-peft-lora-l3-restore-input-rng-r2` 在当前 Jittor HEAD `7fef532497c8dc533148fafc0dbcfd4f38b57b04` 上，于 cscg-qh17 RTX 4090（UUID `GPU-be5af850-cef8-4838-1a48-cf8f4e5d7102`）先原生后 strict shim，通过同一个公开 `swift sft --resume_from_checkpoint` 配置分别从既有原生与 shim step-3 checkpoint 续到 step 4。恢复后实际送入模型的 `input_ids`、`labels`、`attention_mask` shape 分别为 `[4,31]`、`[4,8]`、`[4,31]`，跨 runtime 逐项完全一致。RNG 加载后 Python、NumPy、CPU Torch、CUDA Torch 状态分别与各自 checkpoint 保存值完全一致。Trainer 恢复的 scheduler `last_epoch=3`、`_step_count=4`、`base_lrs` 与 `_last_lr` 跨 runtime 一致；shim 多出 `_is_initial=false`。本配置为 SGD momentum 0，optimizer 没有逐参数持久状态，因此不能将此结果外推为 AdamW/momentum 状态恢复。两个 runtime 的 `global_step` 均从 3 运行到 4；step-4 loss 原生 `3.82575250`、shim `3.82575130`（差 `1.19209e-6`）。96/96 梯度有限且跨 runtime CUDA 对拍，最大绝对差 `6.14673e-7`、最坏单参数相对 L2 `9.41146e-6`；96 项最终 adapter 最大绝对差 `1.86265e-9`、相对 L2 `6.01110e-6`。strict shim 进程、恢复与 optimizer step 均记录 `use_cuda=1`、`fallback_count=0`。
+
+首次采集尝试运行键 `20261008-peft-lora-l3-restore-input-rng-r1`（Slurm 13445）在原生训练开始前由采集器错误判定 CUDA RNG 不匹配：非分布式 checkpoint 将单卡 CUDA RNG 保存为 tensor，采集器误按 tensor 列表比较。该尝试没有执行训练，相关日志留在 `.../20261008-peft-lora-l3-restore-input-rng-r1/`。r2 修正状态格式处理后完成两侧恢复、step 4 与比较。原始事件、checkpoint、逐项状态和比较器保存在未版本化目录 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-peft-lora-l3-restore-input-rng-r2/`。
+
+L3 仍为 **partial**：该补充通过新进程直接核对了续训输入和各自 RNG，但没有验证同进程恢复、模型 buffer，以及拥有逐参数状态的 optimizer 恢复。此前试验与本次运行均限于 Qwen2-0.5B、四条固定数据、无 shuffle、FP32、PEFT LoRA、SGD(momentum=0) 和 constant scheduler。
 
 脚本、日志、梯度、checkpoint、元数据及比较文件保留在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-qwen2-peftlora-sft-l0l2-8ac1/`、`20261008-peftlora-initprobe-5e71/`、`20261008-peftlora-resetseed-39bd/`、`20261008-peft-kaiming-init-0d4f/` 与 `20261008-peft-lora-l2-inputcap-try4-d51b/`。该结果只限 Qwen2-0.5B 此 PEFT LoRA 配置，不代表 PEFT LoRA 或 ms-swift tuner 功能面整体兼容。
 
