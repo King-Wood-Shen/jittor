@@ -87,6 +87,7 @@
 | [Qwen2-0.5B 公开全参数 SFT 三步复验](2026-10-07-qwen2-causal-sft-ffeb.md) | 首步逐参数梯度、三步权重及新进程一步续训对齐；完整 L2–L4 待验 | 2026-10-07 |
 | [Qwen2-0.5B 公开全参数 SFT 三步逐参数梯度对拍](2026-10-08-qwen2-causal-sft-grad3-4a7e.md) | 290 项全参数梯度三步对齐；状态、更新轨迹与恢复仍未完成 L0–L4 验收 | 2026-10-08 |
 | [Qwen2-0.5B 公开 SFT gradient checkpointing CUDA 复验](2026-10-08-qwen2-causal-sft-gradient-checkpointing-cuda.md) | 三步数值与末态权重接近且零 fallback；shim 直通不重算激活、不节省显存，checkpointing 内存语义不兼容 | 2026-10-08 |
+| [Qwen2-0.5B 公开 SFT BF16 autocast CUDA 复验](2026-10-08-qwen2-causal-sft-bf16-amp-cuda.md) | FP32 模型请求 BF16 autocast 时兼容层实际转 FP16；三步训练零 fallback，末态权重接近但 loss/梯度轨迹不同，optimizer 状态未比对 | 2026-10-08 |
 | [Qwen2-0.5B 公开 SFT 单卡初始参数 CUDA 审计](2026-10-08-qwen2-causal-sft-l0-audit.md) | 290 个 trainable 参数的 CUDA 初态跨运行时逐项相同；state-dict 参数名和后续层仍未验，L0 partial | 2026-10-08 |
 | [Qwen2-0.5B 序列分类公开 SFT CUDA 对拍](2026-10-08-qwen2-seqcls-sft-cuda.md) | 共用 checkpoint/首批后 logits 与 loss 对齐；参数名映射、梯度状态与恢复未验，L0/L1 partial | 2026-10-08 |
 | [Qwen2-0.5B 序列分类公开 infer CLI CUDA 对拍](2026-10-08-qwen2-seqcls-infer-cuda.md) | 固定 checkpoint 与输入下预测类别一致、首批 logits 达容差、严格 CUDA/零 fallback；L0/L1 partial，恢复和性能未验 | 2026-10-08 |

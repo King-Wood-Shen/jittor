@@ -1740,6 +1740,17 @@ workaround.
 - Evidence: [Qwen2-0.5B public SFT gradient-checkpointing report](../../docs/results/2026-10-08-qwen2-causal-sft-gradient-checkpointing-cuda.md), Slurm 13485; strict CUDA bootstrap reports zero fallback and the training log emits the pass-through warning.
 - Exit condition: implement recomputation with correct gradient/RNG behavior and demonstrate reduced activation memory plus native parity on a real CUDA model.
 
+## KI-COMPAT-012: BF16 autocast on FP32 operands computes in FP16
+
+- Severity: Medium (requested arithmetic dtype is not preserved)
+- Status: Limitation; confirmed 2026-10-08 on the current CUDA ms-swift path
+- Owner: torch compatibility / AMP
+- Symptom: a public Qwen2 SFT run with FP32 weights and `--bf16 true` completes under strict CUDA, but the shim warns that an all-FP32 autocast region computes in FP16. Loss and gradient norm trajectories differ from native BF16 autocast even though this small-learning-rate run's final full checkpoint is close.
+- Cause: `python/jittor/compat/torch/amp.py::_amp_register_for` retains BF16 only when an operand is already BF16; it does not cast an all-FP32 region to the requested BF16 dtype.
+- Workaround: none verified for the public CLI. The warning suggests casting the module to BF16, but that path needs its own oracle and validation.
+- Evidence: [Qwen2-0.5B public SFT BF16 autocast report](../../docs/results/2026-10-08-qwen2-causal-sft-bf16-amp-cuda.md), Slurm 13516/13521; strict CUDA bootstrap reports zero fallback.
+- Exit condition: preserve requested BF16 autocast semantics and pass same-input forward, per-parameter gradient/update, optimizer-state and recovery checks against native CUDA.
+
 ## KI-DIST-001: FSDP2 flat sharding peaks above the unsharded model
 
 - Severity: Limitation (memory; numerics are correct)
