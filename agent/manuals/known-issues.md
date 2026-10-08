@@ -1751,6 +1751,17 @@ workaround.
 - Evidence: [Qwen2-0.5B public SFT BF16 autocast report](../../docs/results/2026-10-08-qwen2-causal-sft-bf16-amp-cuda.md), Slurm 13516/13521; strict CUDA bootstrap reports zero fallback.
 - Exit condition: preserve requested BF16 autocast semantics and pass same-input forward, per-parameter gradient/update, optimizer-state and recovery checks against native CUDA.
 
+## KI-COMPAT-013: Qwen2 LoRA CPO training diverges from the native trajectory
+
+- Severity: Medium (training completes, but observed numerical parity is absent)
+- Status: Open; reproduced 2026-10-08 on one public CUDA CPO LoRA configuration
+- Owner: torch compatibility / ms-swift RLHF integration
+- Symptom: native and strict CUDA shim both complete three public `swift rlhf --rlhf_type cpo` steps, but step loss/reward metrics differ and the final adapter has relative L2 about 1.414. Initial adapter equality and actual batch IDs were not captured, so the mismatching component is not isolated.
+- Cause: unknown; do not infer an operator bug from this run until initial adapter values, batch IDs and same-input CPO forward values are aligned.
+- Workaround: none verified.
+- Evidence: [Qwen2-0.5B public CPO LoRA CUDA report](../../docs/results/2026-10-08-qwen2-cpo-peftlora-cli-cuda.md), native and strict shim Slurm 13530; checkpoint comparison Slurm 13539; bootstrap fallback count is zero.
+- Exit condition: fix initial state and batch identity, then compare chosen/rejected logits and loss, all trainable gradients, optimizer state and three-step updates against the native CUDA oracle.
+
 ## KI-DIST-001: FSDP2 flat sharding peaks above the unsharded model
 
 - Severity: Limitation (memory; numerics are correct)
