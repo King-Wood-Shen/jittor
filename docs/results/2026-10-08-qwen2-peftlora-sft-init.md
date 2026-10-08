@@ -1,11 +1,13 @@
-# Qwen2-0.5B PEFT LoRA 公开 SFT：初始化随机状态未对齐
+# Qwen2-0.5B PEFT LoRA 公开 SFT：同状态三步对拍
 
-- 状态：此固定配置 L0/L1 partial；补充的同状态 Transformers/PEFT 前向数值通过；L2-L3 blocked；公开 L4 已执行但按前级门槛 blocked；L5 blocked。
+- 状态：固定配置 L0-L2、单卡公开 `swift sft` L4 通过；L3 未运行，L5 blocked。LoRA 随机初始化本身仍不对齐，需用显式转入同一 adapter 状态建立 oracle；不代表 PEFT LoRA 或 ms-swift 整体兼容。
 - 日期：2026-10-08。
-- Jittor 基线：`8964952c3c4124628fb9f2fe5991afb12a09d275`（包含上游 `origin/2.0-refactor` 的 `25700b208fe58680169312e214c9ee82f125a094`）。
+- Jittor 基线：`5def3f89d8de1ddc8d95d18778b10d08c72dbedc`（包含上游 `origin/2.0-refactor` 的 `26bf23f9a0c0e3e12838089ec67a9fb380cba9c2`）。
 - ms-swift checkout：`88d727951203256baa564c643c651b6f8d90fd7e`。
 - 维护者：ms-swift CUDA 适配。
 - 复查条件：Torch CUDA RNG/初始化语义修正，或构造相同初始 adapter 的确定性对拍方案可用时；之后重做同权重前向与三步轨迹。
+
+运行键 `20261008-peft-lora-l2-inputcap-try4-d51b` 在 Slurm 12738 的 cscg-qh17 RTX 4090（UUID `GPU-2fd350e6-8fcd-9385-4e5e-46405831cfa1`）经公开 `swift sft` CLI 先原生后严格 shim 完成三步；model/base checkpoint、PEFT adapter safetensors、Qwen2-0.5B FP32/eager、四条固定样本、batch 4、max length 64、SGD lr `1e-5`、seed 1234 与上一段配置相同。两侧 adapter 文件 SHA256 均为 `e34a28cdc1d227907e13b96f061da71053f13fe0e68d678d274fdc69816e7c56`，数据 SHA256 为 `f38c72953cf933f85bf12abd50d56ed5d7fe1ec13d4a5952c1d2296fec5a65af`。完整 386 项参数的名称、shape、dtype、requires_grad 与 CUDA device 元数据一致，初始张量 SHA256 全部一致；其中 96 项可训练。公开 Trainer 首次 forward hook 保存的 `input_ids`、`labels`、`attention_mask` 三者逐项相同，logits shape `[4,8,151936]`，最大绝对差 `1.32173e-4`、相对 L2 `2.65440e-6`；loss 最大绝对差 `5.24521e-6`、相对 L2 `1.37045e-6`，均有限。三步每步 96 项梯度均在 CUDA：最大梯度绝对差依次为 `8.49366e-7`、`6.56582e-7`、`1.02818e-6`；最坏单参数相对 L2 依次 `9.10550e-6`、`9.06069e-6`、`1.47676e-5`。更新权重最大绝对差依次 `8.52651e-12`、`1.28466e-11`、`1.86265e-9`；最坏相对 L2 `9.10680e-6`、`7.12428e-6`、`7.07144e-6`。固定数据集仅四条且无 shuffle，CLI 记录了三轮各一步；SGD momentum 为默认零，不持有逐参数历史状态。shim 两个进程起止、模型构造、前向与三次 optimizer step 的 `use_cuda=1` 且 fallback 全程 0。比较由 GPU worker Slurm 12745 对保存的原始产物完成；12744 是一次因 `cuda:0` 元数据断言过严失败的比较器运行，未重跑模型。
 
 运行键为 `20261008-qwen2-peftlora-sft-l0l2-8ac1`。Slurm 12634 在 cscg-qh17 RTX 4090（UUID `GPU-be5af850-cef8-4838-1a48-cf8f4e5d7102`）上先原生后严格 shim，经当前 ms-swift 公开 `swift sft` CLI，对 Qwen2-0.5B FP32/eager 使用 PEFT LoRA（q_proj/v_proj、rank 8、alpha 32、dropout 0）、SGD、四条固定样本、batch 4、长度 64 训练三步。两侧均构造 PEFT `PeftModelForCausalLM`，494,573,440 个总参数、540,672 个可训练参数（96 个张量），并产生 adapter checkpoint。Shim 参数与每步梯度记录均在 CUDA；每步 96 个梯度非空，候选运行开始/结束及各步 fallback 均为 0。原生 loss 为 `[3.8273680210, 3.8268311024, 3.8262913227]`，shim 为 `[3.8273668289, 3.8268554211, 3.8263378143]`。
 
@@ -19,11 +21,13 @@
 
 | 层 | 状态 | 证据或缺口 |
 | --- | --- | --- |
-| L0 | partial | 公开 CLI 成功构造并训练，参数数量、键/shape 可枚举且候选设备 CUDA；相同 seed 下 adapter 初值不同，不满足同状态对拍。 |
-| L1 | partial | Slurm 12690/12692 的直接 Transformers/PEFT 前向使用相同 checkpoint、CUDA 输入及逐项完全相同的 adapter；logits/25 组 hidden shapes、dtype、有限值与误差已比较。此路径未覆盖公开 CLI，且受 L0 状态约束。 |
-| L2 | blocked | 虽采集三步 96 项梯度与 checkpoint，但初态不相同且 L1 未过，差异不作为验收。 |
-| L3 | blocked | 保存 adapter 文件不等于恢复轨迹；未验证同进程/新进程恢复及后续状态。 |
-| L4 | blocked | 两侧都实际执行公开 `swift sft` CLI；因前置 L0-L3 未过，不升级形式等级。 |
-| L5 | blocked | 前级未通过，未运行稳态性能协议。 |
+| L0 | PASS（固定配置） | Slurm 12738 公开 CLI 构造完整模型、PEFT、tokenizer/data/trainer；386 项状态元数据相同且初始 SHA256 全等，全部 CUDA。随机初始化差异由显式相同 adapter checkpoint 消除。 |
+| L1 | PASS（固定配置） | Slurm 12738 原生与 shim 公开 CLI 首批实际输入完全一致，logits/loss 结构、有限值和误差通过；Slurm 12690/12692 另对相同 adapter 的直接 PEFT 前向与 25 组 hidden 通过。 |
+| L2 | PASS（三步固定轨迹） | Slurm 12738 对全部 96 个 trainable 参数三步逐项记录梯度及更新；误差见上。固定四条数据不 shuffle，SGD momentum=0，无持久逐参数 optimizer state。未覆盖输入梯度或其他 optimizer。 |
+| L3 | not-run | 未验证同进程/新进程恢复后的 RNG、dataloader 游标、optimizer/scheduler 与续训轨迹。 |
+| L4 | PASS（单卡 `swift sft`） | Slurm 12738 两侧公开 CLI 均完成三步并保存 checkpoint；仅代表该 PEFT LoRA 固定配置。 |
+| L5 | blocked | L3 恢复未验，未运行稳态性能协议。 |
 
-脚本、日志、梯度、checkpoint、元数据及比较文件保留在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-qwen2-peftlora-sft-l0l2-8ac1/`、`20261008-peftlora-initprobe-5e71/`、`20261008-peftlora-resetseed-39bd/` 与 `20261008-peft-kaiming-init-0d4f/`。该结果只限 Qwen2-0.5B 此 LoRA 配置，不代表 PEFT LoRA 或 ms-swift tuner 功能面整体兼容。
+脚本、日志、梯度、checkpoint、元数据及比较文件保留在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-qwen2-peftlora-sft-l0l2-8ac1/`、`20261008-peftlora-initprobe-5e71/`、`20261008-peftlora-resetseed-39bd/`、`20261008-peft-kaiming-init-0d4f/` 与 `20261008-peft-lora-l2-inputcap-try4-d51b/`。该结果只限 Qwen2-0.5B 此 PEFT LoRA 配置，不代表 PEFT LoRA 或 ms-swift tuner 功能面整体兼容。
+
+Slurm 12747 的文档门禁通过 `generate_manifest.py`、`--check` 与布局检查（202 active Markdown files）；Torch 模式结构测试结果为 `1382 passed, 8 skipped, 2 failed, 1019 subtests passed`。失败一项是 CPU matmul 测试需 oneDNN v3，但验收环境没有 `cmake`；另一项发现既有全参数 SFT 前向及三步梯度报告没有列入结果索引 toctree。已把这两篇报告补入 `docs/results/index.md`，Slurm 12782 定向复验可达性规则 `1 passed`。全量结构测试未重跑；oneDNN/cmake 环境缺口仍待有 cmake 的验收环境处理。
