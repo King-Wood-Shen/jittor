@@ -37,6 +37,7 @@
 2026-10-08-qwen2-causal-sft-grad3-4a7e
 2026-10-08-qwen2-peftlora-sft-init
 2026-10-08-qwen2-peftlora-adamw
+2026-10-08-qwen2-pt-fullparam-02498
 ```
 
 ## 按主题索引
@@ -68,3 +69,4 @@
 | [Qwen2-0.5B 全参数 SFT 首批前向对拍](2026-10-08-qwen2-causal-sft-forward-c23a.md) | 固定 batch 的 logits/hidden/loss 对拍通过数值门槛；完整层级仍受限，诊断钩子在 backward 触发内部断言 | 2026-10-08 |
 | [Qwen2-0.5B PEFT LoRA 公开 SFT：同状态三步对拍](2026-10-08-qwen2-peftlora-sft-init.md) | 固定 adapter 下 L0-L2 与公开 `swift sft` L4 通过；新进程恢复至 step 4 的 L3 为 partial，L5 blocked；随机初始化差异仍在 | 2026-10-08 |
 | [Qwen2-0.5B PEFT LoRA：AdamW 三步公开 SFT 对拍](2026-10-08-qwen2-peftlora-adamw.md) | 固定配置 L0/L1/L4 通过；三步梯度与更新数值对齐，optimizer step device 元数据差异使 L2 partial | 2026-10-08 |
+| [Qwen2-0.5B 公开 `swift pt` 全参数 CUDA 三步对拍](2026-10-08-qwen2-pt-fullparam-02498.md) | 三步公开入口完成；checkpoint 290 键逐位一致，设备清单/梯度/optimizer 状态不足，L0-L2 partial | 2026-10-08 |
