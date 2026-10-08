@@ -55,6 +55,7 @@
 2026-10-08-qwen2-embedding-sft-cli-361bf
 2026-10-08-qwen2-causal-transformersengine-api
 2026-10-08-qwen2-service-infer-361bf
+2026-10-08-qwen2-peftlora-export-merge-82c2
 ```
 
 ## 按主题索引
@@ -104,3 +105,4 @@
 | [Qwen2-0.5B ms-swift Embedding `swift sft` CLI CUDA 复验](2026-10-08-qwen2-embedding-sft-cli-361bf.md) | 当前基线公开 CLI 原生与严格 shim 均完成三步并保存 checkpoint，loss/grad norm 与选定参数末态对齐、零 fallback；L0-L4 partial、L1/L3 未运行，L5 blocked | 2026-10-08 |
 | [Qwen2-0.5B causal LM `TransformersEngine` Python API CUDA 对拍](2026-10-08-qwen2-causal-transformersengine-api.md) | 固定两请求非流式生成在 31 步 logits、token IDs 和文本上对齐；L0/L1/L4/L5 通过、L2/L3 不适用、strict CUDA/零 fallback | 2026-10-08 |
 | [Qwen2-0.5B ms-swift `swift deploy` 服务端/客户端 CUDA 复验](2026-10-08-qwen2-service-infer-361bf.md) | 原生与严格 shim 服务对 12 次 HTTP 请求文本/token 用量完全一致；10 次稳态延迟比 0.964，服务进程零 fallback，L0/L1/L4/L5 partial | 2026-10-08 |
+| [Qwen2-0.5B PEFT LoRA 公开 `swift export --merge_lora` CUDA 对拍](2026-10-08-qwen2-peftlora-export-merge-82c2.md) | 固定初始 adapter 的原生与严格 shim 公开合并导出 290 个参数完全一致，候选参数驻留 CUDA、零 fallback；L0/L1/L4 partial，L3 未运行 | 2026-10-08 |
