@@ -14,6 +14,8 @@
 
 首次脚本运行键 `20261008-qwen2-swiftlora-grad3-v1` / Slurm 13251 在原生模型计算前因探针忘记将 tokenizer 输入放到 CUDA 失败；v2 / Slurm 13253 已进入原生训练，但日志语句参数错误导致保存前退出。它们均未运行 shim，不算功能结果。v3 完成两侧模型运行；汇总作业 13254 首因数组数断言错误退出，13255/13256 的归一门槛将近零张量的比值误当作绝对容差而失败，13257 使用报告的 max-absolute 与 relative-L2 标准完成后处理。模型没有因这些汇总器错误重跑。原始脚本、NPZ、JSON 与日志保存在未版本化 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-qwen2-swiftlora-grad3-v1/`、`v2/`、`v3/`。
 
+仓库布局检查通过。完整 `tests/structure` 作业 13258 得到 1,385 passed、6 skipped、1 failed；唯一失败是本报告未登记在生成的根 `MANIFEST.in`。按 `tools/build/generate_manifest.py` 更新清单后，Slurm 13271 对 `tests/structure/test_packaging_structure.py` 定向复验 8 passed（含 8 个 subtests），布局检查再次通过。完整结构套件未因这项文档清单修正而重跑。
+
 | 层 | 本配置状态 | 证据或边界 |
 | --- | --- | --- |
 | L0 | partial | 原生与 shim 构造 Qwen2 和私有 Swift LoRA；训练参数键/数量一致并驻留 CUDA。未构造 Swift template、dataset、collator、Trainer，也未完整比较 386 个 state-dict 键及所有 dtype。 |
