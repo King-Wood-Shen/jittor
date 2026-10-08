@@ -2,7 +2,7 @@
 
 - 状态：本报告覆盖的固定 Qwen2-0.5B 序列分类公开 SFT 双卡配置，L0、L1、L2、L4 为 partial，L3、L5 未通过前置层级或尚未验证。双 rank NCCL、输入、梯度和三步权重对拍完成；不代表所有分类/embedding/reranker/reward 模型或整个 ms-swift。
 - 日期：2026-10-08。
-- 基线：Jittor `d2ea2dde9635ff7a5f4e9a5b7ecde86667a51546`；最近缓存的 `origin/2.0-refactor` SHA 为 `7a18abf295668d9b19da5fa1657f5606e84b65a0`；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。本轮 live fetch 遇 OpenSSL `SSL_ERROR_ZERO_RETURN`，SSH `ls-remote` 遇 `Permission denied (publickey)`，故未能重新核验上游实时 HEAD。
+- 基线：Jittor `d2ea2dde9635ff7a5f4e9a5b7ecde86667a51546`；本轮最终重新 fetch 的 `origin/2.0-refactor` SHA 为 `7a18abf295668d9b19da5fa1657f5606e84b65a0`；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。开工时 HTTPS fetch 与 SSH `ls-remote` 曾分别遇到连接关闭和公钥认证失败，结束前 HTTPS fetch 成功并确认上游 SHA 与缓存相同。
 - 范围：公开 `python -m swift.cli.main sft --task_type seq_cls`，Qwen2-0.5B `Qwen2ForSequenceClassification`，双 RTX 4090、FP32/eager、全参数 SGD、固定 8 行数据、每卡 batch 2、三步，NCCL 2.21.5。
 - 维护者：ms-swift CUDA 适配。
 - 复查条件：修复 scheduler checkpoint 状态差异后补新进程恢复轨迹；补 tokenizer/template、优化器参数名映射与完整模型输出状态；完成稳态双卡性能协议后再评 L5。
