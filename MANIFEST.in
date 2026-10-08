@@ -387,6 +387,7 @@ include docs/results/2026-10-08-qwen2-causal-sft-grad3-4a7e.md
 include docs/results/2026-10-08-qwen2-causal-sft-l0-audit.md
 include docs/results/2026-10-08-qwen2-causal-transformersengine-api.md
 include docs/results/2026-10-08-qwen2-dpo-full-cuda.md
+include docs/results/2026-10-08-qwen2-embedding-sft-cli-361bf.md
 include docs/results/2026-10-08-qwen2-embedding-trainer-infonce-817fb.md
 include docs/results/2026-10-08-qwen2-ia3-forward-349d.md
 include docs/results/2026-10-08-qwen2-peftlora-adamw.md
