@@ -394,6 +394,7 @@ include docs/results/2026-10-08-qwen2-seqcls-ddp-nccl-cuda.md
 include docs/results/2026-10-08-qwen2-seqcls-infer-cuda.md
 include docs/results/2026-10-08-qwen2-seqcls-python-api-cuda.md
 include docs/results/2026-10-08-qwen2-seqcls-sft-cuda.md
+include docs/results/2026-10-08-qwen2-swiftlora-forward.md
 include docs/results/2026-10-08-torch-randomsampler-generator.md
 include docs/results/index.md
 include docs/tutorials/index.md
