@@ -1,6 +1,6 @@
 # Qwen2-0.5B 公开 DPO 三步 CUDA 对拍：strict backward 失败
 
-- 状态：当前固定配置下原生公开训练三步完成；严格 CUDA shim 已构造训练器并进入首步反向，但在 `grad_optional` 抛出 Jittor 内部 `nano_vector.h:41: slice overflow`。这是兼容失败证据，根因尚未定位；不代表所有 DPO 或 RLHF 配置。
+- 状态：当前固定配置下原生公开训练三步完成；严格 CUDA shim 首步反向仍在 `grad_optional` 抛出 Jittor 内部 `nano_vector.h:41: slice overflow`。补充的首批前向探针发现同一 seed 下两侧公开 CLI 取到不同偏好样本，因此目前没有同输入 DPO 前向数值对拍。兼容失败范围只限该配置，不代表所有 DPO 或 RLHF。
 - 日期：2026-10-08。
 - 基线：Jittor `97a66cf5a650461ac08f9cdf609e4eddb25a230b`（本提交仅更新文档）；同步上游缓存 SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0`，本轮上游 HTTPS fetch 因 `SSL_ERROR_ZERO_RETURN` 未核验实时值；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 范围：Qwen2-0.5B、公开 `swift rlhf --rlhf_type dpo`、全参数 FP32、eager attention、本地固定四行偏好数据、batch 1、SGD、三步。
@@ -21,3 +21,22 @@ Slurm 13175 在 `cscg-qh04` RTX 4090（UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214
 | L3 | blocked | L2 未通过，未做恢复轨迹。 |
 | L4 | partial | 公开 CLI 到达 DPO training step，但未完成训练或保存 checkpoint。 |
 | L5 | blocked | 前序层未通过，未做性能测试。 |
+
+### 首批 DPO 前向与批次身份探针（Slurm 13477、13478）
+
+运行键 `20261008-qwen2-dpo-forward-probe-r4` 在 cscg-qh04 RTX 4090 上先运行独立原生公开 CLI，再运行 strict shim 公开 CLI。采集钩子在 `swift.rlhf_trainers.dpo_trainer.DPOTrainer.get_batch_loss_metrics` 记录训练 batch 的 `input_ids`、`attention_mask`、`labels`、DPO loss 与公开指标；随后在 `Accelerator.backward` 入口有意抛出探针哨兵，未执行反向或 optimizer step。Slurm 13477 的作业最终因比较器发现 batch 不同而退出 1，这是预期的不匹配结果，不是模型计算异常。两侧模型首个参数均报告 `cuda:0`；strict shim `use_cuda=1` 且 `fallback_count=0`。
+
+Slurm 13478 使用同一模型 tokenizer 对已保存输入解码，确认原生首批是数据第 4 条（“What color is a clear daytime sky?”，chosen/rejected 为 Blue/Green），shim 首批是第 1 条（“What is 2 plus 2? Answer briefly.”，chosen/rejected 为 4/5）。两边 batch shape 分别为 `[2,30]` 与 `[2,33]`；偏好成对展开后的 `input_ids`、mask 与 labels 不同。模型文件和数据文件 SHA256 与上面的原生 oracle 相同，CLI seed/data_seed 都是 1234。native/shim loss 碰巧都为 `0.6931470633`，但 chosen/rejected logps 与 logits 指标不同；由于输入样本不同，这些数值不能用于模型前向正确性对拍。
+
+| 首批指标 | 原生 | strict shim |
+| --- | ---: | ---: |
+| `logps/chosen` | `-21.33212471` | `-17.36635590` |
+| `logps/rejected` | `-20.04442024` | `-14.73171616` |
+| `logits/chosen` | `-2.30225992` | `-2.24321890` |
+| `logits/rejected` | `-2.13749123` | `-2.27255225` |
+
+观察与既有 `torch-randomsampler-generator` 报告的同 seed 跨 runtime sampler 顺序差异一致，当前 DPO 首批错位具体由 Trainer sampler 还是其他数据路径引起仍未单独定位。
+
+同一探针的 `r1` 没有捕获指标，因为钩子挂在 TRL 基类，而 ms-swift 子类覆写该方法；`r2` 钩子签名遗漏了 ms-swift 的 `pair_loss_scale` 参数；`r3` 在 Jittor CUDA capability 查询子进程持续休眠、尚未进入模型前向时停止。上述尝试均未运行 backward。原始脚本和日志保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-qwen2-dpo-forward-probe-r{1,2,3,4}/`。
+
+因此 L1 更新为 **partial**：公开入口确实分别执行了 CUDA 前向并产生 DPO 输出，但首批输入不一致，缺少同输入 logits/log-prob/loss 对拍。L2 原有 backward 断言失败保持不变；本探针刻意没有重走该失败路径。后续需固定相同样本身份后再对拍前向，再按根因定位 backward，不以相同 seed 推断数据顺序相同。
