@@ -387,6 +387,7 @@ include docs/results/2026-10-08-qwen2-peftlora-adamw.md
 include docs/results/2026-10-08-qwen2-peftlora-sft-init.md
 include docs/results/2026-10-08-qwen2-pt-fullparam-02498.md
 include docs/results/2026-10-08-qwen2-seqcls-infer-cuda.md
+include docs/results/2026-10-08-qwen2-seqcls-python-api-cuda.md
 include docs/results/2026-10-08-qwen2-seqcls-sft-cuda.md
 include docs/results/index.md
 include docs/tutorials/index.md
