@@ -102,7 +102,7 @@
 | [Torch `RandomSampler` 显式 Generator CUDA 运行时对拍](2026-10-08-torch-randomsampler-generator.md) | 同 seed 跨 runtime 的样本顺序不同；各 runtime 内 generator 状态恢复可重放；仅测试 sampler API，不包含模型或 Swift CLI | 2026-10-08 |
 | [Qwen2-0.5B ms-swift 私有 Swift LoRA 固定状态前向](2026-10-08-qwen2-swiftlora-forward.md) | 当前基线下直接 `Swift.prepare_model` 前向通过数值门槛，严格 CUDA/零 fallback；L0 partial，训练/恢复/公开入口/性能未运行 | 2026-10-08 |
 | [Qwen2-0.5B ms-swift 私有 Swift LoRA 三步梯度与更新对拍](2026-10-08-qwen2-swiftlora-grad3.md) | 96 个 trainable 参数三步梯度、AdamW 状态和 adapter 更新通过固定直接 API 对拍；公开 Trainer/CLI、恢复与性能未验证 | 2026-10-08 |
-| [Qwen2-0.5B ms-swift 私有 Swift LoRA 公开 `swift sft` CUDA 对拍](2026-10-08-qwen2-swiftlora-sft-cli-d48.md) | 固定公开 CLI 配置的 logits、三步全部 adapter 梯度/AdamW 状态/更新通过，严格 CUDA/零 fallback；L0 partial、L3 未运行、L4 partial、L5 blocked | 2026-10-08 |
+| [Qwen2-0.5B ms-swift 私有 Swift LoRA 公开 `swift sft` CUDA 对拍](2026-10-08-qwen2-swiftlora-sft-cli-d48.md) | 固定 CLI 配置的 logits、三步 adapter 梯度/AdamW 更新通过；新进程恢复因 Transformers 未识别私有 tuner 而在训练前失败，L0/L4 partial、L3 blocked、L5 blocked | 2026-10-08 |
 | [Qwen2-0.5B ms-swift EmbeddingTrainer InfoNCE CUDA 基线复验](2026-10-08-qwen2-embedding-trainer-infonce-817fb.md) | 新基线下固定 direct Python Trainer API 三步 embedding forward/loss/梯度/更新对拍通过，严格 CUDA/零 fallback；L3、L5 未运行 | 2026-10-08 |
 | [Qwen2-0.5B ms-swift Embedding `swift sft` CLI CUDA 复验](2026-10-08-qwen2-embedding-sft-cli-361bf.md) | 当前基线公开 CLI 原生与严格 shim 均完成三步并保存 checkpoint，loss/grad norm 与选定参数末态对齐、零 fallback；L0-L4 partial、L1/L3 未运行，L5 blocked | 2026-10-08 |
 | [Qwen2-0.5B causal LM `TransformersEngine` Python API CUDA 对拍](2026-10-08-qwen2-causal-transformersengine-api.md) | 固定两请求非流式生成在 31 步 logits、token IDs 和文本上对齐；L0/L1/L4/L5 通过、L2/L3 不适用、strict CUDA/零 fallback | 2026-10-08 |
