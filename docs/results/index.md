@@ -38,6 +38,7 @@
 2026-10-08-qwen2-peftlora-sft-init
 2026-10-08-qwen2-peftlora-adamw
 2026-10-08-qwen2-pt-fullparam-02498
+2026-10-08-qwen2-causal-ddp-7a18-v4
 ```
 
 ## 按主题索引
@@ -70,3 +71,4 @@
 | [Qwen2-0.5B PEFT LoRA 公开 SFT：同状态三步对拍](2026-10-08-qwen2-peftlora-sft-init.md) | 固定 adapter 下 L0-L2 与公开 `swift sft` L4 通过；新进程恢复至 step 4 的 L3 为 partial，L5 blocked；随机初始化差异仍在 | 2026-10-08 |
 | [Qwen2-0.5B PEFT LoRA：AdamW 三步公开 SFT 对拍](2026-10-08-qwen2-peftlora-adamw.md) | 固定配置 L0/L1/L4 通过；三步梯度与更新数值对齐，optimizer step device 元数据差异使 L2 partial | 2026-10-08 |
 | [Qwen2-0.5B 公开 `swift pt` 全参数 CUDA 三步对拍](2026-10-08-qwen2-pt-fullparam-02498.md) | 三步公开入口完成；checkpoint 290 键逐位一致，设备清单/梯度/optimizer 状态不足，L0-L2 partial | 2026-10-08 |
+| [Qwen2-0.5B 公开全参数 SFT：双卡 NCCL 三步新基线复验](2026-10-08-qwen2-causal-ddp-7a18-v4.md) | 双卡公开 CLI 与 290 键 checkpoint 数值对齐；逐参数梯度、恢复与 L5 未验，L0/L1/L2/L4 partial | 2026-10-08 |

@@ -378,6 +378,7 @@ include docs/results/2026-10-07-qwen2-causal-ddp-ffeb.md
 include docs/results/2026-10-07-qwen2-causal-sft-ffeb.md
 include docs/results/2026-10-07-qwen2-ia3-infer-ffeb.md
 include docs/results/2026-10-07-qwen2-infer-1k-ffeb.md
+include docs/results/2026-10-08-qwen2-causal-ddp-7a18-v4.md
 include docs/results/2026-10-08-qwen2-causal-sft-forward-c23a.md
 include docs/results/2026-10-08-qwen2-causal-sft-grad3-4a7e.md
 include docs/results/2026-10-08-qwen2-ia3-forward-349d.md
