@@ -1718,6 +1718,17 @@ workaround.
   example widen only where FP64 is fast, or compute `x * (1/s)` with a
   correction), update the promotion tests with the decision, and delete the entry.
 
+## KI-COMPAT-010: Qwen2 全参数 DPO 在 strict CUDA backward 触发 NanoVector 断言
+
+- Severity: High (supported training path fails during backward)
+- Status: Open; reproduced 2026-10-08 on one Qwen2-0.5B FP32 DPO configuration
+- Owner: torch compatibility / core autograd
+- Symptom: public `swift rlhf --rlhf_type dpo --tuner_type full` reaches the first backward under strict CUDA and raises `nano_vector.h:41: slice overflow` from `jt.core.grad_optional`; native PyTorch completes three steps. Scope is this reproduced configuration, not all DPO/RLHF.
+- Cause: not isolated; CUDA placement and backend fallback were ruled out for the failing process (`use_cuda=1`, `fallback=0`).
+- Workaround: no verified DPO workaround; this configuration cannot complete training in the shim.
+- Evidence: [Qwen2-0.5B public full-parameter DPO report](../../docs/results/2026-10-08-qwen2-dpo-full-cuda.md), Slurm 13175 native oracle and 13176 strict shim; raw traces under `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-qwen2-dpo-3step-v6/`.
+- Exit condition: isolate the failing graph path, add a minimal regression that fails before the fix, then pass the same three-step native/strict CUDA comparison with gradient/state evidence and zero fallback.
+
 ## KI-DIST-001: FSDP2 flat sharding peaks above the unsharded model
 
 - Severity: Limitation (memory; numerics are correct)
