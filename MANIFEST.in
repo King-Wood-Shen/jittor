@@ -381,6 +381,7 @@ include docs/results/2026-10-07-qwen2-infer-1k-ffeb.md
 include docs/results/2026-10-08-qwen2-causal-sft-forward-c23a.md
 include docs/results/2026-10-08-qwen2-causal-sft-grad3-4a7e.md
 include docs/results/2026-10-08-qwen2-ia3-forward-349d.md
+include docs/results/2026-10-08-qwen2-peftlora-adamw.md
 include docs/results/2026-10-08-qwen2-peftlora-sft-init.md
 include docs/results/index.md
 include docs/tutorials/index.md
