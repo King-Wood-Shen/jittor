@@ -19,7 +19,7 @@ Slurm 13101 先在 `cscg-qh17` RTX 4090（UUID `GPU-2fd350e6-8fcd-9385-4e5e-4640
 
 三步梯度最大绝对差分别为 `7.49e-7`、`6.46e-7`、`1.49e-6`，相对 L2 分别为 `4.36e-6`、`3.91e-6`、`9.43e-6`；三步参数 loss 最大差分别为 `9.54e-7`、`3.58e-6`、`5.24e-6`。末步 checkpoint 的 291 个键/shape/dtype 一致，最大权重绝对差 `7.45e-9`、相对 L2 `6.06e-11`，171 个张量发生更新。两侧 SGD `optimizer.pt` 经 zip/pickle 双格式读取后，state 均为空、两个参数组逐项相同；这是无 momentum SGD 的预期状态。严格 shim 的每步梯度 device 均为 CUDA，fallback 始终为 0。
 
-该扩展没有保存每步的 token/label 张量身份，所以三步相同数据顺序仅由固定数据文件、关闭训练 DataLoader shuffle、相同 seed/data seed 与一致 loss 记录支持，未作逐批逐值证明。另发现 `scheduler.pt` 持久化结构不一致：native 有 `verbose=False`，shim 有 `_is_initial=False`；本轮未继续恢复测试。Slurm 13103 的候选缺少审计环境变量，13108/13109 的状态比较 harness 分别遇到错误加载器假设和 scheduler 键差异；日志与所有产物保留，只有 13104 strict 训练及 13105/13110 有效比较计入证据。原始产物未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-qwen2-seqcls-l2-grad3-v1/`。
+该扩展没有保存每步的 token/label 张量身份，所以三步相同数据顺序仅由固定数据文件、关闭训练 DataLoader shuffle、相同 seed/data seed 与一致 loss 记录支持，未作逐批逐值证明。另发现 `scheduler.pt` 持久化结构不一致：native 有 `verbose=False`，shim 有 `_is_initial=False`；本轮未继续恢复测试。Slurm 13103 的候选缺少审计环境变量；13104 完成 strict shim 三步训练和梯度采集后，因比较器变量名覆盖 NumPy 而以退出码 1 结束；13108/13109 的状态比较 harness 分别遇到错误加载器假设和 scheduler 键差异。相关日志和产物均保留，只有 13104 已捕获的训练证据及 13105/13110 有效比较计入结论。原始产物未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-qwen2-seqcls-l2-grad3-v1/`。
 
 | 层 | 本配置状态 | 证据或缺口 |
 | --- | --- | --- |
