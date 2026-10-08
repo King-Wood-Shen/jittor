@@ -1,6 +1,6 @@
 # Qwen2-0.5B PEFT LoRA 公开 SFT：同状态三步对拍
 
-- 状态：固定配置 L0-L2、单卡公开 `swift sft` L4 通过；L3 未运行，L5 blocked。LoRA 随机初始化本身仍不对齐，需用显式转入同一 adapter 状态建立 oracle；不代表 PEFT LoRA 或 ms-swift 整体兼容。
+- 状态：固定配置 L0-L2、单卡公开 `swift sft` L4 通过；L3 新进程续训已部分验证（global_step、更新梯度及 adapter 轨迹对齐，未保存恢复后的输入以直接核对 dataloader 游标/RNG）；L5 blocked。LoRA 随机初始化本身仍不对齐，需用显式转入同一 adapter 状态建立 oracle；不代表 PEFT LoRA 或 ms-swift 整体兼容。
 - 日期：2026-10-08。
 - Jittor 基线：`5def3f89d8de1ddc8d95d18778b10d08c72dbedc`（包含上游 `origin/2.0-refactor` 的 `26bf23f9a0c0e3e12838089ec67a9fb380cba9c2`）。
 - ms-swift checkout：`88d727951203256baa564c643c651b6f8d90fd7e`。
@@ -24,10 +24,16 @@
 | L0 | PASS（固定配置） | Slurm 12738 公开 CLI 构造完整模型、PEFT、tokenizer/data/trainer；386 项状态元数据相同且初始 SHA256 全等，全部 CUDA。随机初始化差异由显式相同 adapter checkpoint 消除。 |
 | L1 | PASS（固定配置） | Slurm 12738 原生与 shim 公开 CLI 首批实际输入完全一致，logits/loss 结构、有限值和误差通过；Slurm 12690/12692 另对相同 adapter 的直接 PEFT 前向与 25 组 hidden 通过。 |
 | L2 | PASS（三步固定轨迹） | Slurm 12738 对全部 96 个 trainable 参数三步逐项记录梯度及更新；误差见上。固定四条数据不 shuffle，SGD momentum=0，无持久逐参数 optimizer state。未覆盖输入梯度或其他 optimizer。 |
-| L3 | not-run | 未验证同进程/新进程恢复后的 RNG、dataloader 游标、optimizer/scheduler 与续训轨迹。 |
+| L3 | partial | Slurm 12799/12802 新进程从三步 checkpoint 恢复至 global_step 4；续训梯度与 adapter 对拍通过。未直接保存恢复后的 batch 输入与 RNG 状态，完整恢复合同未通过。 |
 | L4 | PASS（单卡 `swift sft`） | Slurm 12738 两侧公开 CLI 均完成三步并保存 checkpoint；仅代表该 PEFT LoRA 固定配置。 |
-| L5 | blocked | L3 恢复未验，未运行稳态性能协议。 |
+| L5 | blocked | L3 完整恢复合同仍不完整；本配置未运行性能协议。 |
+
+### 新进程恢复补充（Slurm 12799/12802）
+
+运行键 `20261008-peft-lora-l3-restore-ckpt3-r2` 在 cscg-qh17 RTX 4090（UUID `GPU-2fd350e6-8fcd-9385-4e5e-46405831cfa1`）先原生后严格 shim，通过公开 `swift sft --resume_from_checkpoint` 分别从既有三步 `checkpoint-3` 新进程恢复，目标 `max_steps=4`。两侧 checkpoint 均含 adapter、`trainer_state.json`、optimizer、scheduler 与 RNG 文件。原生与 shim 的 Trainer `global_step` 均从 3 续至 4、epoch 从 3 到 4；四条样本、关闭数据集与 dataloader shuffle，因此下一轮固定一个 batch。第 4 步 loss 分别为 `3.82575250` 与 `3.82575178`，96 个 trainable CUDA 梯度最大绝对差 `6.88713e-7`、最坏单参数相对 L2 `9.50411e-6`；第 4 步 adapter 跨运行最大绝对差 `1.86265e-9`、相对 L2 `6.01197e-6`。候选启动及 optimizer step 的 `use_cuda=1`、fallback 0。比较作业 12802 在同型号 GPU worker 完成。
+
+恢复层仍只记 **partial**：本次捕获器没有命中 Swift 覆盖的 `compute_loss`，故没有保存恢复后的首批 IDs/labels 或恢复前参数快照；固定数据顺序和 global_step/epoch 只能间接支撑游标，不能代替直接输入与 RNG 状态核对。该记录证明这组无 dropout、无 momentum、constant scheduler 的 LoRA CLI 配置可从新进程续一步并保持数值接近，不证明任意 dataloader、optimizer 或 RNG 恢复。首次尝试 12795 因 TMPDIR 路径过长导致 `AF_UNIX path too long`，发生在模型训练前；日志保留。原始比较文件位于未版本化目录 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-peft-lora-l3-restore-ckpt3-r2/`，失败记录位于 `.../r1/`。
 
 脚本、日志、梯度、checkpoint、元数据及比较文件保留在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-qwen2-peftlora-sft-l0l2-8ac1/`、`20261008-peftlora-initprobe-5e71/`、`20261008-peftlora-resetseed-39bd/`、`20261008-peft-kaiming-init-0d4f/` 与 `20261008-peft-lora-l2-inputcap-try4-d51b/`。该结果只限 Qwen2-0.5B 此 PEFT LoRA 配置，不代表 PEFT LoRA 或 ms-swift tuner 功能面整体兼容。
 
-Slurm 12747 的文档门禁通过 `generate_manifest.py`、`--check` 与布局检查（202 active Markdown files）；Torch 模式结构测试结果为 `1382 passed, 8 skipped, 2 failed, 1019 subtests passed`。失败一项是 CPU matmul 测试需 oneDNN v3，但验收环境没有 `cmake`；另一项发现既有全参数 SFT 前向及三步梯度报告没有列入结果索引 toctree。已把这两篇报告补入 `docs/results/index.md`，Slurm 12782 定向复验可达性规则 `1 passed`。全量结构测试未重跑；oneDNN/cmake 环境缺口仍待有 cmake 的验收环境处理。
+Slurm 12747 的文档门禁通过 `generate_manifest.py`、`--check` 与布局检查（202 active Markdown files）；Torch 模式结构测试结果为 `1382 passed, 8 skipped, 2 failed, 1019 subtests passed`。失败一项是 CPU matmul 测试需 oneDNN v3，但验收环境没有 `cmake`；另一项发现既有全参数 SFT 前向及三步梯度报告没有列入结果索引 toctree。已把这两篇报告补入 `docs/results/index.md`，Slurm 12782 定向复验可达性规则 `1 passed`，本次报告索引复验 Slurm 12809 也为 `1 passed`；同一作业的发布清单检查与布局检查通过（202 active Markdown files）。全量结构测试未重跑；oneDNN/cmake 环境缺口仍待有 cmake 的验收环境处理。
