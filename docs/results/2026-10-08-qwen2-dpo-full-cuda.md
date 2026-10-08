@@ -1,6 +1,6 @@
 # Qwen2-0.5B 公开 DPO 三步 CUDA 对拍：strict backward 失败
 
-- 状态：当前固定配置下原生公开训练三步完成；严格 CUDA shim 首步反向仍在 `grad_optional` 抛出 Jittor 内部 `nano_vector.h:41: slice overflow`。补充的首批前向探针发现同一 seed 下两侧公开 CLI 取到不同偏好样本，因此目前没有同输入 DPO 前向数值对拍。兼容失败范围只限该配置，不代表所有 DPO 或 RLHF。
+- 状态：当前固定配置下原生公开训练三步完成；严格 CUDA shim 首步反向仍在 `grad_optional` 抛出 Jittor 内部 `nano_vector.h:41: slice overflow`。新增固定样本前向探针的 DPO loss、chosen/rejected logps 与平均 logits 标量对拍通过容差，但未采集完整逐 token 张量；L1 仍为 partial，L2 failed。兼容失败范围只限该配置，不代表所有 DPO 或 RLHF。
 - 日期：2026-10-08。
 - 基线：Jittor `97a66cf5a650461ac08f9cdf609e4eddb25a230b`（本提交仅更新文档）；同步上游缓存 SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0`，本轮上游 HTTPS fetch 因 `SSL_ERROR_ZERO_RETURN` 未核验实时值；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 范围：Qwen2-0.5B、公开 `swift rlhf --rlhf_type dpo`、全参数 FP32、eager attention、本地固定四行偏好数据、batch 1、SGD、三步。
@@ -16,7 +16,7 @@ Slurm 13175 在 `cscg-qh04` RTX 4090（UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214
 | 层 | 状态 | 证据/缺口 |
 | --- | --- | --- |
 | L0 | partial | 原生与 shim 构造真实 DPO trainer/model；候选 CUDA runtime 与零 fallback 已证，未保存逐参数 device/dtype 清单。 |
-| L1 | not-run | 候选在首步反向前未记录同权重同输入 logits/log-prob 对拍。 |
+| L1 | partial | 固定同一批后 DPO loss、chosen/rejected logps 与平均 logits 标量误差在容差内；完整逐 token 张量结构、dtype、有限性未采集，reward accuracy 因近零 margin 符号不同。 |
 | L2 | failed | 原生三步完成；候选首步反向触发 Jittor 内部范围不变量错误，没有梯度或更新结果。 |
 | L3 | blocked | L2 未通过，未做恢复轨迹。 |
 | L4 | partial | 公开 CLI 到达 DPO training step，但未完成训练或保存 checkpoint。 |
@@ -39,4 +39,18 @@ Slurm 13478 使用同一模型 tokenizer 对已保存输入解码，确认原生
 
 同一探针的 `r1` 没有捕获指标，因为钩子挂在 TRL 基类，而 ms-swift 子类覆写该方法；`r2` 钩子签名遗漏了 ms-swift 的 `pair_loss_scale` 参数；`r3` 在 Jittor CUDA capability 查询子进程持续休眠、尚未进入模型前向时停止。上述尝试均未运行 backward。原始脚本和日志保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-qwen2-dpo-forward-probe-r{1,2,3,4}/`。
 
-因此 L1 更新为 **partial**：公开入口确实分别执行了 CUDA 前向并产生 DPO 输出，但首批输入不一致，缺少同输入 logits/log-prob/loss 对拍。L2 原有 backward 断言失败保持不变；本探针刻意没有重走该失败路径。后续需固定相同样本身份后再对拍前向，再按根因定位 backward，不以相同 seed 推断数据顺序相同。
+前一探针证明默认 sampler 在同 seed 下仍可能让两侧首批错位；它自身不能支持前向数值结论。固定样本的后续证据与边界见下节。L2 原有 backward 断言失败保持不变；两个前向探针都在 backward 入口停止，没有重走该失败路径。
+
+### 固定样本 DPO 前向标量对拍（Slurm 13482）
+
+运行键 `20261008-qwen2-dpo-forward-fixedbatch-r1` 使用与前一探针相同的公开 `swift rlhf --rlhf_type dpo` 配置，并显式传入 `--train_dataloader_shuffle false`，原生 oracle 先运行，strict shim 后运行。两侧实际采集的 `input_ids`、`attention_mask`、`labels` 逐项相同，偏好对展开后 shape 均为 `[2,33]`。两侧模型首个参数在 `cuda:0`；候选 `use_cuda=1`、`fallback_count=0`。两边均在 `Accelerator.backward` 入口按设计停止，所以本运行不包含 backward 或 optimizer step。
+
+| 固定批次 DPO 标量 | 原生 | strict shim | 绝对差 |
+| --- | ---: | ---: | ---: |
+| loss | `0.6931474209` | `0.6931469440` | `4.76837e-7` |
+| `logps/chosen` | `-17.36635971` | `-17.36635590` | `3.81470e-6` |
+| `logps/rejected` | `-14.73171711` | `-14.73171616` | `9.53674e-7` |
+| `logits/chosen` | `-2.243219137` | `-2.243219376` | `2.38419e-7` |
+| `logits/rejected` | `-2.272552967` | `-2.272552490` | `4.76837e-7` |
+
+`rewards/accuracies` 原生为 `0`、shim 为 `1`；两侧 chosen/rejected reward margins 分别约 `-4.77e-7` 与 `5.72e-7`，数值接近零，符号相反。该离散摘要差异单独保留，不能由 loss 相近掩盖。采集器只保存 DPO 汇总标量，没有保存 per-token logps/full logits 的 shape、dtype 和有限值清单；因此 L1 继续为 **partial**，不宣称 L1 通过。完整输出与首个分歧层仍需另行捕获。该结果只支持本固定 batch 的 DPO 汇总前向数值证据，不解除 L2 的 `NanoVector` backward 失败。
