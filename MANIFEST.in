@@ -406,6 +406,7 @@ include docs/results/2026-10-08-qwen2-swiftlora-forward.md
 include docs/results/2026-10-08-qwen2-swiftlora-grad3.md
 include docs/results/2026-10-08-qwen2-swiftlora-sft-cli-d48.md
 include docs/results/2026-10-08-torch-randomsampler-generator.md
+include docs/results/2026-10-09-qwen2-rewardtrainer-api-cuda.md
 include docs/results/index.md
 include docs/tutorials/index.md
 include examples/README.md
