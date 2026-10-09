@@ -1,7 +1,7 @@
 # Qwen2-0.5B ms-swift Embedding `swift sft` CLI CUDA 复验
 
-- 状态：固定 Qwen2-0.5B/FP32/eager/InfoNCE 场景已在公开 `swift sft` CLI 上完成原生与严格 shim 三步训练和 checkpoint 保存；当前源码基线的同输入 embedding 前向与全量可训练参数梯度/更新对拍均通过，L1/L2 对本配置通过。L0、L4 仍为 partial，不能据此宣布 embedding CLI 或 ms-swift 整体兼容。
-- 日期：2026-10-08；L1/L2 补验：2026-10-09。
+- 状态：固定 Qwen2-0.5B/FP32/eager/InfoNCE 场景已在公开 `swift sft` CLI 上完成原生与严格 shim 三步训练、checkpoint 保存及中途恢复；当前源码基线的同输入 embedding 前向、全量可训练参数梯度/更新和恢复轨迹对拍均通过，L1/L2/L3 对本配置通过。L0、L4 仍为 partial，不能据此宣布 embedding CLI 或 ms-swift 整体兼容。
+- 日期：2026-10-08；L1/L2 补验：2026-10-09；L3 补验：2026-10-10。
 - Jittor 基线：`361bfac511b468d4b65745b43df122a8591c35d1`；上游 `2.0-refactor` SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0` 为其祖先。
 - ms-swift checkout：`88d727951203256baa564c643c651b6f8d90fd7e`。
 - 环境：Python 3.11.15、PyTorch 2.6.0+cu124、Transformers 4.57.6、PEFT 0.17.1、ms-swift 4.6.0.dev0；Qwen2-0.5B `model.safetensors` SHA256 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`。
@@ -24,11 +24,15 @@ Slurm 13281 是首个尝试，在原生数据预处理开始前因过长 `TMPDIR
 
 运行键 `20261009-qwen2-embedding-sft-cli-l2-v1`，Slurm 14216 在同一 RTX 4090、源码 HEAD `1cf2e2893fa979a23bc1deeff3eeca23fb6d15bc`、模型/数据、batch 顺序和 CLI 配置下重新运行原生与严格 shim 三步训练。三步完整 `input_ids`、attention mask 和 labels 逐值一致，shape 分别为 `[16,28]`、`[16,28]`、`[12]`；290 个参数的名称、shape、dtype、requires-grad 和初始哈希一致，全部在 CUDA。唯一 trainable 参数 `model.norm.weight` 的三步 FP32 CUDA 梯度相对 L2 分别为 `9.39e-6`、`1.04e-5`、`1.08e-5`，最大绝对差分别为 `1.34e-7`、`1.36e-7`、`1.35e-7`。每一步更新前后权重两侧均逐值相同；SGD 的两组超参数一致（lr `0.01`、momentum `0`，权重衰减组 `0.1/0.0`），内部状态均为空；末态 290 键 checkpoint 最大绝对差为 0。loss 最大差 `4.29e-6`。所有候选进程为真实 CUDA、`use_cuda=1`、`fallback_count=0`。该运行满足本固定配置 L2 的三步、全可训练参数梯度和更新门槛；不推广到其他 tuner、优化器或 embedding 任务。
 
+运行键 `20261009-qwen2-embedding-sft-cli-l3-train-v1` / Slurm 14221 在同一 RTX 4090 上用公开 `swift sft` CLI 分别执行原生与严格 shim 连续三步，并从各自 step-1 checkpoint 新进程恢复至 step 3；batch size 为 2，四条固定记录关闭 shuffle，因此 step 1 checkpoint 位于 epoch 中途。GPU-worker 只读对拍 14222 确认恢复后的 step 2/3 输入与连续训练逐 tensor 完全相同，且 native/shim 的 step 1–3 输入也一致（CUDA `input_ids`/mask，shape `[8,28]` 或 `[8,27]`，labels `[6]`）。连续与恢复轨迹均到达 global step 3 / epoch 1.5；native step 2/3 loss 完全一致，shim 最大差 `4.77e-7`。同一 runtime 内，连续/恢复的 290 键 step-3 权重完全相同；`optimizer.pt`、`scheduler.pt`、`rng_state.pth` 分别逐字节相同，证明该固定中途游标和后续状态恢复对齐。native 与 strict shim 的连续末态及恢复末态 290 键权重也逐值相同。四种运行的父/子进程均记录 CUDA，shim marker 与模式相符，fallback=0。该结果仅支持此固定 trainer、SGD、数据顺序及中途 checkpoint 配置；不外推到其他 sampler、scheduler 或模型。
+
+14221 日志在数据 map 子进程退出清理时出现 `multiprocess` manager 删除 `.nfs*` 临时文件的 `EBUSY` traceback；Map 随后完成，四条 CLI 返回成功，捕获的输入、checkpoint 与状态文件均完整。该清理告警保留在运行日志，不影响上述恢复轨迹证据。
+
 | 层 | 本配置状态 | 证据或边界 |
 | --- | --- | --- |
 | L0 | partial | CLI 真实构造并训练 Qwen2 embedding 模型、processor/template、dataset、trainer 与 SGD；保存 state 键相等，shim CUDA scope/fallback 已审计，但没有完整逐参数 device/dtype/requires-grad 清单。 |
 | L1 | PASS（固定配置） | Slurm 14204 在当前源码基线下确认首批输入和 290 个初始参数逐项一致；`last_hidden_state` 为 CUDA FP32 `[16,896]`，最大绝对差 `1.99676e-6`、相对 L2 `4.00853e-6`，首步 loss 差 `3.58e-6`，fallback=0。仅适用于本模型、数据及 CLI 配置。 |
 | L2 | PASS（固定配置） | Slurm 14216 的三步输入完全相同；唯一 trainable 参数梯度相对 L2 最大 `1.08e-5`、max abs `1.36e-7`，逐步更新前后权重一致；SGD 参数组相同、momentum=0 且状态均为空，末态 290 键 checkpoint 完全相同，fallback=0。仅适用于该模型、数据和 CLI 配置。 |
-| L3 | not-run | 未做同进程或新进程 checkpoint 恢复。 |
-| L4 | partial | 当前公开 `swift sft` 命令在原生和严格 CUDA shim 下均完成三步并写 checkpoint；因 L0-L3 证据缺口，不标完整层级通过。 |
+| L3 | PASS（固定配置） | Slurm 14221/14222 的新进程 checkpoint-1 中途恢复：后续批输入逐值一致；global step/epoch、loss、290 键权重及每个 runtime 内 optimizer/scheduler/RNG 文件均与连续轨迹相同；strict CUDA、fallback=0。仅适用于本 trainer、SGD 和固定四行数据。 |
+| L4 | partial | 当前公开 `swift sft` 命令在原生和严格 CUDA shim 下均完成训练、保存与恢复；完整 L0 构造状态清单仍缺，因此只记录该入口已运行，不升级完整 L4。 |
 | L5 | blocked | L0-L3 未完整通过，且没有满足预热与稳态次数的性能数据。 |
