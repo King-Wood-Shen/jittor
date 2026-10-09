@@ -36,6 +36,7 @@
 2026-10-08-qwen2-causal-sft-forward-c23a
 2026-10-08-qwen2-causal-sft-grad3-4a7e
 2026-10-08-qwen2-causal-sft-gradient-checkpointing-cuda
+2026-10-08-qwen2-causal-sft-bf16-amp-cuda
 2026-10-08-qwen2-causal-sft-l0-audit
 2026-10-08-qwen2-seqcls-sft-cuda
 2026-10-08-qwen2-seqcls-infer-cuda
@@ -48,6 +49,7 @@
 2026-10-08-qwen2-causal-ddp-grad3-6c104
 2026-10-08-qwen2-causal-ddp-resume-7a18
 2026-10-08-qwen2-dpo-full-cuda
+2026-10-08-qwen2-cpo-peftlora-cli-cuda
 2026-10-08-ms-swift-eval-dependency-block
 2026-10-08-torch-randomsampler-generator
 2026-10-08-qwen2-swiftlora-forward
