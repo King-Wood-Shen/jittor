@@ -20,6 +20,10 @@ Slurm 13539 在 worker 上比较 safetensors adapter：336 个键、2,199,552 �
 
 首次 shim JIT 混入总耗时：候选训练约 295 秒，首步约 240 秒；原生训练不到 1 秒。此数据不用于性能比值或 L5。预热复用了先前运行目录的 Jittor CUDA cache（Jittor 源码未变，前次缓存包含 `cuda_archs=89`）；缓存与原始日志留在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261008-qwen2-cpo-peftlora-cli-v5/`。早期 run `...cli-v1` 到 `...cli-v4` 的预检/CLI 参数/空缓存启动配置错误现场均保留，未计为模型兼容结果。
 
+### 静态调用链复核（2026-10-09）
+
+在 ms-swift `88d727951203256baa564c643c651b6f8d90fd7e` 检查 `CPOTrainer` 的继承链后，`RLHFTrainerMixin.get_train_dataloader` 调用 `super()`，最终进入 `SwiftMixin.get_train_dataloader`。该实现将 `args.train_dataloader_shuffle` 传入 `BatchSamplerShard` 的 `shuffle` 参数；本次 CLI 两侧记录的值均为 `false`。因此现有源码没有支持“Swift CPO dataloader 忽略关闭 shuffle”这一解释的证据。此静态检查不能证明两次运行实际读取了相同的 tokenized batch，也不能解释指标分歧；原始运行没有保存 batch 内容与 ID、初始 adapter 仍未比对，根因继续保持未定。下次诊断须先固定相同 adapter，再记录每步 `input_ids`、mask 与 labels，之后才比较 logits/loss、全部梯度及更新轨迹。
+
 | 层 | 状态 | 证据与缺口 |
 | --- | --- | --- |
 | L0 | partial | 真实模型、tokenizer、偏好数据、CPO Trainer 与 LoRA 构造并完成训练；未对比初始 adapter 全量值、所有参数 device 清单和 batch ID。 |
