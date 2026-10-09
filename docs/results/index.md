@@ -66,6 +66,7 @@
 2026-10-09-qwen2-rewardtrainer-api-cuda
 2026-10-09-qwen2-simpo-2gpu-cli-cuda
 2026-10-09-qwen2-simpo-stock-cli-cuda
+2026-10-09-torch-lrscheduler-state-cuda
 ```
 
 ## 按主题索引
@@ -126,3 +127,4 @@
 | [Qwen2-0.5B RewardTrainer Python API CUDA 对拍](2026-10-09-qwen2-rewardtrainer-api-cuda.md) | 固定 preference 数据三步 logits/loss/head 梯度与更新对齐，状态元数据一致且零 fallback；L0 pass，L1/L2/L4 partial，L3 未运行、L5 blocked | 2026-10-09 |
 | [Qwen2-0.5B stock `swift rlhf --rlhf_type simpo` 双卡 CUDA 对拍](2026-10-09-qwen2-simpo-2gpu-cli-cuda.md) | 固定六行重复 preference 数据下双卡三步输入、290 项梯度、NCCL 同步和权重对齐；optimizer 状态相同，scheduler 字段名有差异；L0/L1/L2/L4 partial，L3 未运行，L5 blocked | 2026-10-09 |
 | [Qwen2-0.5B stock `swift rlhf --rlhf_type simpo` CUDA 对拍](2026-10-09-qwen2-simpo-stock-cli-cuda.md) | 单样本三步输入、首步 logits、290 项全参数梯度和末态权重对齐且 strict CUDA/零 fallback；L0/L1/L2/L4 partial、L3 not-run、L5 blocked | 2026-10-09 |
+| [JTorch 学习率调度器状态字段 CUDA 对拍](2026-10-09-torch-lrscheduler-state-cuda.md) | 修复 verbose 与瞬态 `_is_initial` 状态差异；LambdaLR/MultiplicativeLR/StepLR 的 CUDA 状态、学习率轨迹和参数值对齐；定向测试 11 passed，core tier 仍有环境与无关失败 | 2026-10-09 |
