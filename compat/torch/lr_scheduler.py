@@ -30,6 +30,7 @@ class LRScheduler:
 
     def __init__(self, optimizer, last_epoch=-1, verbose=False):
         self.optimizer = optimizer
+        self.verbose = verbose
         for index, group in enumerate(optimizer.param_groups):
             if last_epoch == -1:
                 initial_lr = group["lr"]
@@ -54,14 +55,15 @@ class LRScheduler:
         try:
             self.step()
         finally:
-            self._is_initial = False
+            del self._is_initial
 
     def get_lr(self):
         return list(self.base_lrs)
     def get_last_lr(self):
         return list(self._last_lr)
     def state_dict(self):
-        return {k: v for k, v in self.__dict__.items() if k != "optimizer"}
+        return {k: v for k, v in self.__dict__.items()
+                if k not in ("optimizer", "_is_initial")}
     def load_state_dict(self, sd):
         self.__dict__.update(sd)
     def step(self, epoch=None):
@@ -79,7 +81,7 @@ class LRScheduler:
 def _lambda_state_dict(scheduler):
     from types import FunctionType
     state = {k: v for k, v in scheduler.__dict__.items()
-             if k not in ("optimizer", "lr_lambdas")}
+             if k not in ("optimizer", "lr_lambdas", "_is_initial")}
     state["lr_lambdas"] = [
         None if isinstance(fn, FunctionType) else fn.__dict__.copy()
         for fn in scheduler.lr_lambdas
