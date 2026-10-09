@@ -1754,13 +1754,13 @@ workaround.
 ## KI-COMPAT-013: Qwen2 LoRA CPO training diverges from the native trajectory
 
 - Severity: Medium (training completes, but observed numerical parity is absent)
-- Status: Open; reproduced 2026-10-08 on one public CUDA CPO LoRA configuration
+- Status: Open; root cause identified 2026-10-09 on one public CUDA CPO LoRA configuration
 - Owner: torch compatibility / ms-swift RLHF integration
-- Symptom: native and strict CUDA shim both complete three public `swift rlhf --rlhf_type cpo` steps, but step loss/reward metrics differ and the final adapter has relative L2 about 1.414. Initial adapter equality and actual batch IDs were not captured, so the mismatching component is not isolated.
-- Cause: unknown; do not infer an operator bug from this run until initial adapter values, batch IDs and same-input CPO forward values are aligned.
-- Workaround: none verified.
-- Evidence: [Qwen2-0.5B public CPO LoRA CUDA report](../../docs/results/2026-10-08-qwen2-cpo-peftlora-cli-cuda.md), native and strict shim Slurm 13530; checkpoint comparison Slurm 13539; bootstrap fallback count is zero.
-- Exit condition: fix initial state and batch identity, then compare chosen/rejected logits and loss, all trainable gradients, optimizer state and three-step updates against the native CUDA oracle.
+- Symptom: native and strict CUDA shim both complete public CPO LoRA training, but their first captured batches and resulting metrics differ even when initialized from the same adapter checkpoint.
+- Cause: `swift.rlhf_trainers.CPOTrainer` inherits `RLHFTrainerMixin, SwiftMixin, HFCPOTrainer`, not the standalone `DataLoaderMixin` that consumes `train_dataloader_shuffle`. The RLHF mixin delegates to Transformers `Trainer.get_train_dataloader`, whose map-style path uses `RandomSampler`; consequently `--train_dataloader_shuffle false` is ignored on this CPO path. Slurm 13640/13642 confirmed same initial adapter tensors but different `input_ids`, labels, masks and batch sequence lengths. The independent Torch `RandomSampler` probe (Slurm 13189) also observed different same-seed permutations across runtimes; this is consistent with, but does not alone prove, the exact emitted-index cause in CPO.
+- Workaround: none verified for the public CLI. Same-batch model diagnosis requires replaying identical captured batch tensors through both runtimes.
+- Evidence: [Qwen2-0.5B public CPO LoRA CUDA report](../../docs/results/2026-10-08-qwen2-cpo-peftlora-cli-cuda.md), Slurm 13530/13539/13640/13642; strict shim fallback count is zero.
+- Exit condition: make the CPO dataloader honor the no-shuffle option or otherwise establish identical sample order; then compare chosen/rejected logits and loss, all trainable gradients, optimizer state and three-step updates against the native CUDA oracle.
 
 ## KI-DIST-001: FSDP2 flat sharding peaks above the unsharded model
 
