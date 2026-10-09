@@ -14,7 +14,7 @@ Slurm 作业 11014 在同一 GPU 上先原生 PyTorch、后严格 Jittor CUDA，
 | L0 | partial | 真实模型、tokenizer、数据集及训练器经公开入口构造；初始状态键、全部 dtype 与设备的逐项审计未运行。 |
 | L1 | not-run | 尚无同权重同输入的独立前向张量与逐层误差对拍。 |
 | L2 | blocked | 首次更新前 290 项裁剪后梯度已直接比较，三步 loss/最终权重接近；裁剪前及第 2、3 步梯度、逐步 optimizer 状态和更新轨迹未直接比较。输入为离散 token ID，不适用输入梯度。 |
-| L3 | blocked | 新进程从 checkpoint-3 续训一步并对齐 global step 与最终权重；optimizer 保存状态完全同构，scheduler 核心步数与学习率一致，RNG 四类条目均可加载；同进程恢复、RNG 值及数据游标的直接审计未运行。 |
+| L3 | blocked | 新进程从 checkpoint-3 续训到 global step 4；scheduler 修复后另一次公开 CLI 续训的 step-4 checkpoint 与原生权重接近，scheduler 状态字段和值完全相同。optimizer、RNG 实值、数据游标和同进程恢复仍未在这次复验中核对，因此完整 L3 未通过。 |
 | L4 | blocked | 公开 CLI 两侧确已完成三步并保存 checkpoint；前级验收未全通过，不能升级为 L4 PASS。 |
 | L5 | blocked | 前级未通过；未做真实尺寸的两次预热和十次同步稳态计时。 |
 
@@ -27,3 +27,15 @@ Slurm 作业 11014 在同一 GPU 上先原生 PyTorch、后严格 Jittor CUDA，
 Slurm 11093 在各自运行时加载 checkpoint-4 的 `optimizer.pt`、`scheduler.pt` 与 `rng_state.pth`，候选加载时 fallback 0。两侧无动量 SGD 的 optimizer `state` 均为空，两个参数组的已保存字段和值完全相同；scheduler 的 `last_epoch=4`、`_step_count=5`、`base_lrs` 和 `_last_lr` 一致。scheduler 结构存在非核心字段差异：原生有 `verbose=false`，shim 有 `_is_initial=false`。RNG 两侧均保存并可加载 `python`、`numpy`、`cpu`、`cuda` 四类条目，但不同运行时的内部状态未做逐值等价断言；数据游标也未直接审计。同进程恢复未运行，因此 L3 仍 blocked。
 
 未版本化证据：`$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261007-qwen2-public-causal-fullparam-fp32-ffeb/` 中的 `worker3.sh`、`run.sh`、两侧日志、checkpoint-3、`compare3.py`、`comparison3.json` 和候选启动/退出标记。
+
+## Scheduler 修复后的公开恢复复验（2026-10-09）
+
+使用 JTorch 修复后基线 `793527f768ddd3254a3c128b9725f3a4ec305f07`、ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`，Slurm 14149 在同一 RTX 4090 上以公开 `python -m swift.cli.main sft` 从既有 shim checkpoint-3 恢复并产出 checkpoint-4；训练启动和退出的父子进程均为 `use_cuda=1`、shim 标记真、fallback=0。原生 checkpoint-4 oracle 复用自既有独立 PyTorch CUDA 作业，没有重跑。
+
+worker 对拍确认两侧各有 290 个相同权重键（键顺序不同，没有缺失键），checkpoint 权重最大绝对差 `7.45058e-9`、相对 L2 `7.90862e-11`。step-4 loss 为 native `3.8139622211`、shim `3.8139624596`，绝对差 `2.38e-7`。独立 strict-shim 状态审计 Slurm 14171 确认 scheduler 七个字段集合和值完全一致：包含 `verbose=false`，不含 `_is_initial`，`last_epoch=4`、`_step_count=5`；trainer 两侧 `global_step=4`，fallback=0。
+
+候选训练作业 14149 的比较器因错误要求 safetensors 键顺序也相同而退出；只读诊断作业 14171 按键名集合比较后确认权重完整、数值通过，故该 harness 断言不是兼容性失败。预检 14141 通过；此前预检 14140 因 harness 漏设 ms-swift `PYTHONPATH` 失败，候选 14148 因 AF_UNIX 临时路径过长在数据映射前失败，两次均未形成模型结果，原始日志保留。
+
+该复验只补强这一固定全参数 FP32/SGD 公共 SFT 恢复样例与 scheduler 序列化状态。没有比较 optimizer 状态、RNG 内部值、训练样本游标或同进程恢复；因此 L3 仍为 blocked，L0–L5 整体等级不提升。原始脚本、checkpoint、审计 JSON 与日志未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261009-qwen2-sft-resume-scheduler-fix-v2/` 和 `20261009-qwen2-sft-resume-scheduler-fix-v3/`。
+
+报告文档门禁 Slurm 14173 在 `cscg-qh04` 通过：布局检查成功，Torch-mode `tests/structure` 为 1386 passed、6 skipped、1027 subtests passed；skip 原因为环境未安装 Jittor core wheel 与 pytest-xdist。

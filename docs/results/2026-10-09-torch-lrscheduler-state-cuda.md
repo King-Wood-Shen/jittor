@@ -25,4 +25,4 @@ Torch-mode `tests/structure` 的首次作业 14123 发现验证环境中残留�
 
 原始脚本、状态 JSON、测试输出和日志未版本化，保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261009-torch-lrscheduler-state-compat-v1/`、`20261009-torch-lrscheduler-state-compat-v4/`、`20261009-torch-lrscheduler-core-cuda-v1/`、`20261009-torch-lrscheduler-core-cuda-v2/` 与 `20261009-torch-lrscheduler-structure-v2/`。
 
-这项 compat API 修复证明所列三类 scheduler 的字段和 CUDA 更新行为；它不重写先前 SimPO 作业 14059 保存的 shim checkpoint，也不自动升级该报告的历史 L0–L5 结论。ms-swift 公开训练恢复与恢复后的下一步轨迹仍需独立验证。
+这项 compat API 修复证明所列三类 scheduler 的字段和 CUDA 更新行为；它不重写先前 SimPO 作业 14059 保存的 shim checkpoint，也不自动升级该报告的历史 L0–L5 结论。修复后已另用固定 Qwen2-0.5B 全参数 FP32/SGD 公开 SFT 样例验证 step-3→4 新进程续训：scheduler 七字段和值、step-4 权重与 loss 和原生对齐，严格 fallback=0。此项受限证据和 L3 未完成项见 [Qwen2 SFT 报告](2026-10-07-qwen2-causal-sft-ffeb.md)；optimizer、RNG 实值、数据游标、同进程恢复仍未验证，不构成通用恢复合同。
