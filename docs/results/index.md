@@ -117,7 +117,7 @@
 | [Qwen2-0.5B ms-swift 私有 Swift LoRA 三步梯度与更新对拍](2026-10-08-qwen2-swiftlora-grad3.md) | 96 个 trainable 参数三步梯度、AdamW 状态和 adapter 更新通过固定直接 API 对拍；公开 Trainer/CLI、恢复与性能未验证 | 2026-10-08 |
 | [Qwen2-0.5B ms-swift 私有 Swift LoRA 公开 `swift sft` CUDA 对拍](2026-10-08-qwen2-swiftlora-sft-cli-d48.md) | 固定 CLI 配置的 logits、三步 adapter 梯度/AdamW 更新通过；新进程恢复因 Transformers 未识别私有 tuner 而在训练前失败，L0/L4 partial、L3 blocked、L5 blocked | 2026-10-08 |
 | [Qwen2-0.5B ms-swift EmbeddingTrainer InfoNCE CUDA 基线复验](2026-10-08-qwen2-embedding-trainer-infonce-817fb.md) | 新基线下固定 direct Python Trainer API 三步 embedding forward/loss/梯度/更新对拍通过，严格 CUDA/零 fallback；L3、L5 未运行 | 2026-10-08 |
-| [Qwen2-0.5B ms-swift Embedding `swift sft` CLI CUDA 复验](2026-10-08-qwen2-embedding-sft-cli-361bf.md) | 当前基线公开 CLI 原生与严格 shim 均完成三步并保存 checkpoint，loss/grad norm 与选定参数末态对齐、零 fallback；L0-L4 partial、L1/L3 未运行，L5 blocked | 2026-10-08 |
+| [Qwen2-0.5B ms-swift Embedding `swift sft` CLI CUDA 复验](2026-10-08-qwen2-embedding-sft-cli-361bf.md) | 当前源码补验同一首批输入、290 个参数初态及 embedding 输出，L1 固定配置通过、严格 CUDA/零 fallback；L0/L2/L4 partial，L3 not-run，L5 blocked | 2026-10-09 |
 | [Qwen2-0.5B causal LM `TransformersEngine` Python API CUDA 对拍](2026-10-08-qwen2-causal-transformersengine-api.md) | 固定两请求非流式生成在 31 步 logits、token IDs 和文本上对齐；L0/L1/L4/L5 通过、L2/L3 不适用、strict CUDA/零 fallback | 2026-10-08 |
 | [Qwen2-0.5B ms-swift `swift deploy` 服务端/客户端 CUDA 复验](2026-10-08-qwen2-service-infer-361bf.md) | 原生与严格 shim 服务对 12 次 HTTP 请求文本/token 用量完全一致；10 次稳态延迟比 0.964，服务进程零 fallback，L0/L1/L4/L5 partial | 2026-10-08 |
 | [Qwen2-0.5B PEFT LoRA 公开 `swift export --merge_lora` CUDA 对拍](2026-10-08-qwen2-peftlora-export-merge-82c2.md) | 固定初始 adapter 的原生与严格 shim 公开合并导出 290 个参数完全一致，候选参数驻留 CUDA、零 fallback；L0/L1/L4 partial，L3 未运行 | 2026-10-08 |
