@@ -64,6 +64,7 @@
 2026-10-09-qwen2-orpo-stock-cli-cuda
 2026-10-09-qwen2-reward-stock-cli-cuda
 2026-10-09-qwen2-rewardtrainer-api-cuda
+2026-10-09-qwen2-simpo-stock-cli-cuda
 ```
 
 ## 按主题索引
@@ -122,3 +123,4 @@
 | [Qwen2-0.5B stock `swift rlhf --rlhf_type orpo` CUDA 输入身份审计](2026-10-09-qwen2-orpo-stock-cli-cuda.md) | 两样本三步轨迹发现 step-3 顺序反转；单样本固定批次三步的输入、前向、全参数梯度和末态权重对齐且零 fallback；L0/L1/L2/L4 partial、L3 not-run、L5 blocked | 2026-10-09 |
 | [Qwen2-0.5B stock `swift rlhf --rlhf_type rm` CUDA 入口审计](2026-10-09-qwen2-reward-stock-cli-cuda.md) | 原生和严格 shim 公开 CLI 均完成三步并保存 checkpoint；291 个权重键 shape 对齐，但逐步输入身份不一致、loss 差最大 0.01331；L0 partial、L1/L2 blocked、L4 入口已运行但功能未通过 | 2026-10-09 |
 | [Qwen2-0.5B RewardTrainer Python API CUDA 对拍](2026-10-09-qwen2-rewardtrainer-api-cuda.md) | 固定 preference 数据三步 logits/loss/head 梯度与更新对齐，状态元数据一致且零 fallback；L0 pass，L1/L2/L4 partial，L3 未运行、L5 blocked | 2026-10-09 |
+| [Qwen2-0.5B stock `swift rlhf --rlhf_type simpo` CUDA 对拍](2026-10-09-qwen2-simpo-stock-cli-cuda.md) | 单样本三步输入、首步 logits、290 项全参数梯度和末态权重对齐且 strict CUDA/零 fallback；L0/L1/L2/L4 partial、L3 not-run、L5 blocked | 2026-10-09 |
