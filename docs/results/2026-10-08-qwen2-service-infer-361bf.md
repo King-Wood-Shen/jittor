@@ -1,12 +1,12 @@
 # Qwen2-0.5B ms-swift `swift deploy` 服务端/客户端 CUDA 复验
 
-- 状态：固定 Qwen2-0.5B FP32/eager 场景下，原生与严格 CUDA shim 的公开服务端均响应 12 次 OpenAI 风格 HTTP 请求，文本、结束原因与 token 用量相等，服务路径稳态请求时延可测；该服务面 L0/L1/L4/L5 仍记 partial，不代表所有部署后端或 ms-swift 整体兼容。
-- 日期：2026-10-08。
-- Jittor 基线：`d11887358eb17daa8abe2ddf22f6ff1d2c8c5882`；上游 `2.0-refactor` SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0` 为其祖先。
+- 状态：当前基线固定 Qwen2-0.5B FP32/eager 配置下，公开 Transformers 服务的 L0/L1/L4 通过；L2/L3 不适用。L5 有 10 次稳态时延/吞吐，但因缺进程显存口径仍 partial。不代表其它模型、后端或 ms-swift 整体兼容。
+- 日期：2026-10-08；当前基线补验：2026-10-11。
+- 历史基线：`d11887358eb17daa8abe2ddf22f6ff1d2c8c5882`；当前 Jittor 基线：`5f5ee433dc002b1f5b76154a6e8e8055961a31b8`；上游 `2.0-refactor` SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0` 是祖先。
 - ms-swift checkout：`88d727951203256baa564c643c651b6f8d90fd7e`。
 - 环境：Python 3.11.15、PyTorch 2.6.0+cu124、Transformers 4.57.6、PEFT 0.17.1、ms-swift 4.6.0.dev0；Qwen2-0.5B `model.safetensors` SHA256 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`。
 - 维护者：ms-swift CUDA 适配。
-- 复查条件：`swift deploy`、TransformersEngine、HTTP generation、Jittor shim 生命周期或请求批处理变化时；补齐服务进程完整状态审计与显存口径时。
+- 复查条件：`swift deploy`、TransformersEngine、HTTP generation、Jittor shim 生命周期或请求批处理变化时；改变服务模型、dtype、设备、并发，或补齐服务进程显存口径时。
 
 运行键 `20261008-qwen2-service-infer-361bf-r5`。Slurm 13324 在 cscg-qh15 RTX 4090（UUID `GPU-43cb8a5a-a194-7846-232c-b460bee1ad9e`，driver `580.178.04`）先启动未设置 shim 的原生 `python -m swift.cli.main deploy`，再启动严格候选。两侧均为本地 Transformers backend、FP32/eager、Qwen2 causal LM、同一模型权重和 served model name。客户端使用 OpenAI 风格 `/v1/models` 与 `/v1/chat/completions`，固定请求 “What is the capital of France?”、temperature 0、seed 1234、max_tokens 8；每侧共 12 请求，前 2 请求作为预热，其后 10 个串行请求计稳态。
 
@@ -18,9 +18,17 @@
 
 | 层 | 本配置状态 | 证据或边界 |
 | --- | --- | --- |
-| L0 | partial | 公开 deploy 服务构造真实 Qwen2、tokenizer/template 与 Transformers backend；shim CLI/服务进程 strict CUDA 启用。底层同源 engine 有 290 参数 metadata/device 对拍，但本服务运行没有另存完整参数设备清单。 |
-| L1 | partial | 同一请求下 12 次服务端响应文本、finish reason、token usage 完全一致；服务协议未返回/捕获 logits 或 hidden states。底层 engine 的 logits 证据来自已引用报告。 |
+| L0 | PASS | job16188 原生服务与 job16189 strict shim 服务实际加载的 Qwen2ForCausalLM，各有 291 个参数/缓冲项；名称、shape、dtype、device 元数据逐项一致，FP32 且全 CUDA、有限。两个作业在 cscg-qh13 RTX 4090（UUID `GPU-c050abb2-8bea-6b3a-b793-236e283fa373`）顺序运行；模型权重 SHA256 与固定 checkpoint 一致。 |
+| L1 | PASS | 同一个 HTTP 请求的 `input_ids`/mask shape `[1,26]` 逐项相同；生成 8 步各自捕获完整 `[151936]` CUDA FP32 logits，均有限，最大绝对差 `2.72989e-5`、相对 L2 `8.40818e-7`，逐步 argmax 100% 一致；生成 IDs、公开文本与 finish reason 相同。 |
 | L2 | not-applicable | 无状态纯推理服务，不执行反向或 optimizer 更新。 |
 | L3 | not-applicable | 无训练/续训状态的生成服务请求。 |
-| L4 | partial | 当前公开 `swift deploy` 服务端与客户端完成 12 次真实 HTTP 推理；端到端请求证据有效，但原 batch 健康检查端口选择错误使调度脚本未正常收尾，且 L0/L1 为 partial。 |
-| L5 | partial | 两次预热后 10 次串行稳态时延/吞吐及原生比已测，strict child-server fallback 为 0；显存统计缺失，首次请求包含冷 JIT 启动耗时。 |
+| L4 | PASS（固定配置） | 公开 `swift deploy` 服务通过 OpenAI 风格 HTTP endpoint 完成 12 次请求；job16189 又以单个确定性请求补齐当前服务进程 L0/L1 审计并正常启动、服务、收尾。job16189 外层作业因独立收尾 awk 检查引用缺失的 `shim-bootstrap.log` 而 exit 2；服务请求及模型/生成审计产物完整，shim 服务进程 start/end 事件均记录 fallback 0。 |
+| L5 | partial | 两次预热后 10 次串行稳态时延/吞吐及原生比已测，strict shim fallback 为 0；没有进程显存/allocator 峰值口径，因此不满足完整 L5。首次请求包含冷 JIT 启动耗时，不纳入稳态。 |
+
+## 2026-10-11 当前基线 L0/L1 服务进程补证
+
+新运行键 `20261011-qwen2-service-infer-l01-audit-v1` / job16188 先以原生 PyTorch 启动公开 `swift deploy` 服务，在服务实际加载模型返回处采集全部参数和缓冲区元数据，并在 `lm_head` 前向 hook 中只读捕获生成 logits、服务接收的 prompt IDs/mask 与生成 IDs。原生服务成功完成同一固定请求并留下完整产物。该作业随后因 harness 的 oracle 文件 glob 将真实 `state.<pid>.json` 写成了预期 `state-*.json` 而退出，shim 未启动；原生产物保留且被下一个运行只读复用。
+
+新的 shim-only 运行键 `20261011-qwen2-service-infer-l01-audit-v2` / job16189 在同一 cscg-qh13 RTX 4090 上启动 strict shim 公开服务并发送相同 HTTP 请求。候选服务进程事件为 shim marker=true、`use_cuda=1`，完整状态清单 291 项全 CUDA/FP32/有限。原生与候选状态的名称、shape、dtype、device 逐项相同；输入 ID/mask 完全相同，8 个解码步的 `[8,151936]` logits 均有限，最大绝对差 `2.7298927e-5`、相对 L2 `8.4081810e-7`、逐步 argmax 一致率 100%；生成序列、响应文本及 finish reason 相同。候选服务进程正常退出事件记录 `fallback=0`。
+
+job16189 的模型计算、HTTP 请求和比较器均成功；Slurm exit 2 来自脚本末尾残留的 awk 检查尝试读取本 v2 worker 未配置的 `shim-bootstrap.log`。其余服务进程审计事件及比较 JSON 完整，故本报告只依据已落盘且通过的逐项证据升级 L0/L1/L4，不把外层 harness exit 误作 shim 兼容失败。job16188/16189 原始日志、状态 JSON、NPZ logits、HTTP 响应和脚本均未版本化，分别位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-service-infer-l01-audit-v1/` 与 `20261011-qwen2-service-infer-l01-audit-v2/`。本次 logits hook 会同步并复制 logits 到 CPU，故只作正确性审计，不用于性能测量；L5 沿用独立旧运行数字并保留显存缺项。
