@@ -20,9 +20,19 @@
 
 | 层 | 本配置状态 | 证据或边界 |
 | --- | --- | --- |
-| L0 | partial | 两侧公开 export 均构造模型/PEFT adapter；native 记录 `device_map=cuda:0`，shim 合并后完整 290 参数 CUDA 清单通过；native 未留逐参数设备清单。 |
-| L1 | partial | 公开 merge 结果的 290 个参数逐项完全相同；没有从导出模型再执行 logits/hidden forward，故前向验收未完整。 |
+| L0 | 历史基线 `82c2`：partial；复验基线 `a77725d5`：PASS | 历史 export 记录见上。job15999 新进程从两侧已合并导出模型加载完整 291 项 state（参数和 buffer），名称、shape、dtype、device、finite 元数据相同且均为 FP32 CUDA；tokenizer 与真实模型权重仍为固定产物。 |
+| L1 | 历史基线 `82c2`：partial；复验基线 `a77725d5`：PASS | job15999 相同 tokenizer 输入 `[2,8]`，native/shim logits 均为有限 FP32 CUDA `[2,8,151936]`；最大绝对误差 `8.03471e-5`、相对 L2 `1.75080e-6`、argmax 一致率 100%，满足固定阈值 `abs≤1e-4, relative L2≤1e-5`。 |
 | L2 | not-applicable | 该路径不执行反向传播或 optimizer 更新。 |
 | L3 | not-run | 没有在新进程加载导出模型并验证后续轨迹；无训练 optimizer/scheduler/RNG 恢复证据。 |
-| L4 | partial | 两侧均通过公开 `swift export --merge_lora` 保存可序列化模型；受 L0/L1 的部分证据限制，保守记 partial。 |
+| L4 | 历史基线 `82c2`：PASS；复验基线 `a77725d5`：not-run | 两侧公开 `swift export --merge_lora` 在历史基线成功保存模型；当前基线的 job15999 是直接 Transformers load/forward 审计，没有重跑公开 CLI，因此不把历史 L4 自动继承。 |
 | L5 | not-applicable | 离线合并导出不是训练或在线推理性能场景；本次未测模型服务稳态性能。 |
+
+## 当前基线补充：导出模型 L0/L1 复验（2026-10-11）
+
+本节仅补齐当前 Jittor 基线 `a77725d596454c333a38e4e3cf5670aead599523` 下的导出模型构造与前向证据，不改写上方 `82c2f9e` 的历史公开 CLI 结论。ms-swift 仍为 `88d727951203256baa564c643c651b6f8d90fd7e`。原生 merged export 来自 job13351，strict-shim merged export 来自 job13352；新审计只读复用这两个产物，未重新导出。
+
+新运行键 `20261011-qwen2-peftlora-export-merge-l01-v3` / Slurm job15999 在 cscg-qh10 RTX 4090（UUID `GPU-9fd9b4e3-8bd4-9db8-0a3d-0ea6cfbd07bf`）运行 strict shim；独立原生 oracle 及输入、logits 由 job15947 在 cscg-qh06 RTX 4090（UUID `GPU-e0c8764d-4b51-62e5-f0d3-4aa27a8ddb68`）先行完成。job15947 因35分钟时限在 Jittor 冷编译中终止，但原生完整产物有效；job15997 因缺 CUDA 初始化环境变量在 shim 前置阶段失败，均作为 harness/资源失败保留，不作为兼容结论。v3 补齐 CUDA toolkit、Python config 与 build 环境后通过。
+
+两侧在各自导出目录用 Transformers `AutoModelForCausalLM.from_pretrained`/`AutoTokenizer.from_pretrained` 加载 Qwen2-0.5B，FP32、eager、local-only。291 项 state 参数与 buffer 的名称、shape、dtype、device、有限性清单相同且全在各自 `cuda:0`；两条固定文本各自分词后得到相同 `[2,8]` input IDs 和 attention mask。logits 是有限 FP32 CUDA `[2,8,151936]`，最大绝对误差 `8.0347061e-5`，相对 L2 `1.7507991e-6`，argmax 一致率 100%；预设绝对阈值 `1e-4` 与相对 L2 阈值 `1e-5` 均通过。候选 `shim-runtime.json` 记录 `use_cuda=1`、shim=true、fallback_count=0。
+
+前向比较跨不同 RTX 4090 worker 完成，故仅声称该固定模型/导出物和输入 profile 的阈值通过，不声称同卡严格复验或性能比值。原始产物和失败日志未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-peftlora-export-merge-l01-v1/`、`...-v2/` 与 `...-v3/`。v1 是已完成的 native oracle 加超时 shim 尝试，v2 是 CUDA 初始化环境缺失的无效尝试，v3 为通过的严格候选；不重跑任一运行键。
