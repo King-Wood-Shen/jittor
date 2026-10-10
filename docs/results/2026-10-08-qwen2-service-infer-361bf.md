@@ -1,12 +1,12 @@
 # Qwen2-0.5B ms-swift `swift deploy` 服务端/客户端 CUDA 复验
 
-- 状态：当前基线固定 Qwen2-0.5B FP32/eager 配置下，公开 Transformers 服务的 L0/L1/L4 通过；L2/L3 不适用。L5 有 10 次稳态时延/吞吐，但因缺进程显存口径仍 partial。不代表其它模型、后端或 ms-swift 整体兼容。
+- 状态：当前基线固定 Qwen2-0.5B FP32/eager 配置下，公开 Transformers 服务的 L0/L1/L4/L5 通过；L2/L3 不适用。结论限于本报告固定服务 profile，不代表其它模型、后端或 ms-swift 整体兼容。
 - 日期：2026-10-08；当前基线补验：2026-10-11。
-- 历史基线：`d11887358eb17daa8abe2ddf22f6ff1d2c8c5882`；当前 Jittor 基线：`5f5ee433dc002b1f5b76154a6e8e8055961a31b8`；上游 `2.0-refactor` SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0` 是祖先。
+- 历史基线：`d11887358eb17daa8abe2ddf22f6ff1d2c8c5882`；当前 Jittor 基线：`d66fece475851205cd6413e2aa341a649042b4bb`；上游 `2.0-refactor` SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0` 是祖先。
 - ms-swift checkout：`88d727951203256baa564c643c651b6f8d90fd7e`。
 - 环境：Python 3.11.15、PyTorch 2.6.0+cu124、Transformers 4.57.6、PEFT 0.17.1、ms-swift 4.6.0.dev0；Qwen2-0.5B `model.safetensors` SHA256 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`。
 - 维护者：ms-swift CUDA 适配。
-- 复查条件：`swift deploy`、TransformersEngine、HTTP generation、Jittor shim 生命周期或请求批处理变化时；改变服务模型、dtype、设备、并发，或补齐服务进程显存口径时。
+- 复查条件：`swift deploy`、TransformersEngine、HTTP generation、Jittor shim 生命周期或请求批处理变化时；改变服务模型、dtype、设备或并发时。
 
 运行键 `20261008-qwen2-service-infer-361bf-r5`。Slurm 13324 在 cscg-qh15 RTX 4090（UUID `GPU-43cb8a5a-a194-7846-232c-b460bee1ad9e`，driver `580.178.04`）先启动未设置 shim 的原生 `python -m swift.cli.main deploy`，再启动严格候选。两侧均为本地 Transformers backend、FP32/eager、Qwen2 causal LM、同一模型权重和 served model name。客户端使用 OpenAI 风格 `/v1/models` 与 `/v1/chat/completions`，固定请求 “What is the capital of France?”、temperature 0、seed 1234、max_tokens 8；每侧共 12 请求，前 2 请求作为预热，其后 10 个串行请求计稳态。
 
@@ -22,8 +22,8 @@
 | L1 | PASS | 同一个 HTTP 请求的 `input_ids`/mask shape `[1,26]` 逐项相同；生成 8 步各自捕获完整 `[151936]` CUDA FP32 logits，均有限，最大绝对差 `2.72989e-5`、相对 L2 `8.40818e-7`，逐步 argmax 100% 一致；生成 IDs、公开文本与 finish reason 相同。 |
 | L2 | not-applicable | 无状态纯推理服务，不执行反向或 optimizer 更新。 |
 | L3 | not-applicable | 无训练/续训状态的生成服务请求。 |
-| L4 | PASS（固定配置） | 公开 `swift deploy` 服务通过 OpenAI 风格 HTTP endpoint 完成 12 次请求；job16189 又以单个确定性请求补齐当前服务进程 L0/L1 审计并正常启动、服务、收尾。job16189 外层作业因独立收尾 awk 检查引用缺失的 `shim-bootstrap.log` 而 exit 2；服务请求及模型/生成审计产物完整，shim 服务进程 start/end 事件均记录 fallback 0。 |
-| L5 | partial | 两次预热后 10 次串行稳态时延/吞吐及原生比已测，strict shim fallback 为 0；没有可比较的 shim 进程显存峰值，因此不满足完整 L5。job16191 的新采样尝试没有进入 HTTP 请求阶段，不提供性能或显存数据。首次请求包含冷 JIT 启动耗时，不纳入稳态。 |
+| L4 | PASS（固定配置） | 公开 `swift deploy` 服务通过 OpenAI 风格 HTTP endpoint 完成固定请求；job16189 以单请求补齐当前服务进程 L0/L1 审计，job16250 在同一 profile 下完成 12 次 HTTP 请求。job16189 外层作业因独立收尾 awk 检查引用缺失的 `shim-bootstrap.log` 而 exit 2；服务请求及模型/生成审计产物完整，shim 服务进程 start/end 事件均记录 fallback 0。 |
+| L5 | PASS（固定配置） | job16250 在同一 RTX 4090、相同模型/输入与服务配置下，两次预热后各测 10 次串行稳态请求；响应相同、shim 所有进程 strict CUDA 且 fallback 0、预热后 JIT `.so` 清单稳定。HTTP 中位时延 native/shim 为 169.686/165.015 ms，P95 为 170.657/166.105 ms，中位延迟比 0.9725，按固定 8-token 输出折算吞吐 47.21/48.45 token/s。`nvidia-smi` 进程采样峰值 native/shim 为 2428/3382 MiB（样本 30/212）；shim峰值包含独立 CLI 父进程和承载模型的 Uvicorn 子进程，不与 Torch allocator 数字混用。首次 JIT/启动不计入稳态。 |
 
 ## 2026-10-11 当前基线 L0/L1 服务进程补证
 
@@ -35,4 +35,14 @@ job16189 的模型计算、HTTP 请求和比较器均成功；Slurm exit 2 来�
 
 ## 2026-10-11 L5 进程显存补证尝试
 
-运行键 `20261011-qwen2-service-infer-l5-v1` / Slurm job16191 在 `cscg-qh17` RTX 4090 上先完成 native 固定请求的 2 次预热与 10 次测量外加全部 12 个请求，`nvidia-smi` 采样得到 36 行。strict shim CLI 记录 `use_cuda=1`、shim marker 存在、fallback 0，并在日志中完成 Uvicorn startup/监听；但 harness 未观察到 `/health` 响应便走 readiness 超时分支并向服务发送 SIGINT。候选没有 HTTP 请求/响应文件、显存采样文件或收尾事件，所以不能计算 native/shim 性能比，也不能把这次启动事件算作服务 L4/L5 证据。与 job16189 同类成功 shim 服务相较，16191 日志缺少任何 health 访问记录；现有证据无法区分 shim 启动时间压线、health 请求未成功或其它 readiness 等待问题，尚未定位成 shim 实现缺陷。原始 worker、server/bootstrap 日志、native 响应与显存采样未版本化，保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-service-infer-l5-v1/`。原运行键/job 不重跑；本次结果不改变 L5 partial 状态。
+运行键 `20261011-qwen2-service-infer-l5-v1` / Slurm job16191 在 `cscg-qh17` RTX 4090 上先完成 native 固定请求的 2 次预热与 10 次测量外加全部 12 个请求，`nvidia-smi` 采样得到 36 行。strict shim CLI 记录 `use_cuda=1`、shim marker 存在、fallback 0，并在日志中完成 Uvicorn startup/监听；但 harness 未观察到 `/health` 响应便走 readiness 超时分支并向服务发送 SIGINT。候选没有 HTTP 请求/响应文件、显存采样文件或收尾事件，所以不能计算 native/shim 性能比，也不能把这次启动事件算作服务 L4/L5 证据。与 job16189 同类成功 shim 服务相较，16191 日志缺少任何 health 访问记录；现有证据无法区分 shim 启动时间压线、health 请求未成功或其它 readiness 等待问题，尚未定位成 shim 实现缺陷。原始 worker、server/bootstrap 日志、native 响应与显存采样未版本化，保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-service-infer-l5-v1/`。该次失败当时未改变 L5 partial 状态；后续完整 L5 证据见 v2 部分。原运行键/job 不重跑。
+
+## 2026-10-11 L5 服务稳态与进程显存复验
+
+新运行键 `20261011-qwen2-service-infer-l5-v2` / Slurm job16250 在 `cscg-qh04` RTX 4090（UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4`，driver `580.178.04`）同一 allocation 中顺序运行 native 和 strict shim 公开 `swift deploy`。两侧均使用 Qwen2-0.5B、FP32/eager、Transformers backend、`cuda:0`、同一固定提示与确定性 8-token 请求；各自完成 2 次预热和 10 次计时请求。worker 从真实服务监听端口探测 readiness，native 与 shim 分别在端口 47250 和 47251 收到 `/health` 200、`/v1/models` 200 及 12 个 `/v1/chat/completions` 200。原生与 shim 的完整响应对象按比较器判定相同，12 个返回均为 8 个 completion tokens。
+
+native 与 shim 的 10 次稳态 HTTP 中位时延分别为 `169.686 ms` 和 `165.015 ms`，P95 分别为 `170.657 ms` 和 `166.105 ms`，shim/native 中位数比为 `0.9725`；按 8-token 固定返回折算吞吐为 `47.21` 与 `48.45 tokens/s`。`nvidia-smi` 进程采样分别记录 30 与 212 个样本，观测进程峰值为 `2428 MiB` 与 `3382 MiB`。shim 峰值由 CLI 父进程 `408 MiB` 与承载模型的 Uvicorn 子进程 `3382 MiB` 组成；这是进程级物理显存采样，不是 Torch allocator 峰值。采样脚本和进程 PID 清单均随 state 原始产物保留。两侧 UUID 相同；shim bootstrap 的父、子进程 start/end 事件均为 `use_cuda=1`、marker=true、fallback=0。预热请求后与稳态请求后的 `.so` 清单和内容 hash 相同，因此本测量区间无增量编译；冷启动与 JIT 不计入稳态数值。
+
+job16250 完成并 exit 0；原始 worker、两侧完整服务日志、readiness 探测、HTTP 响应、进程显存采样、PID、shim fallback 事件、缓存快照及比较 JSON 未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-service-infer-l5-v2/`。v1 readiness 失败与 v2 新运行键相互独立：v1 不重跑，v2 的 L5 结论只适用于上述单卡、固定请求与并发配置。
+
+报告门禁运行键 `20261011-qwen2-service-infer-l5-report-docgate-v1` / Slurm job16251 于 cscg-qh04 完成并 exit 0。`bash tools/check_repo_layout.sh` 和文档治理检查通过（237 个活动 Markdown）；Torch 模式 `tests/structure` 为 1384 passed、8 skipped、1019 subtests passed（180.84 秒）。8 项跳过由 2 项 accelerator、2 项声明跳过、4 项其它跳过组成；后者含 2 项当前测试解释器未安装 Jittor、2 项未安装 pytest-xdist。门禁日志未版本化，保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-service-infer-l5-report-docgate-v1/`。
