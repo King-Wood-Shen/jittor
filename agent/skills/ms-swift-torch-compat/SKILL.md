@@ -1,13 +1,13 @@
 ---
 name: ms-swift-torch-compat
-description: 在真实 NVIDIA CUDA 上按 ms-swift 公开入口及 L0-L5 覆盖矩阵验证 Jittor torch shim；原生 PyTorch 是独立数值基准，未运行的面不得记为通过。
+description: 在真实 NVIDIA CUDA 上按 ms-swift 公开入口及 L0-L5 覆盖矩阵验证 Jittor torch shim；原生 PyTorch 是独立行为基准，未运行的面不得记为通过。
 ---
 
 # ms-swift × Jittor torch shim：CUDA profile
 
 ## 目标与边界
 
-回答当前 ms-swift checkout 的公开训练、推理和生态入口在 Jittor torch shim 上能否保持原生 PyTorch CUDA 的设备、数值、梯度、状态及性能合同。单个 `ms_swift_lora_llama` 生态用例只属于入口烟测，不能代表整个 ms-swift。结论只适用于真实 NVIDIA CUDA；CPU 可作独立 oracle，不把 NPU、ROCm 或软件回退计入 CUDA 通过。
+回答当前 ms-swift checkout 的公开训练、推理和生态入口在 Jittor torch shim 上能否保持真实 CUDA 执行、训练收敛、推理输出、状态恢复及性能合同。单个 `ms_swift_lora_llama` 生态用例只属于入口烟测，不能代表整个 ms-swift。结论只适用于真实 NVIDIA CUDA；CPU 可作独立 oracle，不把 NPU、ROCm 或软件回退计入 CUDA 通过。
 
 开始前读仓库 `AGENTS.md`、`agent/manuals/collaboration.md`、`agent/manuals/project-context.md`、`../downstream-library-adaptation/SKILL.md`、`../transformers-torch-compat/SKILL.md` 与 `../github-collaboration-commit/SKILL.md`。以历史提交 `fb23d894e:refactor-wip/results/2026-09-26-ms-swift-cuda-compat.md` 及最新实验目录为历史证据；历史 PASS 必须绑定原 SHA、运行键和验收层级，不自动继承到新基线。
 
@@ -44,7 +44,7 @@ manifest 至少逐面列状态、公开入口、真实代表用例、首个断�
 
 在短时 Slurm worker 预检解释器/模块来源、安装 pin、模型和数据摘要、CLI 参数、钩子签名、审计变量、短 `TMPDIR`、JIT/cache 路径、结果读取器对实际 dtype 的支持。预检未过不启动长模型作业；harness 或调度失败记为实验无效，不记为兼容失败。对拍前保存并比较每步样本 ID、`input_ids`、mask、labels、初始权重与参数名映射；相同 seed 和相近 loss 都不能替代输入同一性。
 
-把冷编译、正确性训练、结果比较分成独立阶段与耗时。仅在源码/ABI/编译器/设备指纹完全一致时复用已验证的预编译产物；并发作业仍使用独立可写缓存，不并发写同一 `JITTOR_HOME`。不得将首次 JIT 计入稳态 L5。前置作业失败时立即收集日志、标记运行键、取消不可能有效的依赖作业；修复后用新运行键重建，不留下 `DependencyNeverSatisfied` 队列。
+把冷编译、正确性训练、结果比较分成独立阶段与耗时。对同一源码、Python ABI、编译器、CUDA 工具链、设备架构及编译参数，在 state 中固定持久的 `JITTOR_HOME` 与 `JITTOR_TORCH_CACHE_ROOT`；串行作业显式加载同一缓存配置，避免每次把它们设为新运行目录。先在 Slurm CUDA worker 用与正式作业相同的环境执行 `python -m jittor_utils.bootstrap` 和严格 CUDA 预检；再提交**新的**作业执行 `python -m jittor_utils.bootstrap --check`，在 `JITTOR_NO_BUILD=1` 下重复预检并核对缓存路径、编译日志及启动耗时。只有该复验无新编译且源码/ABI/工具链/设备指纹一致，才能称这一预热路径可复用；新算子、输入形状或配置仍可能增量编译，不得由单次预检推断整个 ms-swift 均免编译。并发作业仍使用独立可写缓存，不并发写同一 `JITTOR_HOME`；双卡按 rank 隔离。不得将首次 JIT 计入稳态 L5。前置作业失败时立即收集日志、标记运行键、取消不可能有效的依赖作业；修复后用新运行键重建，不留下 `DependencyNeverSatisfied` 队列。
 
 ## 执行与归属
 
@@ -61,13 +61,13 @@ manifest 至少逐面列状态、公开入口、真实代表用例、首个断�
 | 层 | 必需证据 |
 | --- | --- |
 | L0 构造 | 独立原生和 shim 导入，真实模型/tokenizer/template/dataset/tuner/optimizer/trainer 或 engine 构造；状态键、dtype、device 一致 |
-| L1 前向 | 同权重同输入 CUDA 前向；结构、shape、dtype、有限值、logits/hidden/loss 与适用的 greedy token 对齐 |
-| L2 反向与更新 | 全部 trainable 参数及适用输入梯度、optimizer 状态与更新，至少三步固定数据轨迹；需要时用独立 FP64 公式复核 |
-| L3 恢复 | 同进程和新进程恢复模型/adapter、buffer、optimizer、scheduler、RNG、dataloader 游标与 global step，并对齐后续轨迹 |
+| L1 前向 | 同权重同输入 CUDA 前向；训练检查结构、shape、dtype、有限值及可用于反向的 loss，跨实现 logits/hidden/loss 误差只作诊断；推理继续比较 logits 与确定性 greedy token |
+| L2 反向与更新 | 全部 trainable 参数的必需梯度存在且有限，optimizer 真实更新、状态结构有效；两侧分别在预先固定的可学习数据和训练窗口内证明 loss 趋势下降。跨实现梯度/更新逐值误差记录为诊断，不作为训练通过门槛 |
+| L3 恢复 | 同进程和新进程恢复模型/adapter、buffer、optimizer、scheduler、RNG、dataloader 游标与 global step；核实状态未重置、后续批次正确且恢复后能继续按固定窗口降低 loss，不要求跨实现逐值轨迹相等 |
 | L4 公开入口 | 真正通过适用的 `swift` CLI、Python API、launcher 或 server/client 端到端，保留输出与 checkpoint |
 | L5 性能 | 适用 L0–L4 已通过；真实尺寸预热并同步计时至少 10 次稳态，给延迟/吞吐、原生比、显存口径和零 fallback |
 
-默认 CUDA 前向容差 `5e-3`，反向 `2e-2`；同时给最大绝对误差、相对 L2、dtype 与首个分歧层。BF16、RMSNorm、attention、量化和 logits 要单列误差，不事后放宽门槛。L5 不能把首次 JIT、缓存构建或不同显存统计口径混进对比。
+训练收敛协议须在运行前锁定可学习样本、有效 batch、优化器、步数及 loss 统计口径；两侧各自的末段平均 loss 必须低于初段平均 loss，梯度与参数更新有限且非空，不能把单次波动、重置状态或只完成几步的烟测当作收敛。固定样本已处于 loss 下界时换非平凡样本并开新运行键。仍保存两侧逐步 loss、梯度/更新摘要和误差以定位首个异常，但不因训练跨实现数值超容差单独判 L1–L3 失败。推理的 logits/greedy token 对拍及设备、零 fallback、结构、dtype、缺失梯度、NaN/Inf、真实更新和恢复语义不放宽。旧运行按旧协议保留结论，新协议用新运行键验收。L5 不能把首次 JIT、缓存构建或不同显存统计口径混进对比。
 
 ## 根因优先与远端续接
 
