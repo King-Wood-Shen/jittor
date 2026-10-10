@@ -1,7 +1,7 @@
 # Qwen2-0.5B ms-swift Embedding `swift sft` CLI CUDA 复验
 
-- 状态：固定 Qwen2-0.5B/FP32/eager/InfoNCE 场景已在公开 `swift sft` CLI 上完成原生与严格 shim 三步训练、checkpoint 保存及中途恢复；当前源码基线的同输入 embedding 前向、全量可训练参数梯度/更新和恢复轨迹对拍均通过，L1/L2/L3 对本配置通过。L0、L4 仍为 partial，不能据此宣布 embedding CLI 或 ms-swift 整体兼容。
-- 日期：2026-10-08；L1/L2 补验：2026-10-09；L3 补验：2026-10-10。
+- 状态：固定 Qwen2-0.5B/FP32/eager/InfoNCE 场景已在公开 `swift sft` CLI 上完成原生与严格 shim 构造、三步训练、checkpoint 保存及中途恢复；当前源码基线下 L0-L4 对本配置通过，L5 未运行。该结果不代表其他 embedding 配置或 ms-swift 整体兼容。
+- 日期：2026-10-08；L1/L2 补验：2026-10-09；L3/L0/L4 复核：2026-10-10。
 - Jittor 基线：`361bfac511b468d4b65745b43df122a8591c35d1`；上游 `2.0-refactor` SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0` 为其祖先。
 - ms-swift checkout：`88d727951203256baa564c643c651b6f8d90fd7e`。
 - 环境：Python 3.11.15、PyTorch 2.6.0+cu124、Transformers 4.57.6、PEFT 0.17.1、ms-swift 4.6.0.dev0；Qwen2-0.5B `model.safetensors` SHA256 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`。
@@ -30,9 +30,9 @@ Slurm 13281 是首个尝试，在原生数据预处理开始前因过长 `TMPDIR
 
 | 层 | 本配置状态 | 证据或边界 |
 | --- | --- | --- |
-| L0 | partial | CLI 真实构造并训练 Qwen2 embedding 模型、processor/template、dataset、trainer 与 SGD；保存 state 键相等，shim CUDA scope/fallback 已审计，但没有完整逐参数 device/dtype/requires-grad 清单。 |
+| L0 | PASS（固定配置） | Slurm 14216 保存的 native/shim 初态清单各有 290 个参数，name、shape、dtype、device、requires-grad、SHA 逐项相同；全部 CUDA，唯一可训练参数为 `model.norm.weight`。公开 CLI 日志与训练、optimizer、checkpoint 产物证明本模型、Qwen template、数据、EmbeddingTrainer 和 SGD 均已构造；shim fallback=0。 |
 | L1 | PASS（固定配置） | Slurm 14204 在当前源码基线下确认首批输入和 290 个初始参数逐项一致；`last_hidden_state` 为 CUDA FP32 `[16,896]`，最大绝对差 `1.99676e-6`、相对 L2 `4.00853e-6`，首步 loss 差 `3.58e-6`，fallback=0。仅适用于本模型、数据及 CLI 配置。 |
 | L2 | PASS（固定配置） | Slurm 14216 的三步输入完全相同；唯一 trainable 参数梯度相对 L2 最大 `1.08e-5`、max abs `1.36e-7`，逐步更新前后权重一致；SGD 参数组相同、momentum=0 且状态均为空，末态 290 键 checkpoint 完全相同，fallback=0。仅适用于该模型、数据和 CLI 配置。 |
 | L3 | PASS（固定配置） | Slurm 14221/14222 的新进程 checkpoint-1 中途恢复：后续批输入逐值一致；global step/epoch、loss、290 键权重及每个 runtime 内 optimizer/scheduler/RNG 文件均与连续轨迹相同；strict CUDA、fallback=0。仅适用于本 trainer、SGD 和固定四行数据。 |
-| L4 | partial | 当前公开 `swift sft` 命令在原生和严格 CUDA shim 下均完成训练、保存与恢复；完整 L0 构造状态清单仍缺，因此只记录该入口已运行，不升级完整 L4。 |
-| L5 | blocked | L0-L3 未完整通过，且没有满足预热与稳态次数的性能数据。 |
+| L4 | PASS（固定配置） | 原生与严格 shim 均通过公开 `swift sft` CLI 完成三步训练、checkpoint 保存及新进程中途恢复；L0-L3 对该配置均通过。 |
+| L5 | not-run | 未执行真实尺寸预热和至少 10 次同步稳态测量。 |
