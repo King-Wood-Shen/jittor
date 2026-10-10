@@ -1,6 +1,6 @@
 # Qwen2-0.5B PEFT LoRA 公开 SFT：同状态三步对拍
 
-- 状态：固定配置 L0-L2、单卡公开 `swift sft` L4 通过；L3 新进程续训已部分验证（step-3 恢复后的首批输入、RNG、scheduler、梯度及 adapter 轨迹对齐）；同进程恢复、buffer 和有持久逐参数状态的 optimizer 配置仍未验；L5 blocked。LoRA 随机初始化本身仍不对齐，需用显式转入同一 adapter 状态建立 oracle；不代表 PEFT LoRA 或 ms-swift 整体兼容。
+- 状态：历史严格逐值协议下固定配置 L0-L2 与单卡公开 `swift sft` L4 通过；按新训练收敛协议复验时，L2 在 strict shim 第 5 步被 `nano_vector.h:41` slice overflow 阻断，未通过收敛门槛。L3 新进程续训已部分验证；同进程恢复、buffer 和有持久逐参数状态的 optimizer 配置仍未验；L5 blocked。LoRA 随机初始化本身仍不对齐，需用显式转入同一 adapter 状态建立 oracle；不代表 PEFT LoRA 或 ms-swift 整体兼容。
 - 日期：2026-10-08。
 - Jittor 基线：`5def3f89d8de1ddc8d95d18778b10d08c72dbedc`（包含上游 `origin/2.0-refactor` 的 `26bf23f9a0c0e3e12838089ec67a9fb380cba9c2`）。
 - ms-swift checkout：`88d727951203256baa564c643c651b6f8d90fd7e`。
@@ -23,10 +23,18 @@
 | --- | --- | --- |
 | L0 | PASS（固定配置） | Slurm 12738 公开 CLI 构造完整模型、PEFT、tokenizer/data/trainer；386 项状态元数据相同且初始 SHA256 全等，全部 CUDA。随机初始化差异由显式相同 adapter checkpoint 消除。 |
 | L1 | PASS（固定配置） | Slurm 12738 原生与 shim 公开 CLI 首批实际输入完全一致，logits/loss 结构、有限值和误差通过；Slurm 12690/12692 另对相同 adapter 的直接 PEFT 前向与 25 组 hidden 通过。 |
-| L2 | PASS（三步固定轨迹） | Slurm 12738 对全部 96 个 trainable 参数三步逐项记录梯度及更新；误差见上。固定四条数据不 shuffle，SGD momentum=0，无持久逐参数 optimizer state。未覆盖输入梯度或其他 optimizer。 |
+| L2 | 历史协议 PASS；新协议 blocked | Slurm 12738 的三步固定轨迹严格逐值结论保留。Slurm 15908 新协议要求 8 步并比较首/末各两步平均 loss；native 完成 8 步且 loss 下降，但 strict shim 第 5 步失败，未完成末段窗口，故新协议未通过。 |
 | L3 | partial | Slurm 13455 新进程从 step-3 checkpoint 恢复后直接捕获首批 input IDs/labels/mask，三步 RNG 状态分别与各自 checkpoint 完全匹配，scheduler 核心状态、step-4 梯度及 adapter 对齐。配置使用 SGD(momentum=0)，逐参数 optimizer state 为空；shim scheduler 另含 `_is_initial` 字段。未测同进程恢复、buffer 或有持久 optimizer state 的配置。 |
 | L4 | PASS（单卡 `swift sft`） | Slurm 12738 两侧公开 CLI 均完成三步并保存 checkpoint；仅代表该 PEFT LoRA 固定配置。 |
 | L5 | blocked | L3 完整恢复合同仍不完整；本配置未运行性能协议。 |
+
+### 新训练收敛协议复验（Slurm 15908）
+
+用户确认更新训练验收协议后，用新运行键 `20261010-qwen2-peftlora-sft-convergence-v1` 按预先固定的窗口复验同一公开 `swift sft` PEFT LoRA 配置：Qwen2-0.5B FP32/eager、同一显式 adapter（SHA256 `e34a28cdc1d227907e13b96f061da71053f13fe0e68d678d274fdc69816e7c56`）、相同四行数据（SHA256 `f38c72953cf933f85bf12abd50d56ed5d7fe1ec13d4a5952c1d2296fec5a65af`）、batch 4、SGD `1e-5`、constant scheduler、无 shuffle、8 步。验收窗口定为前两步平均 loss 与第 7–8 步平均 loss，末段须更低；不以跨运行时逐值误差判训练通过。
+
+原生 CUDA 在 cscg-qh04 RTX 4090 完成 8 步，loss 从 `3.82736802` 降到 `3.82359934`；前两步均值 `3.82709956`，后两步均值 `3.82386685`，满足原生窗口趋势。strict shim 构造出相同配置并完成前 4 步，loss 为 `3.82736683, 3.82683325, 3.82628608, 3.82575369`；前两步均值 `3.82710004`，目前可见的第 3–4 步均值 `3.82601989`，但这不是合同要求的末段窗口。第 5 步反向后在 Swift `clip_grad_norm_` 调用 `grad_norm.isnan().item()` 时触发 `nano_vector.h:41: slice overflow: 94692996826779 0 1`；job15908 FAILED，shim 未达到第 7–8 步，故本次新协议 L2 未通过。shim 捕获的前 4 次 optimizer step 各有 96 项 CUDA 梯度和更新文件，进程起止 `use_cuda=1`、fallback 0；后续完整性/有限值与窗口审计因作业提前失败未执行。原生 8 步已完成，相关 checkpoint 与逐步文件留在未版本化 state。
+
+本次没有复用旧运行键，也没有改写旧的三步严格逐值结论。该错误形态与既有 NanoVector slice overflow 诊断相同；历史根因追踪已达五轮上限，不在此复验中追加盲目追踪或绕开梯度范数检查。L0/L1/L4 保留此前该固定配置已通过的证据，L3 仍 partial，L5 仍 blocked；此次训练窗口未完整，因此不宣布新协议 L2 通过。
 
 ### 新进程恢复补充（Slurm 12799/12802）
 

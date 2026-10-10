@@ -106,7 +106,7 @@
 | [Qwen2-0.5B 序列分类 Python 推理 API CUDA 对拍](2026-10-08-qwen2-seqcls-python-api-cuda.md) | 固定 batch 的 state_dict、输入、logits 与输出通过；Python API L4 端到端及 10 次稳态 L5 完成，其他模型/任务未覆盖 | 2026-10-08 |
 | [Qwen2 序列分类公开 SFT 双卡 NCCL CUDA 对拍](2026-10-08-qwen2-seqcls-ddp-nccl-cuda.md) | 固定场景双 rank 三步输入、291 参数梯度、更新权重对齐且零 fallback；scheduler 状态不等，恢复与性能未验 | 2026-10-08 |
 | [Qwen2-0.5B 全参数 SFT 首批前向对拍](2026-10-08-qwen2-causal-sft-forward-c23a.md) | 固定 batch 的 logits/hidden/loss 对拍通过数值门槛；完整层级仍受限，诊断钩子在 backward 触发内部断言 | 2026-10-08 |
-| [Qwen2-0.5B PEFT LoRA 公开 SFT：同状态三步对拍](2026-10-08-qwen2-peftlora-sft-init.md) | 固定 adapter 下 L0-L2 与公开 `swift sft` L4 通过；L3 新进程恢复已直接核对输入/RNG/调度器/续训梯度与 adapter，因同进程、buffer 和有状态 optimizer 未验仍为 partial；L5 blocked | 2026-10-08 |
+| [Qwen2-0.5B PEFT LoRA 公开 SFT：同状态三步对拍](2026-10-08-qwen2-peftlora-sft-init.md) | 历史严格逐值 L0-L2 结论保留；新收敛协议复验在 strict shim 第 5 步触发 NanoVector slice overflow、L2 未通过；L3 partial，L5 blocked | 2026-10-10 |
 | [Qwen2-0.5B PEFT LoRA：AdamW 三步公开 SFT 对拍](2026-10-08-qwen2-peftlora-adamw.md) | 历史严格逐值结论保留；新协议固定配置 L0-L4 通过；L5 原生完成 10 个稳态测量，strict shim 第 3 步同步触发 slice overflow，blocked | 2026-10-10 |
 | [Qwen2-0.5B 公开 `swift pt` 全参数 CUDA 三步对拍](2026-10-08-qwen2-pt-fullparam-02498.md) | 三步公开入口完成；checkpoint 290 键逐位一致，设备清单/梯度/optimizer 状态不足，L0-L2 partial | 2026-10-08 |
 | [Qwen2-0.5B 公开全参数 SFT：双卡 NCCL 三步新基线复验](2026-10-08-qwen2-causal-ddp-7a18-v4.md) | 双卡公开 CLI 与 290 键 checkpoint 对齐；step-3→4 恢复为 partial，逐参数梯度和 L5 未验，L0-L4 partial | 2026-10-08 |
