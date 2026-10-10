@@ -415,6 +415,7 @@ include docs/results/2026-10-09-qwen2-simpo-stock-cli-cuda.md
 include docs/results/2026-10-09-torch-lrscheduler-state-cuda.md
 include docs/results/2026-10-10-qwen2-causal-ddp-sft-cuda.md
 include docs/results/2026-10-10-qwen2-peftlora-public-infer-cuda.md
+include docs/results/2026-10-11-qwen2-seqcls-convergence-cuda.md
 include docs/results/2026-10-11-tinyllama-public-infer-l01.md
 include docs/results/index.md
 include docs/tutorials/index.md
