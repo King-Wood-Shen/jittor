@@ -1,6 +1,6 @@
 # Qwen2-0.5B 序列分类公开 SFT：固定窗口收敛 CUDA 复验
 
-- 状态：固定单卡 FP32/eager/SGD profile 的 L0–L4 通过；L5 not-run（未运行性能协议）。本报告是更新后训练收敛协议下的新运行，保留旧版严格逐值报告及其原结论。
+- 状态：固定单卡 FP32/eager/SGD profile 的 L0–L5 通过。本报告是更新后训练收敛协议下的新运行，保留旧版严格逐值报告及其原结论。
 - 日期：2026-10-11。
 - 基线：Jittor `3f1b2618d6c509538c927b4fa563dc8e3bae7311`；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 范围：公开 `python -m swift.cli.main sft --task_type seq_cls`，Qwen2-0.5B 全参数分类，单张 RTX 4090，FP32/eager，固定 8 行数据，batch 4、8 个 optimizer steps、SGD、固定前两步/末两步 loss 窗口。
@@ -26,7 +26,25 @@
 | L2 | PASS | 291 个可训练参数每步梯度存在且 finite/nonzero；两侧实际更新；固定两步初末 loss 窗口均下降。逐值差仅作诊断。 |
 | L3 | PASS | 同进程与新进程均从 step 3 checkpoint 恢复并到 step 8；模型、optimizer/scheduler、RNG、后续 batch 与 loss 窗口通过，详见下节。 |
 | L4 | PASS | 原生与 strict shim 均端到端运行公开 `swift sft` 并保存 checkpoint。 |
-| L5 | not-run | 未做预热后至少十次同步稳态、吞吐/原生比和显存协议。 |
+| L5 | PASS | 同设备原生与 strict shim 各 2 步预热 + 10 步同步完整更新；吞吐、延迟、显存 API 读数和零 fallback 见下节。 |
+
+## L5 稳态训练性能与显存
+
+本层只扩展上述固定 Qwen2-0.5B 全参数分类配置：同一公开 `swift sft` 入口、FP32/eager/SGD、batch 4、固定 8 行数据、相同初始 checkpoint；每侧运行 12 个真实更新步，前 2 步预热，后 10 步计时。L5 native 与 shim 均在 job 16235、`cscg-qh04` 的同一 RTX 4090（UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4`）顺序运行，native oracle 先行。该测量的 Jittor HEAD 为 `34fce8ccfa6ed9f1f6014696c9e6d7c9242c5aa1`，ms-swift HEAD 为 `88d727951203256baa564c643c651b6f8d90fd7e`。模型和数据 SHA256 与上文一致。只读复核键 `20261011-qwen2-seqcls-l5-audit-v2` / job 16236 逐项重算并通过。
+
+整步延迟从 `Trainer.training_step` 调用前开始，在 SGD 更新后同步 CUDA 停表，覆盖前向、反向、梯度裁剪和参数更新。token throughput 按每步 `attention_mask` 中的非 padding token 数除以十步总延迟；两侧首批张量 hash 与每个计时步 token 数相同。两步预热后两侧都重置 peak 统计；shim 的 275 个 JIT `.so` 在计时窗口结束时保持完全相同。十步中 shim 的 `use_cuda=1`、fallback=0；两侧各完成 12 个 training/optimizer step，291 个 trainable 参数中的代表权重确有更新。
+
+| 指标 | 原生 PyTorch CUDA | JTorch strict shim CUDA |
+| --- | ---: | ---: |
+| 稳态延迟 median / mean / p95 | 85.81 / 85.78 / 86.38 ms | 82.66 / 82.99 / 84.52 ms |
+| Token throughput | 1,363.95 token/s | 1,409.89 token/s |
+| Sample throughput | 46.63 sample/s | 48.20 sample/s |
+| Peak allocated after warmup | 5,960,049,664 B | 9,880,698,832 B |
+| Peak reserved after warmup | 6,335,496,192 B | 12,389,974,016 B |
+
+该次配对的原生/shim median latency 比为 `1.038x`，shim/native token throughput 比为 `1.034x`。显存使用相同的 `torch.cuda.max_memory_allocated/reserved` API 口径并在预热后重置；原生读 PyTorch allocator，shim API 映射到 Jittor pool 计数，因此这些读数反映各自运行时 allocator 的高水位，不等同于驱动级整卡占用。墙钟性能只报告，不作为跨机器门禁阈值。
+
+首个性能作业 `20261011-qwen2-seqcls-training-l5-v1` / job 16233 曾完成训练与 10 次计时，但其外层脚本错误地要求整个作业前后的 JIT cache 完全不变，拒绝了预热前两步新增的 4 个 `.so`；该键不重跑。其只读 audit-v1 还误报 native peak 也于预热后 reset，该显存结论不采用。v2 将缓存稳定性检查限定在 warmup step 2 之后，并统一两侧的 peak reset；job 16235 exit 0、audit-v2 exit 0。v1 的 NFS 临时文件清理警告与 v2 比较进程的 `sitecustomize` role 识别告警均不是模型训练或计时断言失败，详细日志留在未版本化的 state 运行目录。本 L5 仅适用于本报告所列单卡分类 profile，不推广到其他模型、数据、精度、优化器或 ms-swift 全部功能面。
 
 ## L3 checkpoint 恢复补证
 
@@ -39,6 +57,8 @@ native 与 strict shim 四条恢复轨迹的 8 个 batch 均与先前连续训�
 训练 job 16220/16221 是被保留的早期观测器 harness 失败；job 16222 完成全部四条真实训练轨迹，但旧比较器失败。后续只读比较器 job 16223–16226 各自因恢复回调计时、pretrain/resume 文件集合或事件排序断言不正确而失败；job 16227 修正审计口径后通过。它们均未重跑模型训练，也不是兼容性失败；相关日志和中间产物保留于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-seqcls-resume-l3-{v1,v2,v3,audit-v1,audit-v2,audit-v3,audit-v4,audit-v5}/`。本 L3 结论仅覆盖上述 Qwen2-0.5B 序列分类单卡 FP32/eager/SGD 固定 profile；不推广到其他数据、优化器、精度、分布式拓扑或 ms-swift 全部入口。
 
 ## 文档门禁
+
+本次 L5 报告文档门禁键 `20261011-qwen2-seqcls-l5-report-docgate-v1`、job 16237 已完成（exit 0）：GPU worker 上 `bash tools/check_repo_layout.sh` 通过，文档治理检查覆盖 237 个活动 Markdown；Torch-mode `tests/structure` 为 1384 passed、8 skipped、1019 subtests passed（177.74 s）。
 
 文档门禁运行键 `20261011-qwen2-seqcls-convergence-report-docgate-v2`、Slurm job 16213 已完成（exit 0）。GPU worker 上 `bash tools/check_repo_layout.sh` 通过，文档治理检查覆盖 237 个活动 Markdown；Torch 模式 `tests/structure` 为 1384 passed、8 skipped、1019 subtests passed。此前 v1/job 16212 只因 manifest 顺序断言失败，已修正排序并以独立 v2 键重跑完整门禁；v1 结果保留，不属于模型兼容性失败。
 
