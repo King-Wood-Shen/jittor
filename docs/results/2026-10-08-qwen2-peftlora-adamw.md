@@ -1,6 +1,6 @@
 # Qwen2-0.5B PEFT LoRA：AdamW 三步公开 SFT 对拍
 
-- 状态：固定配置 L0/L1/L4 通过；L2 数值轨迹通过，但 optimizer `step` 的公开 device 元数据有差异，故记 partial；L3 未运行；L5 blocked。仅覆盖此 PEFT LoRA 配置与 `adamw_torch`。
+- 状态：历史严格逐值结论保留；新协议下固定配置 L0–L4 通过，L5 blocked。L5 原生有 10 条稳态样本，但 strict shim 在第 3 步同步时触发 Jittor slice overflow，未达到 10 条有效样本。仅覆盖此 PEFT LoRA 配置与 `adamw_torch`。
 - 日期：2026-10-08。
 - Jittor 基线：`02498fdd9d9cd9bd698aff7b7a53ae056371a30a`，已合入上游 `origin/2.0-refactor` 的 `84d60a6d63fc4185fd7746bd1c65d23f06507542`。
 - ms-swift checkout：`88d727951203256baa564c643c651b6f8d90fd7e`。
@@ -24,7 +24,15 @@
 | L2 | PASS（固定四步窗口） | 全部 96 个可训练梯度逐项由训练钩子断言存在、CUDA 且有限；AdamW state 每步完整有限；adapter 确实更新，原生和 shim 各自末段窗口 loss 低于初段窗口。跨实现梯度/更新差异不作通过门槛。 |
 | L3 | PASS（同进程与新进程恢复） | checkpoint-1 分别由同 PID 与新 CLI 进程恢复；optimizer、scheduler 与四类 RNG 有效，恢复后的有序 batch 与连续轨迹相同。 |
 | L4 | PASS（单卡公开 CLI） | 两侧通过公开 `swift sft` CLI 完成连续及同进程恢复轨迹并保存 checkpoint。 |
-| L5 | not-run | 未按至少 10 次稳态样本执行性能协议。 |
+| L5 | blocked（strict shim 运行失败） | 原生阶段采集到 10 条稳态样本；strict shim 第 3 步同步时触发 `nano_vector.h:41: slice overflow`，未生成有效性能 JSON，故无 shim 延迟、吞吐或原生比。 |
+
+### 2026-10-10：AdamW 稳态性能阶段
+
+新运行键 `20261010-peftlora-adamw-l5-v3` 使用同一公开 `swift sft`、Qwen2-0.5B FP32/eager、q/v PEFT LoRA rank 8、固定四条训练样本、batch 2 和 `adamw_torch`，原生 job 15759 先完成，strict shim job 15760 后运行。两阶段均在 cscg-qh04 RTX 4090（UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4`）；ms-swift SHA `88d727951203256baa564c643c651b6f8d90fd7e`，Jittor HEAD `54aef30b2e05a07f6bba9ad08aeb4e618ea9863a`。原始日志与 JSON 保存在未版本化的 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261010-peftlora-adamw-l5-v3/`。
+
+原生公开 CLI 完成 12/12 步。同步计时覆盖 Trainer `training_step` 与 `AdamW.step`；首两步作预热，后十步均值 72.154851 ms、中位数 72.170864 ms、nearest-rank p95 73.074367 ms，对应该计时口径 13.8591 steps/s。原生 Torch allocator 峰值 allocated 2,193,025,536 bytes、reserved 2,220,883,968 bytes。首批三种张量均为 `[2,34]`，96 个可训练参数驻留 `cuda:0`。
+
+strict shim 的 launcher 和训练进程均记录 `use_cuda=1`、`fallback_count=0`，并已实际进入公开训练；训练到第 3/12 步时，性能钩子在 `torch.cuda.synchronize()` 中调用兼容层 `jt.sync_all(True)`，触发 `nano_vector.h:41: slice overflow: 93941780761789 0 1`。仅两条有效训练计时，shim 未生成完成标记或性能 JSON，作业 15760 以 exit 1 结束。因此不能给出 shim 稳态性能或 native/shim 比值，L5 保持 blocked。该 slice overflow 与已记录的 Qwen2 全参数训练故障属于同一 Jittor 内部不变量问题；其根因调查已达五轮上限，本结果不启动第六轮，也不以本次未复现/短轨迹推翻历史故障。此处仅记录失败边界，不推断其他 LoRA 配置。
 
 该新结论仅覆盖以上固定 Qwen2-0.5B PEFT LoRA/AdamW 配置，不能推广到其他 optimizer、trainer、模型或整个 ms-swift。same-process 只读审计运行键为 `20261010-peftlora-adamw-l3-shim-audit-v3` / job15710；new-process 训练为 `20261010-peftlora-adamw-l3-newprocess-v1` / job15725，独立审计 job15729。结构化审计结果与两侧训练原始产物保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/` 下相应运行目录。
 
