@@ -1,7 +1,7 @@
 # Qwen2-0.5B ms-swift Embedding `swift sft` CLI CUDA 复验
 
-- 状态：固定 Qwen2-0.5B/FP32/eager/InfoNCE 场景已在公开 `swift sft` CLI 上完成原生与严格 shim 构造、三步训练、checkpoint 保存及中途恢复；当前源码基线下 L0-L4 对本配置通过，L5 未运行。该结果不代表其他 embedding 配置或 ms-swift 整体兼容。
-- 日期：2026-10-08；L1/L2 补验：2026-10-09；L3/L0/L4 复核：2026-10-10。
+- 状态：固定 Qwen2-0.5B/FP32/eager/InfoNCE 场景已在公开 `swift sft` CLI 上完成原生与严格 shim 构造、三步训练、checkpoint 保存、中途恢复及同步性能测量；当前源码基线下 L0-L5 对本配置通过。该结果不代表其他 embedding 配置或 ms-swift 整体兼容。
+- 日期：2026-10-08；L1/L2 补验：2026-10-09；L3/L0/L4/L5 复核：2026-10-10。
 - Jittor 基线：`361bfac511b468d4b65745b43df122a8591c35d1`；上游 `2.0-refactor` SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0` 为其祖先。
 - ms-swift checkout：`88d727951203256baa564c643c651b6f8d90fd7e`。
 - 环境：Python 3.11.15、PyTorch 2.6.0+cu124、Transformers 4.57.6、PEFT 0.17.1、ms-swift 4.6.0.dev0；Qwen2-0.5B `model.safetensors` SHA256 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`。
@@ -28,6 +28,10 @@ Slurm 13281 是首个尝试，在原生数据预处理开始前因过长 `TMPDIR
 
 14221 日志在数据 map 子进程退出清理时出现 `multiprocess` manager 删除 `.nfs*` 临时文件的 `EBUSY` traceback；Map 随后完成，四条 CLI 返回成功，捕获的输入、checkpoint 与状态文件均完整。该清理告警保留在运行日志，不影响上述恢复轨迹证据。
 
+运行键 `20261010-qwen2-embedding-sft-cli-l5-v1` / Slurm 15255 在同一 cscg-qh04 RTX 4090（UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4`，driver `580.178.04`）上依次运行原生和 strict shim 公开 CLI。Qwen2-0.5B、FP32/eager、InfoNCE、固定四行数据、batch 4、仅训练 `model.norm.weight`；每侧 12 步，排除前 2 步预热，对后 10 步在 `EmbeddingTrainer.training_step` 和 SGD 更新前后显式 `torch.cuda.synchronize()`，计时包含前向/损失/反向与 optimizer step，不含 data-loader 等待、模型构造和 checkpoint I/O。两侧初态 290 参数和首批输入相同。
+
+同步计算平均/中位/p95 延迟：native `23.679/23.653/23.852 ms`，strict shim `34.777/34.783/35.111 ms`；shim/native 平均延迟比 `1.469`，对应有效样本吞吐 `168.93/115.02 examples/s`。`torch.cuda` allocator 峰值 allocated/reserved 分别为 native `2,029,272,064/2,105,540,608 bytes`、shim `3,952,275,456/4,149,215,232 bytes`。native/shim 所有父子进程均为真实 CUDA，候选 `use_cuda=1`、fallback=0。结论只适用于该固定模型、训练参数、worker 和测量口径；未将 allocator 显存口径解释为整卡总占用。
+
 | 层 | 本配置状态 | 证据或边界 |
 | --- | --- | --- |
 | L0 | PASS（固定配置） | Slurm 14216 保存的 native/shim 初态清单各有 290 个参数，name、shape、dtype、device、requires-grad、SHA 逐项相同；全部 CUDA，唯一可训练参数为 `model.norm.weight`。公开 CLI 日志与训练、optimizer、checkpoint 产物证明本模型、Qwen template、数据、EmbeddingTrainer 和 SGD 均已构造；shim fallback=0。 |
@@ -35,4 +39,4 @@ Slurm 13281 是首个尝试，在原生数据预处理开始前因过长 `TMPDIR
 | L2 | PASS（固定配置） | Slurm 14216 的三步输入完全相同；唯一 trainable 参数梯度相对 L2 最大 `1.08e-5`、max abs `1.36e-7`，逐步更新前后权重一致；SGD 参数组相同、momentum=0 且状态均为空，末态 290 键 checkpoint 完全相同，fallback=0。仅适用于该模型、数据和 CLI 配置。 |
 | L3 | PASS（固定配置） | Slurm 14221/14222 的新进程 checkpoint-1 中途恢复：后续批输入逐值一致；global step/epoch、loss、290 键权重及每个 runtime 内 optimizer/scheduler/RNG 文件均与连续轨迹相同；strict CUDA、fallback=0。仅适用于本 trainer、SGD 和固定四行数据。 |
 | L4 | PASS（固定配置） | 原生与严格 shim 均通过公开 `swift sft` CLI 完成三步训练、checkpoint 保存及新进程中途恢复；L0-L3 对该配置均通过。 |
-| L5 | not-run | 未执行真实尺寸预热和至少 10 次同步稳态测量。 |
+| L5 | PASS（固定配置） | Slurm 15255 每侧排除 2 步预热并对 10 步同步计时；shim/native 平均计算延迟比 1.469，吞吐 115.02/168.93 examples/s，allocator 峰值显存与零 fallback 已记录。测量排除 data-loader 等待和 checkpoint I/O。 |
