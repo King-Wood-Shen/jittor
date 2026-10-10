@@ -47,6 +47,8 @@ GPU-worker 只读 artifact audit 新键 `20261010-qwen2-orpo-fixedbatch-converge
 
 该新 profile 不改变前述多样本 sampler 限制，也不覆盖其他 ORPO 数据、并行模式或 ms-swift 其他功能面。job15418 的 `/usr/bin/time` 缺失、job15427 的 marker 路径问题和 job15431 的比较器分组假设均为 harness 失败，已保留原日志；最终结论仅基于原生 15427 与严格 shim 15431 的现有产物及成功的只读审计 15441。
 
+新结论文档门禁 run key `20261010-qwen2-orpo-fixedbatch-convergence-docgate-v1` / Slurm 15445 在 cscg-qh04 完成：布局检查成功；Torch-mode `tests/structure` 为 1384 passed、8 skipped、1019 subtests passed。worker 未配置 nvcc，该门禁只验证仓库布局和结构契约，不构成 CUDA 兼容性证据。
+
 | 层 | 状态 | 证据与缺口 |
 |---|---|---|
 | L0 | pass（单固定样本12步 profile）；partial（多样本轨迹） | 固定样本公开 CLI 的模型、trainer、optimizer 与 290 参数 CUDA 初态通过；两样本运行第 3 步批次顺序不同。 |
