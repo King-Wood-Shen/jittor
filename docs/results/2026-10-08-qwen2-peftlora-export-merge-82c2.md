@@ -24,7 +24,7 @@
 | L1 | 历史基线 `82c2`：partial；复验基线 `a77725d5`：PASS | job15999 相同 tokenizer 输入 `[2,8]`，native/shim logits 均为有限 FP32 CUDA `[2,8,151936]`；最大绝对误差 `8.03471e-5`、相对 L2 `1.75080e-6`、argmax 一致率 100%，满足固定阈值 `abs≤1e-4, relative L2≤1e-5`。 |
 | L2 | not-applicable | 该路径不执行反向传播或 optimizer 更新。 |
 | L3 | not-run | 没有在新进程加载导出模型并验证后续轨迹；无训练 optimizer/scheduler/RNG 恢复证据。 |
-| L4 | 历史基线 `82c2`：PASS；复验基线 `a77725d5`：not-run | 两侧公开 `swift export --merge_lora` 在历史基线成功保存模型；当前基线的 job15999 是直接 Transformers load/forward 审计，没有重跑公开 CLI，因此不把历史 L4 自动继承。 |
+| L4 | 历史基线 `82c2`：PASS；复验基线 `c43f87d3`：PASS | job16141 在当前代码基线通过原生与 strict shim 公开 CLI 导出、完整参数 CUDA 清单及 safetensors 逐张量比较；补充细节见下文。 |
 | L5 | not-applicable | 离线合并导出不是训练或在线推理性能场景；本次未测模型服务稳态性能。 |
 
 ## 当前基线补充：导出模型 L0/L1 复验（2026-10-11）
@@ -36,3 +36,11 @@
 两侧在各自导出目录用 Transformers `AutoModelForCausalLM.from_pretrained`/`AutoTokenizer.from_pretrained` 加载 Qwen2-0.5B，FP32、eager、local-only。291 项 state 参数与 buffer 的名称、shape、dtype、device、有限性清单相同且全在各自 `cuda:0`；两条固定文本各自分词后得到相同 `[2,8]` input IDs 和 attention mask。logits 是有限 FP32 CUDA `[2,8,151936]`，最大绝对误差 `8.0347061e-5`，相对 L2 `1.7507991e-6`，argmax 一致率 100%；预设绝对阈值 `1e-4` 与相对 L2 阈值 `1e-5` 均通过。候选 `shim-runtime.json` 记录 `use_cuda=1`、shim=true、fallback_count=0。
 
 前向比较跨不同 RTX 4090 worker 完成，故仅声称该固定模型/导出物和输入 profile 的阈值通过，不声称同卡严格复验或性能比值。原始产物和失败日志未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-peftlora-export-merge-l01-v1/`、`...-v2/` 与 `...-v3/`。v1 是已完成的 native oracle 加超时 shim 尝试，v2 是 CUDA 初始化环境缺失的无效尝试，v3 为通过的严格候选；不重跑任一运行键。
+
+## 当前基线补充：公开合并导出 CLI L4（2026-10-11）
+
+新运行键 `20261011-qwen2-peft-export-l4-cli-v1` / job16141 使用当前 Jittor 提交 `c43f87d3ef1c990a567580c4c3a2dbf423f2a4ee`（相对上节 `a77725d5` 仅增加结果文档，不改变运行代码），ms-swift checkout 仍为 `88d727951203256baa564c643c651b6f8d90fd7e`。在 cscg-qh13 RTX 4090（UUID `GPU-47aa9ed3-c3cd-c68a-15af-c3fd65e992e5`）顺序运行独立原生 PyTorch CLI，再运行 `JITTOR_TORCH_SHIM=1` strict CUDA CLI；两侧均使用同一 Qwen2-0.5B FP32/eager 参数、模型 SHA256 `9cd8fc8c...df77cad` 和 adapter SHA256 `e34a28cd...16e7c56`，均由真实 `swift export --merge_lora` 入口完成合并并保存。
+
+原生和候选的实际 `swift/cli/export.py` 服务进程保存钩子各记录 290/290 参数在 `cuda:0`。候选 CLI 父进程与子进程均记录 shim marker、`use_cuda=1`、`fallback_count=0`；原生两进程均没有 shim marker。两侧 safetensors 的 290 个张量键/shape/dtype/有限值检查通过，最大绝对差和相对 L2 均为 0，非零差异张量数为 0。job16141 Slurm 状态为 FAILED，原因仅是其尾部审计器错误地要求每侧恰有单进程四条事件；真实父、子进程分别记录 start/end，故各侧共六条事件。没有重跑 CLI；独立 GPU worker job16147 以修正的父/子进程审计规则检查原始事件、CUDA 清单、零 fallback、比较 JSON、保存文件及两侧 CLI 成功日志，全部通过。
+
+原始事件、逐参数 device inventory、模型导出与日志位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-peft-export-l4-cli-v1/`；只读审计日志位于 `.../20261011-qwen2-peft-export-l4-artifact-audit-v1/`。本结论只覆盖固定模型、adapter 和公开合并导出 CLI；不外推到量化、其他 tuner 或整个 ms-swift。当前层级仍为 L0/L1 PASS、L2 not-applicable、L3 not-run、L4 PASS、L5 not-applicable。
