@@ -67,6 +67,7 @@
 2026-10-09-qwen2-simpo-2gpu-cli-cuda
 2026-10-09-qwen2-simpo-stock-cli-cuda
 2026-10-09-torch-lrscheduler-state-cuda
+2026-10-10-qwen2-causal-ddp-sft-cuda
 ```
 
 ## 按主题索引
@@ -129,3 +130,4 @@
 | [Qwen2-0.5B stock `swift rlhf --rlhf_type simpo` 双卡 CUDA 对拍](2026-10-09-qwen2-simpo-2gpu-cli-cuda.md) | 固定六行重复 preference 数据下双卡三步输入/梯度及 step-3→4 新进程恢复轨迹对齐；strict shim 零 fallback，跨 runtime 状态哈希不同，同进程恢复与可区分样本游标未验；L0-L4 partial，L5 blocked | 2026-10-10 |
 | [Qwen2-0.5B stock `swift rlhf --rlhf_type simpo` CUDA 对拍](2026-10-09-qwen2-simpo-stock-cli-cuda.md) | 单样本三步输入、首步 logits、290 项全参数梯度和末态权重对齐且 strict CUDA/零 fallback；L0/L1/L2/L4 partial、L3 not-run、L5 blocked | 2026-10-09 |
 | [JTorch 学习率调度器状态字段 CUDA 对拍](2026-10-09-torch-lrscheduler-state-cuda.md) | 修复 verbose 与瞬态 `_is_initial` 状态差异；LambdaLR/MultiplicativeLR/StepLR 的 CUDA 状态、学习率轨迹和参数值对齐；定向测试 11 passed，core tier 仍有环境与无关失败 | 2026-10-09 |
+| [Qwen2-0.5B 公开双卡全参数 SFT：strict shim 第六步 backward 失败](2026-10-10-qwen2-causal-ddp-sft-cuda.md) | native 12 步完成；strict shim 在 step 6 `grad_optional` 触发 NanoVector slice overflow，前五步逐参数梯度已审计；L2 未完成、无恢复或性能结论 | 2026-10-10 |

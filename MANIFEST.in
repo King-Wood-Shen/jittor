@@ -413,6 +413,7 @@ include docs/results/2026-10-09-qwen2-rewardtrainer-api-cuda.md
 include docs/results/2026-10-09-qwen2-simpo-2gpu-cli-cuda.md
 include docs/results/2026-10-09-qwen2-simpo-stock-cli-cuda.md
 include docs/results/2026-10-09-torch-lrscheduler-state-cuda.md
+include docs/results/2026-10-10-qwen2-causal-ddp-sft-cuda.md
 include docs/results/index.md
 include docs/tutorials/index.md
 include examples/README.md
