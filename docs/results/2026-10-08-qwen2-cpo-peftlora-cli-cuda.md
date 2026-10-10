@@ -38,3 +38,29 @@ Slurm 13539 在 worker 上比较 safetensors adapter：336 个键、2,199,552 �
 | L5 | blocked | 前层未通过，且首次 JIT 混入候选时长；未做预热后至少 10 次稳态测量。 |
 
 这是 Qwen2-0.5B、固定小数据、LoRA CPO 的单配置结果，不代表 CPO 所有实现、其他偏好算法或整个 ms-swift。
+
+### 固定初态收敛补验（2026-10-10）
+
+本节按当前 Skill 的 L0–L5 口径给出一个更窄的 CPO profile 结果；不改写上文旧运行键按旧输入合同得出的历史结论，也不外推到其他偏好数据、优化器或 ms-swift 整体。
+
+原生 oracle 为 Slurm 15352 的 run key `20261010-qwen2-cpo-fixedinit-convergence-v3`，strict shim 轨迹由新 run key `20261010-qwen2-cpo-fixedinit-convergence-v4` / Slurm 15357 完成。两侧依次在 `cscg-qh04` 同一 RTX 4090（UUID `GPU-3c43713b-3ee9-956f-d6cd-95e55d2cdfea`）运行公开 `swift rlhf --rlhf_type cpo`。Jittor HEAD `555f5b8bfcdc3b809ce104b62014fb296e48e5d6`，ms-swift HEAD `88d727951203256baa564c643c651b6f8d90fd7e`；Qwen2-0.5B 权重 SHA256 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`，初始 adapter SHA256 `4033d97f2838b3bdebfb8fbaea2b4d582fa24d12472eae460545afe97172fc4e`，单条 preference JSONL SHA256 `5fd06bff17bc409ce5d69325b68abcef5bdd4d9549ba317746c1d0be051808e4`。配置为 FP32/eager、LoRA rank 4 / alpha 8 / all-linear、SGD `lr=2e-4`、`weight_decay=0`、batch 1、固定同一偏好对、12 步；损失窗口预先固定为 step 1–3 与 10–12。
+
+原生 12 步和 strict shim 12 步分别保存 checkpoint-12。336 个 trainable adapter 初态逐张量一致；所有 12 步输入一致。首个 CPO forward 张量 shape、dtype 相同且有限，最大绝对差为 `1.383e-4`，相对 L2 最大 `3.134e-6`（误差仅作为诊断）。两侧每步 336 个 trainable 参数梯度都存在、在 CUDA、有限且非零；每步更新 300 个（step 1）或 336 个（step 2–12）参数，更新有限且非空。SGD 有 2 个参数组（336 与 0 个参数），学习率、动量和 weight decay 配置有效；momentum 为 0，optimizer state entries 为 0，符合该 SGD 配置。保存的 adapter checkpoint 各有 336 个有限张量。
+
+| runtime | step 1–3 平均 loss | step 10–12 平均 loss |
+| --- | ---: | ---: |
+| PyTorch CUDA | 1.51681169 | 1.50025185 |
+| strict Jittor torch shim CUDA | 1.51681161 | 1.50025292 |
+
+候选父子进程均记录 CUDA=1、shim 标记真、fallback=0。v4 插件每个逻辑 step 写出两条逐字段完全相同的梯度/更新记录；Slurm 15396 在 GPU worker 上只折叠完全相等的重复 JSON 对象并完成其余对拍，没有合并或忽略任何字段。重复记录由哪个 shim/CLI 调用层触发尚未定位，因此保留该 harness 观察为限制，不把它解释成模型层缺陷。
+
+| 层 | 固定 profile 状态 | 证据边界 |
+| --- | --- | --- |
+| L0 | pass | 同一真实模型、tokenizer/template、单条数据、LoRA adapter、trainer 与 SGD 在 CUDA 构造；336 个 trainable 初态、dtype/device 和 optimizer 参数组核实。 |
+| L1 | pass | 初态和 12 步输入一致；首批 forward 输出结构、shape、dtype、有限性通过，误差只作诊断。 |
+| L2 | pass | 两侧 12 步各自 loss 窗口下降；每步 336 个梯度完整、有限、非零，参数更新非空且 optimizer state 与配置匹配。 |
+| L3 | not-run | 未测试同进程/新进程恢复、scheduler/RNG 和 dataloader cursor。 |
+| L4 | pass | 两侧均从公开 `swift rlhf --rlhf_type cpo` CLI 端到端训练并保存 checkpoint-12。 |
+| L5 | blocked | L3 未运行；没有至少 10 次稳态性能测量。 |
+
+审计产物位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261010-qwen2-cpo-fixedinit-artifact-audit-v8/`；原始模型运行产物位于对应 v3/v4 state 目录。v1/v2 仅为 CLI/harness 前置失败；v3 shim 的首步在 harness 序列化内部 Var 时退出；v4 训练成功但首个离线比较器未接受重复记录。最后一次 provenance probe v5 因 `sitecustomize.py` f-string 语法错误未启用 strict shim，明确排除为兼容证据。CPO 本轮问题达到五轮上限，不再重复训练。

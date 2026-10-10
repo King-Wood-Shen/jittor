@@ -111,7 +111,7 @@
 | [Qwen2-0.5B 双卡公开 SFT checkpoint 恢复对拍](2026-10-08-qwen2-causal-ddp-resume-7a18.md) | 各 runtime 连续与 step-3→4 恢复的模型、优化器、scheduler、RNG 和末步指标对齐；sampler cursor 与前序层级证据不足，L3 partial | 2026-10-08 |
 | [ms-swift 公开 `swift eval`：依赖前置阻断](2026-10-08-ms-swift-eval-dependency-block.md) | Slurm worker 缺 `evalscope` 且代理拒绝连接；模型评估未运行，L0-L5 blocked/not-run | 2026-10-08 |
 | [Qwen2-0.5B 公开全参数 DPO 三步 CUDA 对拍](2026-10-08-qwen2-dpo-full-cuda.md) | 原生三步成功；strict CUDA shim 首步反向触发 `NanoVector` 断言；固定 batch 汇总前向标量接近但完整张量未验，L1 partial、L2 failed | 2026-10-08 |
-| [Qwen2-0.5B 公开 CPO LoRA `swift rlhf` CUDA 对拍](2026-10-08-qwen2-cpo-peftlora-cli-cuda.md) | 新诊断确认同初始 adapter 下首批仍不同：CPO 继承链未采用 `DataLoaderMixin`，未遵守关闭 shuffle；诊断 forward/grad 已运行但同输入数值 L1/L2 未验，L0/L2 partial、L3 not-run、L4/L5 blocked | 2026-10-09 |
+| [Qwen2-0.5B 公开 CPO LoRA `swift rlhf` CUDA 对拍](2026-10-08-qwen2-cpo-peftlora-cli-cuda.md) | 固定单偏好对、同初态单卡 profile：L0-L2 与公开 CLI L4 通过，strict CUDA/零 fallback；L3 未运行，L5 blocked。其他 CPO 场景仍未覆盖 | 2026-10-10 |
 | [Torch `RandomSampler` 显式 Generator CUDA 运行时对拍](2026-10-08-torch-randomsampler-generator.md) | 同 seed 跨 runtime 的样本顺序不同；各 runtime 内 generator 状态恢复可重放；仅测试 sampler API，不包含模型或 Swift CLI | 2026-10-08 |
 | [Qwen2-0.5B ms-swift 私有 Swift LoRA 固定状态前向](2026-10-08-qwen2-swiftlora-forward.md) | 当前基线下直接 `Swift.prepare_model` 前向通过数值门槛，严格 CUDA/零 fallback；L0 partial，训练/恢复/公开入口/性能未运行 | 2026-10-08 |
 | [Qwen2-0.5B ms-swift 私有 Swift LoRA 三步梯度与更新对拍](2026-10-08-qwen2-swiftlora-grad3.md) | 96 个 trainable 参数三步梯度、AdamW 状态和 adapter 更新通过固定直接 API 对拍；公开 Trainer/CLI、恢复与性能未验证 | 2026-10-08 |
