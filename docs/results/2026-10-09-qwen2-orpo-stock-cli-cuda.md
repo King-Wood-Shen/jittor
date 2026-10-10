@@ -1,6 +1,6 @@
 # Qwen2-0.5B stock `swift rlhf --rlhf_type orpo` CUDA 输入身份审计
 
-- 状态：两条样本的三步公开 ORPO CLI 测试在 step 3 出现批次顺序反转；新的单样本受控三步测试输入、前向、全参数梯度及末态权重对齐。该受限场景 L0/L1/L2/L4 partial，L3 not-run、L5 blocked；ORPO 多样本路径仍受未生效的 `train_dataloader_shuffle=false` 限制，不能标为整体通过。
+- 状态：两条样本的三步公开 ORPO CLI 测试在 step 3 出现批次顺序反转；新单固定样本、12 步全参数收敛 profile 的 L0–L2 与 L4 通过，L3 not-run、L5 blocked。多样本 sampler 次序问题仍未解决，不能将 ORPO 或整个 ms-swift 标为整体通过。
 - 日期：2026-10-10 复核。
 - 基线：Jittor `6bd0cf9bc15d29c17f6b18b929b55dfb4d4ea2fc`（上游 `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 范围：Qwen2-0.5B causal LM，全参数 FP32/eager，公开单卡 `swift rlhf --rlhf_type orpo`，两条 preference 样本、batch 2、SGD、三步。
@@ -13,7 +13,7 @@
 
 静态检查 ms-swift `ORPOTrainer` 继承 `RLHFTrainerMixin, SwiftMixin, HFORPOTrainer`，未混入单独的 `DataLoaderMixin`。`RLHFTrainerMixin.get_train_dataloader` 只转调父类，随后落到 Transformers Trainer 的 map-style 随机 sampler；因此 CLI 的 `--train_dataloader_shuffle false` 没有在该 ORPO 路径关闭随机采样。native 与 shim 的跨 runtime 随机 sampler 顺序差异与第 3 步观察一致。该归因限定于当前 ORPO MRO 和这组固定数据，不外推其他 Trainer。
 
-### 单样本固定批次数值隔离
+### 单样本固定批次：旧三步协议
 
 为独立检查 ORPO 算法数值并移除已证实的随机样本次序变量，运行键 `20261009-qwen2-orpo-fixedbatch-cli-v2` 使用原数据首条偏好记录、batch 1 和三步公开 CLI。预检 Slurm 13904、训练 Slurm 13905 均在 `cscg-qh04` RTX 4090（GPU UUID `GPU-381c130e-e915-d4b7-0a6f-dce556f02e44`）完成；环境版本和模型权重同上，单行数据 SHA256 为 `f2f99ab3ae84aa4f10a7e7690d302e6668ac831ac8f24e740d7ca62f00103e10`。native 先于 strict shim，候选父子进程均为 `use_cuda=1`、`fallback=0`。
 
@@ -28,13 +28,32 @@
 
 报告门禁运行键 `20261010-qwen2-orpo-fixedbatch-l2-docgate-v1` / Slurm 15280 在 cscg-qh04 完成。`bash tools/check_repo_layout.sh` 通过；以 `JITTOR_TORCH_SHIM=1 PYTHONPATH=python` 运行 Torch-mode `tests/structure`，结果为 1384 passed、8 skipped、1019 subtests passed（516.55 秒）。4 个额外 skip 分别来自未安装 core wheel 与 pytest-xdist；门禁脚本注明另有 4 个声明性 skip。该文档门禁未执行模型验收。
 
+### 单固定样本：12 步收敛协议
+
+按更新后的收敛门槛，新运行键 `20261010-qwen2-orpo-fixedbatch-convergence-v2` 保存原生独立 oracle；v2 作业 15420/15426 分别完成隔离 CUDA 缓存构建与 `JITTOR_NO_BUILD=1` 复用检查，11 个共享库路径及 SHA256 完全一致。原生 12 步 CLI 于 job15427 完成。v2 shim 产物因 runtime scope 路径配置错误排除；新键 `20261010-qwen2-orpo-fixedbatch-convergence-v3` 仅重跑严格 shim 侧，job15430 预检成功，job15431 完成 12 步 CLI 并保存 checkpoint-12。两侧均为 Qwen2-0.5B、FP32/eager、全参数、batch 1、固定首条偏好记录、SGD lr `1e-5`、constant scheduler、`max_grad_norm=1`，使用相同单行数据 SHA256 `f2f99ab3ae84aa4f10a7e7690d302e6668ac831ac8f24e740d7ca62f00103e10` 与模型 SHA256 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945872fecdf77cad`。GPU worker 为 cscg-qh04 RTX 4090，UUID `GPU-3c43713b-3ee9-956f-d6cd-95e55d2cdfea`；shim 训练父子进程均记录 CUDA=1、shim=True、fallback=0。
+
+GPU-worker 只读 artifact audit 新键 `20261010-qwen2-orpo-fixedbatch-convergence-audit-v1` / job15441 完成，未重跑训练。全部 12 步输入逐张量完全相同；首步 forward shape/dtype/有限值合法，chosen/rejected logits shape `[1,28,151936]`，跨 runtime 最大绝对差 `8.16137e-5`、相对 L2 约 `2.54e-6`。两侧 loss 的 step1–3 均值到 step10–12 均值分别由 `3.98413571` 降至 `3.92896231`（native）、由 `3.98413301` 降至 `3.92895770`（shim）。每一步两侧 290 个 trainable 参数均有有限且非零 CUDA 梯度，更新非空；SGD 两参数组分别为 169 项 decay `0.1`、121 项 decay `0`，lr `1e-5`、momentum 0，state 结构有效。scheduler 每步的重复 hook 记录只有在相邻记录逐字段完全相同时才折叠；12 个有效状态步的 `last_epoch`、双组 lr、`_step_count` 均正确。checkpoint 两侧均为 290 键、各 244 个张量相对初态改变，global step 12；末态跨 runtime 最大绝对差 `7.45058e-9`、相对 L2 `1.39669e-10`。优化器/scheduler 文件格式的 runtime 私有字段差异不要求数值相同。
+
+该 profile 的层级结论仅限单固定样本公开 ORPO CLI：
+
+| 层 | 状态 | 证据与边界 |
+|---|---|---|
+| L0 | pass | 公开 CLI 构造同一真实模型、数据、ORPO trainer 与 SGD optimizer；290 个初始参数名称、shape、dtype、trainable 与 CUDA 状态一致。 |
+| L1 | pass | 12 步同输入；首步 forward 结构、dtype、有限值及可反向 loss 合法。跨 runtime 数值差只作诊断。 |
+| L2 | pass | 两侧各自 12 步 loss 窗口下降；逐步 290 参数梯度完整、有限、非零，真实更新非空，optimizer/scheduler/checkpoint 结构有效。 |
+| L3 | not-run | 未测同/新进程恢复、RNG 与 dataloader 游标续训。 |
+| L4 | pass | 两侧真正通过公开 `swift rlhf --rlhf_type orpo` CLI 并保存 checkpoint；仅此固定单样本配置。 |
+| L5 | blocked | 前级完整性能协议未运行；训练时间含 JIT，不作性能结论。 |
+
+该新 profile 不改变前述多样本 sampler 限制，也不覆盖其他 ORPO 数据、并行模式或 ms-swift 其他功能面。job15418 的 `/usr/bin/time` 缺失、job15427 的 marker 路径问题和 job15431 的比较器分组假设均为 harness 失败，已保留原日志；最终结论仅基于原生 15427 与严格 shim 15431 的现有产物及成功的只读审计 15441。
+
 | 层 | 状态 | 证据与缺口 |
 |---|---|---|
-| L0 | partial | 真实模型、公开 ORPO trainer 与 optimizer 已构造；290 项初始参数逐项相同且在 CUDA。完整模型/buffer、trainer 与 optimizer 状态映射未审计。 |
-| L1 | partial | 两样本运行第 3 步输入不同；单样本受控运行三步输入相同并对齐首步 logits/loss，完整 hidden-state 和多样本路径仍未验。 |
-| L2 | partial | 单样本受控运行三步覆盖全部梯度及末态权重；补充确认 optimizer 状态及参数组一致，但 scheduler 状态字段不同，且直接逐步更新重构未完成。两样本轨迹第 3 步输入不同。 |
+| L0 | pass（单固定样本12步 profile）；partial（多样本轨迹） | 固定样本公开 CLI 的模型、trainer、optimizer 与 290 参数 CUDA 初态通过；两样本运行第 3 步批次顺序不同。 |
+| L1 | pass（单固定样本12步 profile）；partial（多样本轨迹） | 固定样本 12 步同输入、有效 forward 结构与有限 loss；多样本 sampler 顺序未对齐。 |
+| L2 | pass（单固定样本12步 profile）；partial（多样本轨迹） | 12 步梯度、更新、loss 趋势、optimizer/scheduler/checkpoint 结构通过；多样本第 3 步输入身份不同。 |
 | L3 | not-run | 未测试同进程/新进程恢复、optimizer/scheduler/RNG/dataloader 游标和续训轨迹。 |
-| L4 | partial | 两种设置都通过 stock CLI 并保存 checkpoint；单样本受控场景数值对齐，多样本场景受 sampler 顺序影响，不能将公开 ORPO 面标为完整通过。 |
+| L4 | pass（单固定样本12步 profile）；partial（多样本轨迹） | 单固定样本 profile 的公开 CLI 端到端通过；多样本 sampler 次序问题仍在。 |
 | L5 | blocked | 前级未通过；shim 耗时含冷 JIT，未做预热后至少 10 次稳态性能及显存协议。 |
 
 原始脚本、模型/数据摘要、NPZ、逐步梯度、checkpoint 和日志未版本化，分别保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261009-qwen2-orpo-stock-cli-v1/`、`20261009-qwen2-orpo-fixedbatch-cli-v2/` 和 `20261009-qwen2-orpo-input-diagnose-v1/`。本报告仅适用于上述单卡 ORPO 配置，不代表其他偏好算法或整个 ms-swift。
