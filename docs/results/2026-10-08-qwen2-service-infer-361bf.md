@@ -23,7 +23,7 @@
 | L2 | not-applicable | 无状态纯推理服务，不执行反向或 optimizer 更新。 |
 | L3 | not-applicable | 无训练/续训状态的生成服务请求。 |
 | L4 | PASS（固定配置） | 公开 `swift deploy` 服务通过 OpenAI 风格 HTTP endpoint 完成 12 次请求；job16189 又以单个确定性请求补齐当前服务进程 L0/L1 审计并正常启动、服务、收尾。job16189 外层作业因独立收尾 awk 检查引用缺失的 `shim-bootstrap.log` 而 exit 2；服务请求及模型/生成审计产物完整，shim 服务进程 start/end 事件均记录 fallback 0。 |
-| L5 | partial | 两次预热后 10 次串行稳态时延/吞吐及原生比已测，strict shim fallback 为 0；没有进程显存/allocator 峰值口径，因此不满足完整 L5。首次请求包含冷 JIT 启动耗时，不纳入稳态。 |
+| L5 | partial | 两次预热后 10 次串行稳态时延/吞吐及原生比已测，strict shim fallback 为 0；没有可比较的 shim 进程显存峰值，因此不满足完整 L5。job16191 的新采样尝试没有进入 HTTP 请求阶段，不提供性能或显存数据。首次请求包含冷 JIT 启动耗时，不纳入稳态。 |
 
 ## 2026-10-11 当前基线 L0/L1 服务进程补证
 
@@ -32,3 +32,7 @@
 新的 shim-only 运行键 `20261011-qwen2-service-infer-l01-audit-v2` / job16189 在同一 cscg-qh13 RTX 4090 上启动 strict shim 公开服务并发送相同 HTTP 请求。候选服务进程事件为 shim marker=true、`use_cuda=1`，完整状态清单 291 项全 CUDA/FP32/有限。原生与候选状态的名称、shape、dtype、device 逐项相同；输入 ID/mask 完全相同，8 个解码步的 `[8,151936]` logits 均有限，最大绝对差 `2.7298927e-5`、相对 L2 `8.4081810e-7`、逐步 argmax 一致率 100%；生成序列、响应文本及 finish reason 相同。候选服务进程正常退出事件记录 `fallback=0`。
 
 job16189 的模型计算、HTTP 请求和比较器均成功；Slurm exit 2 来自脚本末尾残留的 awk 检查尝试读取本 v2 worker 未配置的 `shim-bootstrap.log`。其余服务进程审计事件及比较 JSON 完整，故本报告只依据已落盘且通过的逐项证据升级 L0/L1/L4，不把外层 harness exit 误作 shim 兼容失败。job16188/16189 原始日志、状态 JSON、NPZ logits、HTTP 响应和脚本均未版本化，分别位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-service-infer-l01-audit-v1/` 与 `20261011-qwen2-service-infer-l01-audit-v2/`。本次 logits hook 会同步并复制 logits 到 CPU，故只作正确性审计，不用于性能测量；L5 沿用独立旧运行数字并保留显存缺项。
+
+## 2026-10-11 L5 进程显存补证尝试
+
+运行键 `20261011-qwen2-service-infer-l5-v1` / Slurm job16191 在 `cscg-qh17` RTX 4090 上先完成 native 固定请求的 2 次预热与 10 次测量外加全部 12 个请求，`nvidia-smi` 采样得到 36 行。strict shim CLI 记录 `use_cuda=1`、shim marker 存在、fallback 0，并在日志中完成 Uvicorn startup/监听；但 harness 未观察到 `/health` 响应便走 readiness 超时分支并向服务发送 SIGINT。候选没有 HTTP 请求/响应文件、显存采样文件或收尾事件，所以不能计算 native/shim 性能比，也不能把这次启动事件算作服务 L4/L5 证据。与 job16189 同类成功 shim 服务相较，16191 日志缺少任何 health 访问记录；现有证据无法区分 shim 启动时间压线、health 请求未成功或其它 readiness 等待问题，尚未定位成 shim 实现缺陷。原始 worker、server/bootstrap 日志、native 响应与显存采样未版本化，保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-service-infer-l5-v1/`。原运行键/job 不重跑；本次结果不改变 L5 partial 状态。
