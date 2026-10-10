@@ -7,6 +7,25 @@
 - 维护者：ms-swift CUDA 适配。
 - 复查条件：Torch AdamW optimizer state 的 `step` 张量 device 报告路径或 Jittor placement 实现变化时，复验公开 CLI、checkpoint 和逐步状态。
 
+## 2026-10-10：固定窗口收敛与同进程恢复复验
+
+以下是按新训练验收协议完成的独立复验，不改写上方 2026-10-08 的严格逐值结论。历史 L2 仍为 partial：当时要求 optimizer `step` 的 device 元数据与原生相同；本协议把跨实现逐值误差留作诊断，要求两侧分别证明固定训练窗口收敛、完整梯度与有效状态，并要求恢复语义正确。
+
+原生 oracle 使用运行键 `20261010-peftlora-adamw-l3-same-process-v1`（job15563 的原生轨迹），严格 shim 使用 `20261010-peftlora-adamw-l3-same-process-shim-v2`（job15577）；公开 CLI 无构建预检为 job15576。两侧沿用同一 Qwen2-0.5B FP32/eager、q/v LoRA、四条固定样本、batch 2、`adamw_torch` 与四步配置。运行前数据及初始 adapter 摘要已固定；GPU 为 qh04 RTX 4090（UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4`）。strict shim 事件的 `use_cuda=1`、`fallback_count=0`；训练钩子断言输入与全部 96 个可训练参数及梯度位于 CUDA，梯度存在且有限，AdamW 的 96 组状态每步有限。
+
+每条轨迹以首两步和末两步的平均 loss 为固定窗口：原生 continuous 从 `3.98078406` 降至 `3.85156130`，shim continuous 从 `3.98078299` 降至 `3.85156107`；原生同进程恢复轨迹从 `3.98078406` 降至 `3.85156130`，shim 同进程恢复轨迹从 `3.98078453` 降至 `3.85155821`。四步均有 96 个 optimizer state，step 从 1 到 4；96 个 adapter 张量均不同于初始值，最大绝对更新约 `4.0031e-5`。连续训练与 checkpoint-1 恢复后的四个有序 batch（`input_ids`、`labels`、`attention_mask`）逐数组相同；恢复发生在同一训练进程，加载 96 个 AdamW state，scheduler `last_epoch=1`，Python、NumPy、CPU Torch、CUDA RNG 均匹配 checkpoint。
+
+| 层 | 新协议状态 | 证据或边界 |
+| --- | --- | --- |
+| L0 | PASS（固定配置） | 公开 `swift sft` CLI 构造模型、LoRA、固定数据与 AdamW；strict shim CUDA 标记有效且零 fallback。 |
+| L1 | PASS（训练 loss 路径） | 固定 CUDA 输入、形状与有限 loss；训练按该 loss 完成反向。不以跨实现 logits/hidden 误差作为训练门槛；未保存逐层 logits。 |
+| L2 | PASS（固定四步窗口） | 全部 96 个可训练梯度逐项由训练钩子断言存在、CUDA 且有限；AdamW state 每步完整有限；adapter 确实更新，原生和 shim 各自末段窗口 loss 低于初段窗口。跨实现梯度/更新差异不作通过门槛。 |
+| L3 | PASS（同进程恢复） | checkpoint-1 恢复 optimizer、scheduler 与四类 RNG；同 PID 继续训练，后续有序 batch 与连续轨迹相同。新进程恢复未运行。 |
+| L4 | PASS（单卡公开 CLI） | 两侧通过公开 `swift sft` CLI 完成连续及同进程恢复轨迹并保存 checkpoint。 |
+| L5 | not-run | 未按至少 10 次稳态样本执行性能协议。 |
+
+该新结论仅覆盖以上固定 Qwen2-0.5B PEFT LoRA/AdamW 配置，不能推广到其他 optimizer、trainer、模型或整个 ms-swift。审计运行键为 `20261010-peftlora-adamw-l3-shim-audit-v3` / job15710；结构化审计结果与两侧训练原始产物保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/` 下相应运行目录。
+
 运行键 `20261008-peft-lora-adamw-l2-ckptinit-v2` 的 Slurm 12826 在 cscg-qh17 RTX 4090（UUID `GPU-2fd350e6-8fcd-9385-4e5e-46405831cfa1`）先原生后严格 shim，通过公开 `swift sft` 完成三步。两侧均以相同 Qwen2-0.5B FP32/eager base、相同 PEFT LoRA adapter、四条固定数据、batch 4、max length 64、seed 1234、无 shuffle 构造并保存 checkpoint。AdamW 参数均为 lr `1e-5`、betas `(0.9, 0.95)`、eps `1e-8`；weight decay 分组相同，为 `0.1` 与 `0.0`。原生 optimizer 名为公开注册项 `adamw_torch`。
 
 完整 386 项模型参数初始值逐项 SHA256 相同，96 项 trainable 参数及输入均在 CUDA。首批 input IDs/labels/attention mask 完全相同，logits shape `[4,8,151936]`，最大绝对差 `1.33336e-4`、相对 L2 `2.51284e-6`；loss 最大差 `1.19209e-6`。三步 loss 原生为 `[3.82736802, 3.75735402, 3.68772626]`，shim 为 `[3.82736683, 3.75735426, 3.68772697]`。
