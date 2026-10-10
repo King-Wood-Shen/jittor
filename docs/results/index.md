@@ -69,6 +69,7 @@
 2026-10-09-torch-lrscheduler-state-cuda
 2026-10-10-qwen2-causal-ddp-sft-cuda
 2026-10-10-qwen2-peftlora-public-infer-cuda
+2026-10-11-tinyllama-public-infer-l01
 ```
 
 ## 按主题索引
@@ -103,6 +104,7 @@
 | [Qwen2-0.5B 序列分类公开 SFT CUDA 对拍](2026-10-08-qwen2-seqcls-sft-cuda.md) | 共用 checkpoint/首批后 logits 与 loss 对齐；参数名映射、梯度状态与恢复未验，L0/L1 partial | 2026-10-08 |
 | [Qwen2-0.5B 序列分类公开 infer CLI CUDA 对拍](2026-10-08-qwen2-seqcls-infer-cuda.md) | 固定 checkpoint 与输入下预测类别一致、首批 logits 达容差、严格 CUDA/零 fallback；L0/L1 partial，恢复和性能未验 | 2026-10-08 |
 | [Qwen2-0.5B PEFT LoRA 公开 `swift infer` CUDA 对拍](2026-10-10-qwen2-peftlora-public-infer-cuda.md) | 固定 adapter 与两条请求的 L0、完整生成 logits L1、公开 CLI L4、10 次稳态性能 L5 通过；L2/L3 不适用 | 2026-10-10 |
+| [TinyLlama 1.1B Chat 公开 `swift infer` CUDA 对拍](2026-10-11-tinyllama-public-infer-l01.md) | 固定两条请求的 L0/L1/L4 通过；记录 RoPE buffer 梯度标志差异；L2/L3 不适用、L5 未运行 | 2026-10-11 |
 | [Qwen2-0.5B 序列分类 Python 推理 API CUDA 对拍](2026-10-08-qwen2-seqcls-python-api-cuda.md) | 固定 batch 的 state_dict、输入、logits 与输出通过；Python API L4 端到端及 10 次稳态 L5 完成，其他模型/任务未覆盖 | 2026-10-08 |
 | [Qwen2 序列分类公开 SFT 双卡 NCCL CUDA 对拍](2026-10-08-qwen2-seqcls-ddp-nccl-cuda.md) | 固定场景双 rank 三步输入、291 参数梯度、更新权重对齐且零 fallback；scheduler 状态不等，恢复与性能未验 | 2026-10-08 |
 | [Qwen2-0.5B 全参数 SFT 首批前向对拍](2026-10-08-qwen2-causal-sft-forward-c23a.md) | 固定 batch 的 logits/hidden/loss 对拍通过数值门槛；完整层级仍受限，诊断钩子在 backward 触发内部断言 | 2026-10-08 |
