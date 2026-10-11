@@ -21,7 +21,7 @@ L1 保存并比较了 28 个数组：IDs、mask、完整 logits 与 25 层 hidde
 
 L3 使用新键 `20261011-qwen2-ia3-restore-l3-v3` / job16277，基于 job16270 捕获的同一输入，不重跑公开 infer。原生 oracle 先导出 IA3 adapter，再在同进程通过新建模型对象加载导出物，随后另起进程从相同导出目录恢复；strict shim 执行相同步骤。两侧恢复前后完整 362 参数、1 buffer、72 IA3 参数的名称、shape、dtype、device、`requires_grad` 与值 SHA256 均相同。恢复前后输入 IDs/mask 及两 token greedy 结果相同；logits/25 层 hidden 均有限，恢复内误差符合本 profile L1 门槛且 argmax 相同。原生与 shim 的新进程恢复状态哈希完全相同；logits 最大绝对误差 `1.05381012e-4`、相对 L2 `1.96029835e-6`，hidden 最大绝对误差 `4.04357910e-4`、最大相对 L2 `2.96811737e-6`，greedy token IDs 相同。六条 shim runtime 事件均为 shim 标记、`use_cuda=1`、`fallback_count=0`。只读产物审计键 `20261011-qwen2-ia3-restore-l3-audit-v1` / job16278 PASS；它没有导入模型、JIT 或重算。
 
-L3 的早期尝试也保留：job16275 因 harness 漏传路径变量在模型加载前退出；job16276 的状态哈希相同，但 harness 错将新进程浮点 logits 要求为 bitwise 相等，未保存输出，因此不作兼容判定；job16277 使用正确的 L1 数值阈值并保留输出，job16278 完成只读审计。L0/L1 的旧证据不被覆盖。
+L3 的早期尝试也保留：job16275 因 harness 漏传路径变量在模型加载前退出；job16276 的状态哈希相同，但 harness 错将新进程浮点 logits 要求为 bitwise 相等，未保存输出，因此不作兼容判定。job16277 的原生和 shim 恢复阶段均完成并保存全部产物，但作业末尾比较器错误地要求原生侧也有 shim runtime 事件，故作业终态为 FAILED；只读审计 job16278 修正为只检查 shim 事件，完成所有已保存证据的比较并 PASS。L0/L1 的旧证据不被覆盖。
 
 首次键 `20261011-qwen2-ia3-public-infer-l01-v1` / job16259 的原生 CLI 完成，但 strict shim 在单独冷缓存首次初始化期间 55 分钟超时；该缓存仅生成 `jit_utils_core`，没有 shim 模型计算。其日志与锁文件保留，未清除或重跑。v2 改用既有 Qwen2 CUDA 缓存并完成；该缓存的锁元数据指向已终态比较进程，提交前队列无活动使用者。正确性作业允许缺失的 JIT 库增量编译，因此本次不声称预热后缓存稳定，也没有性能测量。
 
