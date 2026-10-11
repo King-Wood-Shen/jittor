@@ -1,21 +1,25 @@
 # Qwen2-0.5B stock `swift rlhf --rlhf_type orpo` CUDA 输入身份审计
 
 - 状态：两条样本的三步公开 ORPO CLI 测试在 step 3 出现批次顺序反转。单固定样本12步 profile 的 L0–L4 通过（L3 恢复于2026-10-11补验）；原生 L5 完成十次稳态测量，strict shim 的测量轨迹在 step 16 backward 失败，故 L5 未通过。多样本 sampler 次序问题仍未解决，不能将 ORPO 或整个 ms-swift 标为整体通过。
-- 日期：2026-10-11 复核。
+- 日期：2026-10-12 复核。
 - 基线：恢复补验使用 Jittor `049bcc8548a63dfad654a605564e6f1949a1bbda`（上游 `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。原12步训练证据仍绑定其报告中记录的历史基线。
 - 范围：Qwen2-0.5B causal LM，全参数 FP32/eager，公开单卡 `swift rlhf --rlhf_type orpo`，两条 preference 样本、batch 2、SGD、三步。
 - 维护者：ms-swift CUDA 适配。
-- 复查条件：为 step-3 的跨 runtime 行序反转捕获 ORPO 运行时实际进入的 dataloader/batch-sampler、构造参数、epoch 与样本身份；ms-swift trainer MRO 或 Torch shim sampler/random generator 变化时复查。完成因果定位后，再使用多条固定数据重做输入、前向、梯度、状态与恢复对拍。
+- 复查条件：ms-swift trainer MRO、Accelerate `SeedableRandomSampler` 或 Torch shim 的 generator-backed `randperm` 语义变化时复查；在多样本 ORPO 输入、前向、梯度、状态和恢复对拍通过前，不提升其 L0–L4。
 
 运行键 `20261009-qwen2-orpo-stock-cli-v1` 的数据 SHA256 为 `80ace7504a35976e65bda0f8bf7f651b6efbef7257b2f5858290451d9f58450f`，Qwen2 权重 SHA256 为 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`。环境为 Python 3.11.15、PyTorch 2.6.0+cu124、Transformers 4.57.6、TRL 0.24.0。Slurm 13866 在 `cscg-qh04` RTX 4090（GPU UUID `GPU-3c43713b-3ee9-956f-d6cd-95e55d2cdfea`）完成 worker 预检；Slurm 13874 随后依次运行 native 与 strict shim CLI。两侧均训练三步并生成 `checkpoint-3`。候选父子进程均记录 `use_cuda=1`、`fallback=0`。
 
 审计插件先核对全部 290 个初始参数名称、shape、dtype、trainable 标志和 SHA256；两侧逐项相同且参数在 CUDA。输入记录为 `input_ids`、`labels`、`attention_mask`，shape 均为 `[4,33]`。第 1、2 步三种张量逐元素相同。Slurm 13886 对已保存 NPZ 的 GPU worker 只读诊断确认第 3 步 `input_ids` 与 `labels` 的四行发生样本顺序交换：native 的行顺序为 A、B、A、B，shim 为 B、A、B、A；`attention_mask` 也随记录对应。批次内容相同而样本次序不同。
 
-### Sampler 因果归属复核（2026-10-11）
+### Sampler 运行时因果复核（2026-10-12）
 
-复核发现，上述 step-3 行序反转的原始观察有效，但此前将它归因于 Transformers/Accelerate 随机 sampler 的说明与本报告绑定的 ms-swift `88d727951203256baa564c643c651b6f8d90fd7e` 源码不符，现撤回该因果结论。该版本 `ORPOTrainer` 的 MRO 是 `RLHFTrainerMixin, SwiftMixin, HFORPOTrainer`；RLHF 的 `get_train_dataloader` 通过 `super()` 进入 `SwiftMixin.get_train_dataloader`。本次参数记录为 `sequence_parallel_size=1`、`dataset_shuffle=false`、`train_dataloader_shuffle=false`、`group_by_length=false`。因此此路径调用 ms-swift `swift/dataloader/shard.py` 的 `BatchSamplerShard`，而不是 Transformers 的 `_get_train_sampler`；其 `shuffle=False` 分支顺序生成 `range(...)`，不调用 `torch.randperm`。在 Torch shim 下，该自定义 batch sampler 也没有可供 Accelerate 替换的 `.sampler`，单进程 loader 保留原 batch sampler。
+2026-10-11 对源码 MRO 的静态推断有误，现按运行时证据更正；step-3 输入反序本身仍有效。ms-swift `88d727951203256baa564c643c651b6f8d90fd7e` 的 `ORPOTrainer` MRO 为 `RLHFTrainerMixin, SwiftMixin, HFORPOTrainer`，且该类未混入 `DataLoaderMixin`。运行时 `RLHFTrainerMixin.get_train_dataloader` 经 `super()` 到达 TRL/Transformers trainer；strict shim 实际构造 `accelerate.data_loader.DataLoaderShard`，其中 batch sampler 是 compat `_BatchSampler`，其 sampler 为 Accelerate `SeedableRandomSampler`。尽管已解析配置记录 `dataset_shuffle=false`、`train_dataloader_shuffle=false`、`group_by_length=false`，该 ORPO loader 仍走该随机 sampler 路径。
 
-独立的 `RandomSampler`/显式 `Generator` 探针确实观察到相同 seed 下 native 与 shim permutation 不同，但它没有经过上述 ORPO loader 路径，不能解释本次 step-3 输入反序。故保留第 1、2 步输入相同、第 3 步四行 A/B 次序互换的实测结果；根因改记为未定位。下一次最小诊断应在真实 ORPO CLI worker 捕获 dataloader/batch-sampler 的实际类型、`shuffle`/seed/epoch、每步 dataset row ID 与模型入口行 ID，先查清训练参数与所见批次的对应关系，再判断是否属于 Jittor sampler 缺陷。该更正只修正因果边界，不改变现有多样本 L0–L4 未通过或未完成的验收状态。
+strict shim loader-only 运行键 `20261012-qwen2-orpo-multisample-loader-probe-v8` / job17212 在 cscg-qh04 RTX 4090（GPU UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4`）捕获三轮 sampler 索引 `[1,0]`、`[1,0]`、`[0,1]`。三轮 CUDA loader 输入分别与旧 shim `shim-input-step1..3.npz` 逐张量相等，运行时 `use_cuda=1`、fallback=0；没有模型前向、优化器更新或 checkpoint 写入。`loader-diagnostic.json` 内嵌的 run_key 误写为 v7；实际执行键由 v8 的 worker 日志、脚本与目录确认，报告以 Slurm job 和产物目录为身份依据。
+
+独立的 native sampler-only 复核键 `20261012-qwen2-orpo-seedable-sampler-native-probe-v2` / job17215 使用 PyTorch 2.6.0+cu124 与同版本 Accelerate `SeedableRandomSampler(data_seed=1234)`，不导入 Jittor、不加载模型或重跑训练。三轮索引均为 `[1,0]`，并逐轮映射到未修改的历史 native `native-input-step1..3.npz`。原生与 shim 历史输入文件在该只读作业前后 SHA 不变。因此 step-3 差异发生在 seeded sampler 产生的索引处，和旧训练观察的第 1、2 步一致、第 3 步 A/B 交换相符。
+
+根因收敛为 compat generator-backed `torch.randperm` 的跨实现序列差异：Accelerate `SeedableRandomSampler` 经 `RandomSampler` 调用 `torch.randperm`；compat 的 `_RandomSampler.__iter__` 同样调用 `torch.randperm`，而 compat factory 对独立 generator 的排列由 `numpy.random.Generator.permutation` 产生，相关 factory fidelity 当前标为 approximate。对本例两项样本和 seed/epoch 1234–1236，strict shim 第三轮为 `[0,1]`，native 为 `[1,0]`。数据集、collator、batch tensor 与模型入口没有引入新的行序变化。多样本 ORPO 的 seeded sampler 对拍因此仍为未通过/partial，不能扩展为训练数值通过；后续应先评估与修复 generator-backed `randperm` 的兼容边界，再用新运行键验证多样本输入及训练层级。原始脚本与证据保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-orpo-multisample-loader-probe-v8/` 和 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-orpo-seedable-sampler-native-probe-v2/`。
 
 ### 单样本固定批次：旧三步协议
 
