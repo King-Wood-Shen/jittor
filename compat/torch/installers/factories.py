@@ -379,6 +379,30 @@ def _seed_from(gen):
 #: generator* returns -- jittor's randint is int32 -- because a generator picks
 #: the stream a draw comes from and nothing else.
 _INTEGER_DRAWS = {"randperm": "int64", "randint": "int32"}
+_TORCH_CPU_RANDPERM_SMALL_LIMIT = np.iinfo(np.uint32).max // 20
+
+
+def _torch_cpu_randperm(rng, n):
+    """Consume a NumPy MT19937 stream like Torch 2.6's CPU randperm kernel."""
+    if n < _TORCH_CPU_RANDPERM_SMALL_LIMIT:
+        values = np.arange(n, dtype=np.int64)
+        for i in range(max(n - 1, 0)):
+            word = int(rng.randint(0, 1 << 32, dtype=np.uint32))
+            j = i + word % (n - i)
+            values[i], values[j] = values[j], values[i]
+        return values
+
+    # PyTorch 2.6 switches to an inside-out shuffle at this size. Its
+    # CPUGeneratorImpl::random64 combines two successive MT words high-first.
+    values = np.empty(n, dtype=np.int64)
+    for i in range(n):
+        hi = int(rng.randint(0, 1 << 32, dtype=np.uint32))
+        lo = int(rng.randint(0, 1 << 32, dtype=np.uint32))
+        z = ((hi << 32) | lo) % (i + 1)
+        values[i] = i
+        values[i] = values[z]
+        values[z] = i
+    return values
 
 
 def _is_dim(value):
@@ -459,7 +483,8 @@ def _draw_from_generator(name, generator, args, kwargs):
     if name in ("randn", "randn_like"):
         values = rng.standard_normal(shape)
     elif name in ("rand", "rand_like"):
-        values = rng.random(shape)
+        random = getattr(rng, "random", None)
+        values = random(shape) if callable(random) else rng.random_sample(shape)
     elif name == "normal":
         mean = kwargs.get("mean", values_args[0] if len(values_args) > 0 else 0.0)
         std = kwargs.get("std", values_args[1] if len(values_args) > 1 else 1.0)
@@ -478,9 +503,20 @@ def _draw_from_generator(name, generator, args, kwargs):
             return None
         if not (_is_dim(low) and _is_dim(high)):
             return None
-        values = rng.integers(int(low), int(high), size=shape)
+        integers = getattr(rng, "integers", None)
+        if callable(integers):
+            values = integers(int(low), int(high), size=shape)
+        else:
+            values = rng.randint(int(low), int(high), size=shape)
     elif name == "randperm":
-        values = rng.permutation(int(shape[0]))
+        n = int(shape[0])
+        if hasattr(rng, "bit_generator"):
+            # A checkpoint restored from the old PCG64 format must continue
+            # that stream exactly; only newly seeded MT19937 streams use the
+            # Torch CPU randperm word-consumption algorithm below.
+            values = rng.permutation(n)
+        else:
+            values = _torch_cpu_randperm(rng, n)
     else:
         return None
     # dtype: the caller's, else the one the plain call would have produced --

@@ -628,9 +628,17 @@ def frombuffer(buffer, *, dtype, count=-1, offset=0, requires_grad=False):
 
 
 def _numpy_stream(seed):
-    """One independent numpy stream per generator, seeded deterministically."""
+    """One independent CPU MT19937 stream per generator.
+
+    Torch's CPU Generator is backed by ``std::mt19937``. NumPy's legacy
+    RandomState uses the same MT19937 seeding and raw-word sequence, which lets
+    generator-backed CPU ``randperm`` consume the same words as Torch instead
+    of substituting a different permutation algorithm.
+    """
     import numpy as _np
-    return _np.random.default_rng(int(seed))
+    # std::mt19937 is seeded from its 32-bit seed_type; torch's CPU engine
+    # therefore uses the low 32 bits of the accepted 64-bit Generator seed.
+    return _np.random.RandomState(int(seed) & 0xFFFFFFFF)
 
 
 class Generator:
@@ -673,14 +681,18 @@ class Generator:
         restored nothing. Accelerate's `save_state`/`load_state` and
         `RandomSampler`'s replay both rest on this round-tripping.
 
-        The bytes are the numpy bit generator's own state, pickled. They are
-        this shim's format, not torch's CUDA/CPU state bytes, and are not
-        interchangeable with them -- the same rule torch states for its own
-        opaque state: save it, hand it back, do not parse it.
+        The bytes are this shim's NumPy state, pickled. They are this shim's
+        format, not torch's CUDA/CPU state bytes, and are not interchangeable
+        with them. The tagged MT19937 representation is distinct from the
+        previous PCG64 state; ``set_state`` still accepts that earlier format
+        so checkpoints written before the engine change remain resumable.
         """
         import numpy as _np
         import pickle as _pickle
-        blob = _pickle.dumps(self._stream().bit_generator.state, protocol=4)
+        blob = _pickle.dumps({
+            "format": "jittor-torch-generator-mt19937-v1",
+            "state": self._stream().get_state(),
+        }, protocol=4)
         return jt.array(_np.frombuffer(blob, dtype=_np.uint8).copy())
     def set_state(self, s):
         import numpy as _np
@@ -699,8 +711,21 @@ class Generator:
         except EXPECTED as exc:
             swallowed("torch/installers/tensor Generator.set_state", exc)
             raise ValueError("generator state is not one this generator produced")
-        stream = self._stream()
-        stream.bit_generator.state = state
+        import numpy as _np
+        if (isinstance(state, dict)
+                and state.get("format") == "jittor-torch-generator-mt19937-v1"):
+            stream = _numpy_stream(self._seed)
+            stream.set_state(state["state"])
+        elif (isinstance(state, dict)
+              and state.get("bit_generator") == "PCG64"):
+            # Preserve checkpoints produced by the former default_rng/PCG64
+            # stream. A restored legacy stream keeps its old draw semantics;
+            # newly seeded generators use the Torch-compatible MT stream.
+            stream = _np.random.default_rng()
+            stream.bit_generator.state = state
+        else:
+            raise ValueError("generator state is not one this generator produced")
+        self._rng = stream
         return self
     def seed(self):
         return self._seed

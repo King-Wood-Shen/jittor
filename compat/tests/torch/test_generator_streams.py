@@ -127,6 +127,55 @@ def test_a_generator_changes_the_stream_and_nothing_else():
         assert seeded.requires_grad == plain.requires_grad, label
 
 
+def test_generator_backed_cpu_randperm_matches_torch_seedable_sampler_trace():
+    # These three epoch seeds and permutations are frozen from the independent
+    # PyTorch 2.6 CPU SeedableRandomSampler oracle used by the ORPO profile.
+    # The generator is CPU-resident even when loader tensors later move to CUDA.
+    for seed in (1234, 1235, 1236):
+        actual = torch.randperm(
+            2, generator=torch.Generator(device="cpu").manual_seed(seed))
+        np.testing.assert_array_equal(actual.numpy(), np.array([1, 0]))
+
+
+def test_generator_backed_randperm_large_branch_combines_raw_words_high_first(
+        monkeypatch):
+    from importlib import import_module
+
+    factories = import_module("jittor.compat.torch.installers.factories")
+    monkeypatch.setattr(factories, "_TORCH_CPU_RANDPERM_SMALL_LIMIT", 0)
+
+    class RawWords:
+        def __init__(self):
+            self.words = iter((0, 5, 0, 0, 0, 1, 0, 4))
+
+        def randint(self, low, high, dtype):
+            assert (low, high, dtype) == (0, 1 << 32, np.uint32)
+            return next(self.words)
+
+    generator = torch.Generator(device="cpu").manual_seed(0)
+    generator._rng = RawWords()
+    actual = torch.randperm(4, generator=generator)
+    np.testing.assert_array_equal(actual.numpy(), np.array([3, 2, 0, 1]))
+
+
+def test_generator_restores_legacy_pcg64_checkpoint_state():
+    # Generator state tensors already written by prior shim versions contain a
+    # pickled PCG64 state. Restoring one must preserve its former stream rather
+    # than interpreting it as an MT19937 state.
+    import pickle
+
+    legacy = np.random.default_rng(27)
+    state = pickle.dumps(legacy.bit_generator.state, protocol=4)
+    encoded = torch.tensor(
+        np.frombuffer(state, dtype=np.uint8).copy(), dtype=torch.uint8)
+    generator = torch.Generator(device="cpu").set_state(encoded)
+    expected = np.random.default_rng()
+    expected.bit_generator.state = legacy.bit_generator.state
+    np.testing.assert_array_equal(
+        torch.randperm(9, generator=generator).numpy(),
+        expected.permutation(9))
+
+
 def test_the_default_dtype_still_decides_what_a_seeded_draw_returns():
     """`torch.set_default_dtype` is how a pipeline asks for fp16/bf16 latents."""
     torch.set_default_dtype(torch.float64)
