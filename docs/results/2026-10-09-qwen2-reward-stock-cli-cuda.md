@@ -1,11 +1,11 @@
 # Qwen2-0.5B stock Reward Model CLI CUDA 入口审计
 
-- 状态：原生与 strict shim 均完成公开 `swift rlhf --rlhf_type rm` 训练。2026-10-12 新 shim 复验的三批 sampler 索引与逐批输入哈希和既有原生 oracle 一致，确认先前顺序分叉在当前 compat 基线已消失；job17482 的 Slurm 终态因训练后格式断言失败，不能将整个运行键标为自动门禁通过。job17601 对齐首批输入并通过同权重 CUDA reward logits 前向，L1 首批证据通过；job17714 两侧六步公开 CLI 的全参数梯度、更新、收敛窗口与 checkpoint 审计通过，L2 通过。L0 仍 partial、L3 not-run。L4 入口已运行并保存 step-6 checkpoint，但功能合同尚未完成；L5 blocked。不代表 RewardTrainer 或 ms-swift 整体兼容。
+- 状态：原生与 strict shim 均完成公开 `swift rlhf --rlhf_type rm` 训练。2026-10-12 新 shim 复验的三批 sampler 索引与逐批输入哈希和既有原生 oracle 一致，确认先前顺序分叉在当前 compat 基线已消失；job17482 的 Slurm 终态因训练后格式断言失败，不能将整个运行键标为自动门禁通过。job17601 对齐首批输入并通过同权重 CUDA reward logits 前向，L1 首批证据通过；job17714 两侧六步公开 CLI 的全参数梯度、更新、收敛窗口与 checkpoint 审计通过，L2 通过。L0 在当前固定构造配置通过；L3 not-run。L4 入口已运行并保存 step-6 checkpoint，但功能合同尚未完成；L5 blocked。不代表 RewardTrainer 或 ms-swift 整体兼容。
 - 日期：2026-10-09；当前基线补验：2026-10-11、2026-10-12。
-- 基线：历史严格对拍 Jittor `dfde300e618dffcf38965b08777cae67c641476c`；2026-10-11 追踪运行 Jittor `487935592dd6b42cc9cde4212c7713906beee819`；2026-10-12 sampler 修复代码提交 `5f70e7b3321abe2e131a9bb0557b27cf041b037a`；本轮 L2 验证 Jittor `3c6ac47f5a69aa0685dc5ea4615f9edd442f6247`（upstream `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
+- 基线：历史严格对拍 Jittor `dfde300e618dffcf38965b08777cae67c641476c`；2026-10-11 追踪运行 Jittor `487935592dd6b42cc9cde4212c7713906beee819`；2026-10-12 sampler 修复代码提交 `5f70e7b3321abe2e131a9bb0557b27cf041b037a`；L2 验证 Jittor `3c6ac47f5a69aa0685dc5ea4615f9edd442f6247`；L0 验证 Jittor `60c62e9ce976bca3228fa644d8481918caaa0780`（upstream `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 范围：Qwen2-0.5B `Qwen2ForSequenceClassification`、公开单卡 `swift rlhf --rlhf_type rm`、全参数 FP32/eager、SGD、六行固定 preference 数据、batch 2；输入追踪和首批 L1 使用三步轨迹，新 L2 使用六步并固定 step1–2/5–6 loss 窗口。
 - 维护者：ms-swift CUDA 适配。
-- 复查条件：L0 仍需两侧逐参数初态 dtype/device 清单；随后评估同进程/新进程恢复和性能层。若 sampler 实现改变，重新核对批次身份。
+- 复查条件：随后评估同进程/新进程恢复和性能层。若 sampler 实现改变，重新核对批次身份。
 
 初始模型由原生 PyTorch 从固定 Qwen2 checkpoint 构造，确定性初始化 `score.weight` 后保存；同一 safetensors 被原生与候选 CLI 读取，SHA256 为 `415ca5ddc706cea55ef2a66850061291272c744bd5e1acdca6eeddc8d4035a1b`。底模文件 SHA256 为 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`。六条 preference JSONL SHA256 为 `dc072b5ee211afbb4c6e8f1a1f5689d7f4e5a98f4f79c86b70d4d39a4608eee4`。ms-swift 为 Python 3.11.15、PyTorch 2.6.0+cu124、Transformers 4.57.6。
 
@@ -15,7 +15,7 @@ Slurm 13784 在 `cscg-qh17` RTX 4090（UUID `GPU-2fd350e6-8fcd-9385-4e5e-4640583
 
 | 层 | 状态 | 证据与缺口 |
 |---|---|---|
-| L0 | partial | 同一确定性初始 safetensors 和 291 个末态键；shim 日志显示全参数 Qwen2ForSequenceClassification、`device_map=cuda:0`，审计到的批输入为 CUDA。2026-10-12 输入身份补验通过；仍缺两侧逐参数初态 dtype/device 清单。 |
+| L0 | pass（当前固定构造配置） | job17852 在 RTX 4090 上先 native 后 strict shim，直接走相同 `SwiftRLHF` 构造序列，止于训练前；两侧构造 Qwen2ForSequenceClassification、processor、template、长度5数据集、3 batch DataLoader、RewardTrainer、SGD 两参数组和 scheduler。291 个参数均为 `float32`、`cuda:0`，291 个 state 键也均在 `cuda:0`，494,033,664 个可训练标量；参数与 state 键清单及逐参数值 SHA256 完全匹配。job17862 在 GPU worker 对两份清单和 optimizer 组成员/显式 lr、weight_decay 做归一化比较通过；shim runtime `use_cuda=1`、fallback=0；没有执行 forward/optimizer step 或保存 checkpoint。该 L0 只覆盖报告中锁定的固定 RM 构造配置。 |
 | L1 | pass（首批） | job17601 在同一 RTX 4090 上先 native、后 strict shim，各跑公开 CLI 一步；首批 `input_ids`/`attention_mask` 的 shape、dtype、CUDA device 与 SHA 全等，也与旧 native 输入 oracle 和 sampler 修复后 shim 输入记录首批 SHA 一致。score logits shape `[4,1]`、CUDA `float32`、finite；`max_abs=3.8147e-6`、`max_rel=8.8035e-5`，满足预设 `atol=1e-5, rtol=1e-4`。该结论限定于此首批前向。 |
 | L2 | pass（固定六步 CLI 配置） | job17714 两侧每步覆盖291个可训练参数的 CUDA 梯度与更新；step1–2和5–6预锁窗口各自下降；step-6模型、optimizer checkpoint及序列化公共状态审计通过。 |
 | L3 | not-run | 没有同进程或新进程恢复轨迹。 |
@@ -60,3 +60,11 @@ job17601 在 `cscg-qh04` NVIDIA RTX 4090（UUID `GPU-3c43713b-3ee9-956f-d6cd-95e
 step-6 checkpoint 的291个模型键均有限且相对初始模型均发生改变；每份权重共494,033,664个标量，native/shim 分别改变493,481,997/493,481,987个，最大绝对差分量均为 `2.5737472e-4`。两份 checkpoint 均有模型、optimizer、scheduler 与 `trainer_state` 文件，`global_step=6`。只读审计 job17756 使用 PyTorch `weights_only=True` 读取原生 optimizer，使用拒绝所有全局对象的受限 pickle reader 读取 strict-shim 便携状态；两边公共 state dict 完全相等，state 为空（SGD momentum=0 的预期），两组参数覆盖数为170/121，`lr=1e-5`、weight decay 为0.1/0.0且选项一致。optimizer 文件字节数不同（1768/894）对应不同序列化格式，不表示状态差异。
 
 job17714 的最终 Slurm exit 1 来自训练后的首版比较器错误假设 optimizer 只有一个参数组；训练本身两侧均完成六步并保存 checkpoint。修正为检查两组公开参数选项后，独立 artifact audit job17739 通过全部 L2 检查，optimizer checkpoint 又由 job17756 通过。GPU worker 为 `cscg-qh04` RTX 4090（UUID `GPU-3c43713b-3ee9-956f-d6cd-95e55d2cdfea`，driver `580.178.04`）；strict-shim 父子进程 `use_cuda=1`、fallback delta=0。复用匹配的 CUDA JIT 缓存，`JITTOR_NO_BUILD=1` bootstrap 在2.9秒通过，`jittor_core` SHA256 前后均为 `caf12a34ff55c770651ef2b95c9f1ceda48599496bec59aeae8e36c6f994dbd5`。此结论仅验收当前固定 Reward RM CLI 的 L2 配置，不提升 L0/L3/L4/L5，也不代表更广 Reward 或 ms-swift 支持。
+
+## 2026-10-12 Reward RM 构造阶段全参数清单
+
+新运行键 `20261012-qwen2-reward-stock-cli-l0-construct-v1` / job17852 复用同一 Qwen2-0.5B 底模、确定性初始 safetensors、六行 preference 数据及 L2 固定参数。它直接构造 `SwiftRLHF`、template、数据集、全参数 tuner、RewardTrainer、SGD optimizer、scheduler 与训练 DataLoader，并在 step 0 停止；不执行前向、训练步骤或 checkpoint 保存。作业在 `cscg-qh04` RTX 4090（UUID `GPU-3c43713b-3ee9-956f-d6cd-95e55d2cdfea`，driver `580.178.04`）顺序运行独立 native 与 strict-shim Python 进程。两边模型类、processor/template 类、task type、device map、dataset/loader 结构与 scheduler 状态匹配。
+
+291 个参数均位于 `cuda:0` 且 dtype 为 `torch.float32`；291 个 state 键也均在 `cuda:0`，两侧 state 名、shape、dtype、device 与值 SHA256 完全匹配。可训练标量数为494,033,664。逐项参数的名称、shape、dtype、device、requires_grad 及值 SHA256 完全匹配，说明两侧加载了同一初态。两组 optimizer 的参数成员顺序一致，组大小为170/121，显式 `lr=1e-5`、`initial_lr=1e-5`、weight decay分别为0.1/0.0；optimizer 初始 state 为空，scheduler 初态相同。strict-shim `sitecustomize` 作用域记录 `use_cuda=1`、父进程 fallback=0；匹配缓存下 `JITTOR_NO_BUILD=1` bootstrap通过且 `jittor_core` SHA前后不变。比较器不比较原生与 shim 的 optimizer 类名，也不把各自 `param_groups` 内部表示强求相同；既有 L2 optimizer 工件审计负责完整公共 optimizer 状态/选项。
+
+job17852 的训练后比较器因比较 backend-specific optimizer 类/隐式默认及内部字段而以 exit 1 结束，但两侧构造和清单已写出。job17859 仅在 GPU worker 诊断组差异：两侧组成员和显式选项一致；原生把 momentum、dampening、nesterov、maximize 默认项放在参数组，shim 的 SGD 将默认值保存在 optimizer 实例上。job17862 在 GPU worker 用新运行键对原始清单作语义归一化比较并通过。为定位 job17852 比较器字段，曾在登录节点对 GPU 产出的 JSON 文件作一次只读字段诊断；未导入框架、未加载模型或运行计算，该诊断不计验收证据。最终验收比较由 Slurm GPU job17862 完成。原始 JSON、脚本与 Slurm 日志均保存在 state，未版本化。该结果补齐本固定配置的 L0，不改变 L3 not-run、L4 功能合同未完成、L5 blocked，也不代表其它 Reward/ms-swift 工作负载。
