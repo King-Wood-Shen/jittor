@@ -94,7 +94,7 @@
 | [Torch 兼容层在真实模型上对 PyTorch：差距表、显存与性能修复](2026-09-24-torch-compat-real-models.md) | 11 项全部跑通，几何平均 1.26x，进程显存峰值为 PyTorch 的 0.87–1.45 倍；余下差距在主机侧 | 2026-09-24 |
 | [性能/显存分析工具：审计与重写](2026-09-25-profiling-tools.md) | 已实现，RTX 4090 上验证；未合入 | 2026-09-25 |
 | [ms-swift CUDA 适配：基线同步与长上下文流式断点](2026-10-07-ms-swift-cuda-compat-sync.md) | 新基线完整性能协议段错误；长上下文流式 L4/L5 未通过 | 2026-10-07 |
-| [Qwen2-0.5B 公开 infer CLI 千 token 非流式复验](2026-10-07-qwen2-infer-1k-ffeb.md) | 当前基线固定非流式 profile 的 L0/L1/L4 通过；L2/L3 不适用，L5未跑；streaming 与整体范围仍未覆盖 | 2026-10-11 |
+| [Qwen2-0.5B 公开 infer CLI 千 token 非流式复验](2026-10-07-qwen2-infer-1k-ffeb.md) | 固定非流式 profile 的 L0/L1/L4/L5 通过，L2/L3 不适用；L5为2026-10-12同卡两次预热、十次同步测量；streaming 与整体范围仍未覆盖 | 2026-10-12 |
 | [Qwen2-0.5B IA3 adapter 公开 infer](2026-10-07-qwen2-ia3-infer-ffeb.md) | 同一 adapter 下两条公开输出相同；逐参数设备、完整 logits 与恢复未验 | 2026-10-07 |
 | [Qwen2-0.5B PEFT IA3 公开 infer 当前基线复验](2026-10-11-qwen2-ia3-public-infer-cuda.md) | 当前基线固定 profile 的 L0/L1/L3/L4 通过；L2不适用，L5未运行 | 2026-10-11 |
 | [Qwen2-0.5B IA3：Transformers/PEFT 直接前向](2026-10-08-qwen2-ia3-forward-349d.md) | 当前同步基线参数设备、完整 logits/hidden-state 对拍及公开 infer CLI 输出对齐；恢复未验，形式 L4/L5 受阻 | 2026-10-08 |

@@ -1,8 +1,8 @@
 # Qwen2-0.5B 公开 infer CLI：新基线千 token 非流式复验
 
-- 状态：2026-10-11 当前基线新增的固定非流式 CLI profile：L0/L1/L4 通过，L2/L3 不适用，L5 未运行；历史运行记录及各自当时的结论保留在下文。
-- 日期：2026-10-07（历史运行）；2026-10-11（当前基线复验）。
-- 基线：Jittor `af2cbfa3c`（父提交包含上游 `ffeb7bd80`），ms-swift `88d7279`，隔离 Python 3.11.15。
+- 状态：固定非流式 CLI profile 的 L0/L1/L4 通过、L2/L3 不适用；2026-10-12 补齐 L5 稳态性能。历史运行记录及各自当时的结论保留在下文。
+- 日期：2026-10-07（历史运行）；2026-10-11（当前基线 L0/L1/L4 复验）；2026-10-12（当前固定 profile L5）。
+- 历史基线：Jittor `af2cbfa3c`（父提交包含上游 `ffeb7bd80`），ms-swift `88d7279`，隔离 Python 3.11.15；各次新增证据在对应小节注明实际基线。
 - 验证范围：真实缓存 Qwen2-0.5B、公开 `python -m swift.cli.main infer`、单 RTX 4090 CUDA、FP32、eager attention、非流式 greedy、最多 32 新 token、两条提示。
 - 维护者：ms-swift CUDA 适配。
 - 复查条件：改动 Qwen2 加载、tokenizer/template、Torch shim、CUDA executor 或公开推理入口；补完整 logits/hidden、构造状态和恢复审计时。
@@ -47,7 +47,22 @@ Slurm 11282 在 Jittor `0c9810603d83b2aa53dd04051436a1265957ece7`（上游基线
 | L2 | not-applicable | 推理配置，不做反向或 optimizer 更新。 |
 | L3 | not-applicable | 推理配置没有训练状态续训合同；此项不声称验证独立 server/session 恢复。 |
 | L4 | PASS | 两侧均通过公开 `swift infer` CLI 端到端完成，并产出逐字段相同 JSONL。 |
-| L5 | not-run | 本次有模型采集开销且非稳态协议；不使用其运行时间作性能结论。 |
+| L5 | PASS | 2026-10-12 新运行键在真实 RTX 4090 上完成每侧 2 次预热与 10 次 CUDA 同步生成；严格 CUDA/零 fallback、输出一致，计时段 JIT 对象稳定。仅限本节固定 profile。 |
+
+### 2026-10-12 固定 profile 的 L5 稳态生成
+
+新运行键 `20261012-qwen2-public-infer-1k-l5-v4`（Slurm job 17929，cscg-qh04）基于 Jittor `8a13fd3e3cdd98d2f1c9b6009c0c5863e4851c76` 与 ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`，在原生 PyTorch 与 strict shim 间顺序运行，均为同一分配中的 RTX 4090（UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4`）。沿用 Qwen2-0.5B 权重 SHA256 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`、提示文件 SHA256 `bdb99f9e1fe097c595db2fba7c81cefcb49300e6dbac2595cf075fd6160abcaa`，输入均为 CUDA FP32 `[2,1396]`（input SHA256 `3f9d4eb68c050926eef0a520afbe57fd14a69a745366ce6d932cd41c90ce63de`，mask SHA256 `c882479a525706f4e89fad4a5388fe2c1eed3cb5e83d33853247dbba18218502`）。公开命令为 `python -m swift.cli.main infer`，FP32/eager、batch 2、非流式 greedy、`max_new_tokens=32`、temperature 0。每侧先做两次真实输入形状预热，再做十次 CUDA 同步的 `generate` 测量；模型加载、CLI启动及首次 JIT 不计入测时。此前 v1-v3 未进入有效性能对拍：分别止于资源预检、预检期间 JIT 预热和空队列计数脚本；这些是 harness/预检边界，不是兼容失败。
+
+十次生成的序列 SHA256 在各侧内部均相同，且两侧相同：`f684c2ae4f53f752155919b79ca64e0434c8af91e2d2ffb6c0172819a7543f8e`。公开 CLI 的两条 JSONL 结果逐字段一致。strict shim 主/推理进程均为 `use_cuda=1`、fallback 0；两侧模型均审计到 290 个 FP32 CUDA 参数和 1 个 buffer。shim 的 JIT shared-object 清单在预热后与十次测量结束时相同；其缓存从测量前的 308 个对象在预热中增加 3 个，之后十次测量保持 311 个。`jittor_core` SHA256 前后均为 `7da45583a157494524e881c5a9755487eeaa82fc6ca0287a288a49dcb7f5740a`。
+
+| 运行时 | 中位延迟 | 均值 | P95（最近秩） | 生成序列位置/次 | 吞吐* | CUDA allocator 峰值 allocated / reserved |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 原生 PyTorch | 729.857 ms | 729.978 ms | 731.654 ms | 34 | 46.584 positions/s | 2,662,699,520 / 2,808,086,528 B |
+| Jittor strict shim | 754.995 ms | 755.358 ms | 757.854 ms | 34 | 45.033 positions/s | 2,587,152,896 / 3,297,771,520 B |
+
+`shim/native` 中位延迟比为 1.034，吞吐比为 0.967。这里的 34 个“生成序列位置”按每条序列第一次 EOS（含 EOS）计数；公开 CLI 汇总打印 `num_generated_tokens=33`，不含终止 EOS。该吞吐口径据此不能与 CLI 汇总的 tokens/s 直接混用。allocator 数值仅是 CUDA allocator 口径，不代表 Jittor 进程总显存。两侧 CLI 退出码为 0 并写出结果；Multiprocess 临时目录清理各出现一次 NFS `.nfs*` 文件 `EBUSY` 警告，未阻止结果落盘或作业成功。原始日志、事件、结果、比较器、缓存清单和运行 manifest 未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-public-infer-1k-l5-v4/`；job 17928 为该运行的 CUDA/存储预检。
+
+此 L5 只覆盖上述固定两条提示、模型、FP32/eager、batch、非流式 `swift infer` 和单卡配置；不升级 streaming、不同上下文/批量、Python API、训练或恢复，也不代表整个 ms-swift 的性能状态。
 
 采集器自身的失败尝试也保留：job 16254（键 `20261011-qwen2-public-infer-1k-l01-v1`）在原生 CLI 产出结果后因未将 native capture 钩子导入实际推理子进程而退出；job 16255 完成原生与 strict shim 两侧及张量采集，但首个比较器因在 shim 环境内、atexit 前读取自身尚未闭合的 runtime 事件而退出；job 16256 的只读比较另因过时地要求 `native-capture.json` 退出，均未得出兼容结论。job 16257（键 `20261011-qwen2-public-infer-1k-analysis-v2`）改为读取实际的 `native-forward.json/.npz` 并在独立进程退出后比较，完成并通过上述审计。旧运行键未重跑，原有各历史严格对拍结论均未覆盖或改写。此项不覆盖 streaming/KI-EXEC-011、其他上下文长度或 batch，也不代表整个 ms-swift 已兼容。
 
