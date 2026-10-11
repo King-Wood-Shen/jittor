@@ -1,6 +1,6 @@
 # Qwen2-0.5B PEFT IA3 公开 `swift infer` 当前基线 CUDA 复验
 
-- 状态：此固定 profile 的 L0/L1 通过；公开 CLI 已在原生与 strict shim 上端到端运行且输出相同，但因 L3 未运行，正式 L4 blocked；L2 不适用，L5 blocked。
+- 状态：此固定 profile 的 L0/L1/L3/L4 通过；公开 CLI 已在原生与 strict shim 上端到端运行且输出相同；L2 不适用，L5 未运行。
 - 日期：2026-10-11。
 - Jittor 基线：`7c110a68e54e02d625a7d87c62a88b035e829489`；同步的 `origin/2.0-refactor`=`7a18abf295668d9b19da5fa1657f5606e84b65a0`，为提交祖先。
 - ms-swift：`88d727951203256baa564c643c651b6f8d90fd7e`（4.6.0.dev0）；Python 3.11.15、PyTorch 2.6.0+cu124、Transformers 4.57.6、PEFT 0.17.1。
@@ -17,7 +17,11 @@ L0 比较了完整的 362 个命名参数和 1 个 buffer；每项的名称、sh
 
 L1 保存并比较了 28 个数组：IDs、mask、完整 logits 与 25 层 hidden states。张量均在 CUDA、dtype/shape 一致且有限。Logits shape 为 `[2,26,151936]`，最大绝对误差 `1.05381012e-4`、相对 L2 `1.96029835e-6`，所有位置 greedy argmax 相同；hidden states 最大绝对误差 `4.04357910e-4`、最大相对 L2 `2.96811737e-6`。
 
-公开 CLI 两侧均完成两条请求，各生成 2 token；JSONL 逐字段相同（响应分别为 `The passage` 与 `The expression`）。strict shim 的父/推理子进程 start/end 事件均记录 shim 标记、`use_cuda=1`、`fallback_count=0`；运行时明确记录 `CUDA enabled`。这证明入口已执行和输出一致，但按本 Skill 的逐层门槛，L3 未验收前不授予正式 L4 PASS。
+公开 CLI 两侧均完成两条请求，各生成 2 token；JSONL 逐字段相同（响应分别为 `The passage` 与 `The expression`）。strict shim 的父/推理子进程 start/end 事件均记录 shim 标记、`use_cuda=1`、`fallback_count=0`；运行时明确记录 `CUDA enabled`。
+
+L3 使用新键 `20261011-qwen2-ia3-restore-l3-v3` / job16277，基于 job16270 捕获的同一输入，不重跑公开 infer。原生 oracle 先导出 IA3 adapter，再在同进程通过新建模型对象加载导出物，随后另起进程从相同导出目录恢复；strict shim 执行相同步骤。两侧恢复前后完整 362 参数、1 buffer、72 IA3 参数的名称、shape、dtype、device、`requires_grad` 与值 SHA256 均相同。恢复前后输入 IDs/mask 及两 token greedy 结果相同；logits/25 层 hidden 均有限，恢复内误差符合本 profile L1 门槛且 argmax 相同。原生与 shim 的新进程恢复状态哈希完全相同；logits 最大绝对误差 `1.05381012e-4`、相对 L2 `1.96029835e-6`，hidden 最大绝对误差 `4.04357910e-4`、最大相对 L2 `2.96811737e-6`，greedy token IDs 相同。六条 shim runtime 事件均为 shim 标记、`use_cuda=1`、`fallback_count=0`。只读产物审计键 `20261011-qwen2-ia3-restore-l3-audit-v1` / job16278 PASS；它没有导入模型、JIT 或重算。
+
+L3 的早期尝试也保留：job16275 因 harness 漏传路径变量在模型加载前退出；job16276 的状态哈希相同，但 harness 错将新进程浮点 logits 要求为 bitwise 相等，未保存输出，因此不作兼容判定；job16277 使用正确的 L1 数值阈值并保留输出，job16278 完成只读审计。L0/L1 的旧证据不被覆盖。
 
 首次键 `20261011-qwen2-ia3-public-infer-l01-v1` / job16259 的原生 CLI 完成，但 strict shim 在单独冷缓存首次初始化期间 55 分钟超时；该缓存仅生成 `jit_utils_core`，没有 shim 模型计算。其日志与锁文件保留，未清除或重跑。v2 改用既有 Qwen2 CUDA 缓存并完成；该缓存的锁元数据指向已终态比较进程，提交前队列无活动使用者。正确性作业允许缺失的 JIT 库增量编译，因此本次不声称预热后缓存稳定，也没有性能测量。
 
@@ -25,13 +29,13 @@ L1 保存并比较了 28 个数组：IDs、mask、完整 logits 与 25 层 hidde
 
 ## 仓库文档门禁
 
-唯一门禁键 `20261011-qwen2-ia3-public-infer-docgate-v2`（Slurm 16274）在 `cscg-qh04` 完成：`tools/check_repo_layout.sh` 报告 238 个活动 Markdown 文件且布局通过；Torch-mode `tests/structure` 为 1384 passed、8 skipped、1019 subtests passed（184.39 秒）。skip 原因是 2 个 accelerator、2 个 declared 和 4 个环境相关项（解释器缺 Jittor 安装解析目标与 pytest-xdist）。节点有 RTX 4090，但该结构测试运行时 Jittor 日志显示没有 nvcc 并继续 CPU 路径；因此此门禁只证明文档/打包/结构契约，不作为 CUDA 计算证据。门禁 v1/job16273 的两个失败分别发现本报告未列入结果 toctree、生成的根 `MANIFEST.in` 未更新；已补齐结果 toctree 并在 v2 worker 中运行 manifest 生成器及 `--check`，之后全门禁通过。两轮原始日志和 manifest 均保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-ia3-public-infer-docgate-v1/` 与 `...-v2/`，未版本化。
+唯一门禁键 `20261011-qwen2-ia3-public-infer-docgate-v2`（Slurm 16274）在 `cscg-qh04` 完成：`tools/check_repo_layout.sh` 报告 238 个活动 Markdown 文件且布局通过；Torch-mode `tests/structure` 为 1384 passed、8 skipped、1019 subtests passed（184.39 秒）。skip 原因是 2 个 accelerator、2 个 declared 和 4 个环境相关项（解释器缺 Jittor 安装解析目标与 pytest-xdist）。节点有 RTX 4090，但该结构测试运行时 Jittor 日志显示没有 nvcc 并继续 CPU 路径；因此此门禁只证明文档/打包/结构契约，不作为 CUDA 计算证据。门禁 v1/job16273 的两个失败分别发现本报告未列入结果 toctree、生成的根 `MANIFEST.in` 未更新；已补齐结果 toctree 并在 v2 worker 中运行 manifest 生成器及 `--check`，之后全门禁通过。两轮原始日志和 manifest 均保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-ia3-public-infer-docgate-v1/` 与 `...-v2/`，未版本化。L3 原始产物及只读审计输出保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-ia3-restore-l3-v3/` 与 `...-audit-v1/`；无效轮次 v1/v2 日志也保留，均未版本化。
 
 | 层 | 本配置状态 | 证据或缺口 |
 | --- | --- | --- |
 | L0 | PASS | 362 参数、1 buffer 元数据与值哈希完全相同；72 个 IA3 参数及全部状态驻留 CUDA。 |
 | L1 | PASS | 同权重与输入下完整 logits、25 层 hidden states 有限、设备/dtype/shape 一致并在误差门槛内，greedy argmax 相同。 |
 | L2 | not-applicable | 此 profile 是推理，不含反向或更新。 |
-| L3 | not-run | 未测试同进程和新进程的模型/adapter 保存与恢复。 |
-| L4 | blocked | 公开 `swift infer` 已执行且输出匹配；按逐层门槛等待 L3。 |
-| L5 | blocked | L3/L4 未完整通过，未按协议进行十次稳态性能测量。 |
+| L3 | PASS | IA3 adapter 导出；同进程 fresh-object 与新进程均恢复完整模型/adapter 状态，输入与 greedy token 相同，logits/hidden 符合 L1 数值阈值；native/shim 状态哈希相同，strict CUDA 零 fallback。推理无 optimizer、scheduler、训练 RNG 或 dataloader 游标。 |
+| L4 | PASS | 公开 `swift infer` 两侧均完成，JSONL 逐字段相同；适用 L3 已通过。 |
+| L5 | not-run | 未做至少十次稳态性能测量。 |

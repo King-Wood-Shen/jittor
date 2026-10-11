@@ -96,7 +96,7 @@
 | [ms-swift CUDA 适配：基线同步与长上下文流式断点](2026-10-07-ms-swift-cuda-compat-sync.md) | 新基线完整性能协议段错误；长上下文流式 L4/L5 未通过 | 2026-10-07 |
 | [Qwen2-0.5B 公开 infer CLI 千 token 非流式复验](2026-10-07-qwen2-infer-1k-ffeb.md) | 当前基线固定非流式 profile 的 L0/L1/L4 通过；L2/L3 不适用，L5未跑；streaming 与整体范围仍未覆盖 | 2026-10-11 |
 | [Qwen2-0.5B IA3 adapter 公开 infer](2026-10-07-qwen2-ia3-infer-ffeb.md) | 同一 adapter 下两条公开输出相同；逐参数设备、完整 logits 与恢复未验 | 2026-10-07 |
-| [Qwen2-0.5B PEFT IA3 公开 infer 当前基线复验](2026-10-11-qwen2-ia3-public-infer-cuda.md) | 当前基线固定 profile 的 L0/L1 通过；公开 CLI 已运行且输出相同，L3 未运行因此正式 L4 blocked，L5 blocked | 2026-10-11 |
+| [Qwen2-0.5B PEFT IA3 公开 infer 当前基线复验](2026-10-11-qwen2-ia3-public-infer-cuda.md) | 当前基线固定 profile 的 L0/L1/L3/L4 通过；L2不适用，L5未运行 | 2026-10-11 |
 | [Qwen2-0.5B IA3：Transformers/PEFT 直接前向](2026-10-08-qwen2-ia3-forward-349d.md) | 当前同步基线参数设备、完整 logits/hidden-state 对拍及公开 infer CLI 输出对齐；恢复未验，形式 L4/L5 受阻 | 2026-10-08 |
 | [Qwen2-0.5B 公开全参数 SFT 双卡三步与恢复复验](2026-10-07-qwen2-causal-ddp-ffeb.md) | 一步双卡逐参数梯度对拍完成；三步扩展在原生 qh09 设备枚举处失败；完整 L0–L5 待验 | 2026-10-07 |
 | [Qwen2-0.5B 公开全参数 SFT 三步复验](2026-10-07-qwen2-causal-sft-ffeb.md) | 补 scheduler 修复后的 step-3→4 新进程续训：290 键权重与 scheduler 对齐且零 fallback；optimizer、RNG 实值、数据游标和同进程恢复未验，L3 仍 blocked | 2026-10-09 |
