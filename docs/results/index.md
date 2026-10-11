@@ -132,7 +132,7 @@
 | [Qwen2-0.5B ms-swift `swift deploy` 服务端/客户端 CUDA 复验](2026-10-08-qwen2-service-infer-361bf.md) | 固定 Qwen2 FP32/eager 服务 profile 的 L0/L1/L4/L5 通过，L2/L3 不适用；L5 同卡稳态 HTTP 与进程显存口径已补齐 | 2026-10-11 |
 | [Qwen2-0.5B PEFT LoRA 公开 `swift export --merge_lora` CUDA 对拍](2026-10-08-qwen2-peftlora-export-merge-82c2.md) | 历史 `82c2` 严格结论保留；当前基线 L0/L1/L4 通过、零 fallback，L3 not-run；固定配置范围受限 | 2026-10-11 |
 | [Qwen2-0.5B stock `swift rlhf --rlhf_type kto` CUDA 入口审计](2026-10-09-qwen2-kto-stock-cli-cuda.md) | 解释 shim 额外 reference forward 来自 no-grad 首次 GraphReplay eager/capture；三步全参数梯度、更新、loss 与末态权重对拍通过，固定配置 L1/L2 pass、L0 partial，L3 未运行，L4/L5 未通过 | 2026-10-10 |
-| [Qwen2-0.5B stock `swift rlhf --rlhf_type rm` CUDA 入口审计](2026-10-09-qwen2-reward-stock-cli-cuda.md) | randperm 修复后 sampler 索引及三步输入 SHA 与旧原生 oracle 对齐；L0 partial、L1 partial（缺 logits）、L2 blocked，L4 CLI 已运行但功能门槛未通过 | 2026-10-12 |
+| [Qwen2-0.5B stock `swift rlhf --rlhf_type rm` CUDA 入口审计](2026-10-09-qwen2-reward-stock-cli-cuda.md) | sampler 修复后输入身份对齐；同初态首批 CUDA logits L1 通过，L0 partial、L2 blocked、L3 未运行、L4 入口已运行但功能门槛未通过、L5 blocked | 2026-10-12 |
 | [Qwen2-0.5B RewardTrainer Python API CUDA 对拍](2026-10-09-qwen2-rewardtrainer-api-cuda.md) | 保留2026-10-09旧协议三步严格对拍；新协议 native 与 strict shim 新进程恢复均通过，同进程恢复仍因审计面轮次上限未结案，L3 partial | 2026-10-12 |
 | [Qwen2-0.5B stock `swift rlhf --rlhf_type simpo` 双卡 CUDA 对拍](2026-10-09-qwen2-simpo-2gpu-cli-cuda.md) | 固定六行重复 preference 数据下双卡三步输入/梯度及 step-3→4 新进程恢复轨迹对齐；strict shim 零 fallback，跨 runtime 状态哈希不同，同进程恢复与可区分样本游标未验；L0-L4 partial，L5 blocked | 2026-10-10 |
 | [Qwen2-0.5B stock `swift rlhf --rlhf_type simpo` CUDA 对拍](2026-10-09-qwen2-simpo-stock-cli-cuda.md) | 单样本三步输入、首步 logits、290 项全参数梯度和末态权重对齐且 strict CUDA/零 fallback；L0/L1/L2/L4 partial、L3 not-run、L5 blocked | 2026-10-09 |
