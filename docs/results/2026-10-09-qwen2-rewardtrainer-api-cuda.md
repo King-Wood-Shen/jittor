@@ -1,6 +1,6 @@
 # Qwen2-0.5B RewardTrainer Python API CUDA 对拍
 
-- 状态：固定初始化与六组预 tokenized preference 数据下，构造状态、三步前向、trainable head 梯度和更新通过数值对拍；L0 通过，L1/L2/L4 partial，L3 未运行，L5 blocked。该结果不代表公开 CLI、预训练 reward head 或整体 ms-swift reward modeling 兼容。
+- 状态：旧合同固定初始化与六组预 tokenized preference 数据下，构造状态、三步前向、trainable head 梯度和更新通过数值对拍；L0 通过，L1/L2/L4 partial，L5 blocked。2026-10-12 新合同新增原生与 strict shim 的新进程恢复通过证据，但同进程恢复未完成，故 L3 partial。该结果不代表公开 CLI、预训练 reward head 或整体 ms-swift reward modeling 兼容。
 - 日期：2026-10-09。
 - 基线：Jittor `2b30a5a2b68bb192918c56aef36d1f23e1ce0dd5`，上游 `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 范围：`swift.rlhf_trainers.RewardTrainer` Python API、Qwen2-0.5B sequence-classification backbone、新建单值 `score.weight`、只训练该 head、单张 RTX 4090、FP32/eager、三步 SGD。
@@ -34,4 +34,14 @@ GPU worker 上比较 18 项逐步张量：每步输入 IDs 与 mask 完全相同
 
 本次五键诊断序列的前四键是恢复审计 harness 缺陷，不是 Jittor 兼容失败：v1漏传模型目录，v2将 `cuda:0` 错判为非 CUDA，v3/v4依次错误拼接审计产物目录及使用不存在的 RewardTrainer 输入键。第五键的原生新进程轨迹完整通过；随后同进程段在自定义 optimizer 审计器读取 `optimizer.state[score.weight]['step']` 时遇到 KeyError，未完成同进程恢复判定，也未进入 strict-shim 侧。该训练恢复面按五轮上限停止；没有据此认定同进程兼容通过或失败，也没有修改源码。
 
-因此该新协议补验只建立了原生 oracle 和固定输入/收敛合同，没有 shim 恢复证据：L3 仍为 `not-run`，不提升上方旧结果等级；L0/L1/L2/L4/L5 状态仍按旧合同表格及其各自范围解释。原始脚本、五个运行键日志、checkpoint 与 JSON 证据保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-rewardtrainer-api-l3-recovery-v*/`，未版本化。
+该阶段只建立了原生 oracle 和固定输入/收敛合同；当时没有 shim 恢复证据。2026-10-12 补充如下，新协议下 L3 从未运行更新为 partial，不提升上方旧合同层级；L0/L1/L2/L4/L5 仍按旧合同表格及各自范围解释。v5 的同进程审计仍受五轮上限约束，不重跑该路径。
+
+## 2026-10-12 新进程恢复补验
+
+新运行键 `20261012-qwen2-rewardtrainer-api-l3-shim-v1` / Slurm job17250 在 `cscg-qh09` RTX 4090（UUID `GPU-75e00e55-1ddf-9e21-c891-6eb36e84eb9f`，driver `580.178.04`）只运行 strict shim 路径，没有重跑 job16173 原生 oracle。基线为 Jittor `e0a4140d54da8bf7396389ed07a6f426187ff184`、上游 `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`、ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`；模型 SHA 与前节一致。Python 3.11.15、g++ 11.5.0、Linux 6.1.188、nvcc 12.2.140、CUDA key `cu12.2.140_sm_89`。Jittor 记录环境中 CUDA runtime wheel 12.4.127 与所需 12.2.140 不同；本次明确使用系统 nvcc/runtime 12.2.140，该边界保留。
+
+首个 shim 进程训练到 global step 2 并产生完整 checkpoint；独立新进程载入该 checkpoint 并继续到 step 4。载入时 `model.safetensors` 的 291 项 state 与当前模型逐项精确相同；AdamW 的 `step=2`、`exp_avg`/`exp_avg_sq` 有限，scheduler `last_epoch=2`，Python/NumPy/Torch/CUDA RNG 指纹与保存时记录相同。恢复后的首个 batch 是固定顺序 row 4、5，下一批是 row 6、7；两步梯度均在 CUDA、有限且非零，`score.weight` 更新非空。四步 loss 为 `1.23318052, 0.08493219, 0.01081249, 0.00189325`，首两步均值 `0.65905636`、末两步均值 `0.00635287`。两进程严格 CUDA，均报告 `fallback_count=0`。
+
+新进程路径已在 native（job16173）与 strict shim（job17250）两侧建立；完整 L3 仍为 `partial`，因为 L3 合同还要求同进程恢复。native 同进程路径在 v5 的审计器读取 optimizer state 时遇到 `KeyError('step')`，该五键诊断面已按轮次上限停止，未判定同进程兼容通过或失败；本轮不重试它。L0/L1/L2/L4/L5 不因这次恢复证据改变。原始脚本、完整日志、checkpoint 与 JSON 证据保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-rewardtrainer-api-l3-shim-v1/`，未版本化。该作业复用了独立运行 JIT 缓存；job17247 的 `JITTOR_NO_BUILD=1` 检查在 2.7 秒完成，fallback 为 0 且 core 文件 SHA 前后相同。
+
+该报告提交前的 job17259 在同一工作树 `e0a4140d54da8bf7396389ed07a6f426187ff184` 通过 `bash tools/check_repo_layout.sh` 与 Torch-mode `tests/structure`；结果为 1384 passed、8 skipped、1019 subtests passed（184.18s）。复用了独立 CPU-only 结构缓存 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-ms-swift-skill-workflow-docgate-v1/jittor-home`：Python 3.11.15/SOABI、g++ 11.5.0、Linux 6.1.188 和三个源码树指纹完全相同，无活跃写者，`JITTOR_NO_BUILD=1` 检查通过，`jittor_core`/`jit_utils_core` 文件哈希前后不变。该 worker 无 nvcc，故这是 CPU 结构门禁证据，不声称 CUDA 结构测试通过。完整门禁日志和缓存指纹保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-rewardtrainer-resume-report-docgate-v1/`，未版本化。
