@@ -110,7 +110,7 @@
 | [TinyLlama 1.1B Chat 公开 `swift infer` CUDA 对拍](2026-10-11-tinyllama-public-infer-l01.md) | 固定两条请求的 L0/L1/L4/L5 通过；记录 RoPE buffer 梯度标志差异；L2/L3 不适用 | 2026-10-11 |
 | [Qwen2-0.5B 序列分类公开 SFT 固定窗口收敛 CUDA 复验](2026-10-11-qwen2-seqcls-convergence-cuda.md) | 固定单卡 profile 的 L0–L5 通过；保留 RoPE buffer 标志与 `initial_lr` 字段差异；另记录 10 步稳态性能和显存口径 | 2026-10-11 |
 | [Qwen2-0.5B 序列分类 Python 推理 API CUDA 对拍](2026-10-08-qwen2-seqcls-python-api-cuda.md) | 固定 batch 的 state_dict、输入、logits 与输出通过；Python API L4 端到端及 10 次稳态 L5 完成，其他模型/任务未覆盖 | 2026-10-08 |
-| [Qwen2 序列分类公开 SFT 双卡 NCCL CUDA 对拍](2026-10-08-qwen2-seqcls-ddp-nccl-cuda.md) | 保留旧协议三步逐值结果；均衡标签 profile 的 backward 故障仍在；另一固定数据双卡 profile 按新收敛协议通过 L0–L2/L4，L3/L5 not-run | 2026-10-11 |
+| [Qwen2 序列分类公开 SFT 双卡 NCCL CUDA 对拍](2026-10-08-qwen2-seqcls-ddp-nccl-cuda.md) | 保留旧协议三步逐值结果与均衡标签 backward 故障；固定数据双卡 profile 按新协议通过 L0–L4（含同/新进程 L3 恢复），L5 not-run | 2026-10-11 |
 | [Qwen2-0.5B 全参数 SFT 首批前向对拍](2026-10-08-qwen2-causal-sft-forward-c23a.md) | 固定 batch 的 logits/hidden/loss 对拍通过数值门槛；完整层级仍受限，诊断钩子在 backward 触发内部断言 | 2026-10-08 |
 | [Qwen2-0.5B PEFT LoRA 公开 SFT：同状态三步对拍](2026-10-08-qwen2-peftlora-sft-init.md) | 历史严格逐值 L0-L2 结论保留；新收敛协议复验在 strict shim 第 5 步触发 NanoVector slice overflow、L2 未通过；L3 partial，L5 blocked | 2026-10-10 |
 | [Qwen2-0.5B PEFT LoRA：AdamW 三步公开 SFT 对拍](2026-10-08-qwen2-peftlora-adamw.md) | 历史严格逐值结论保留；新协议固定配置 L0-L4 通过；L5 原生完成 10 个稳态测量，strict shim 第 3 步同步触发 slice overflow，blocked | 2026-10-10 |
