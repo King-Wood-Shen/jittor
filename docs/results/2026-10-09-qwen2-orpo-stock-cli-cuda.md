@@ -1,8 +1,8 @@
 # Qwen2-0.5B stock `swift rlhf --rlhf_type orpo` CUDA 输入身份审计
 
-- 状态：两条样本的三步公开 ORPO CLI 测试在 step 3 出现批次顺序反转；新单固定样本、12 步全参数收敛 profile 的 L0–L2 与 L4 通过，L3 not-run、L5 blocked。多样本 sampler 次序问题仍未解决，不能将 ORPO 或整个 ms-swift 标为整体通过。
-- 日期：2026-10-10 复核。
-- 基线：Jittor `6bd0cf9bc15d29c17f6b18b929b55dfb4d4ea2fc`（上游 `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
+- 状态：两条样本的三步公开 ORPO CLI 测试在 step 3 出现批次顺序反转。单固定样本12步 profile 的 L0–L4 通过（L3 恢复于2026-10-11补验），L5 not-run；多样本 sampler 次序问题仍未解决，不能将 ORPO 或整个 ms-swift 标为整体通过。
+- 日期：2026-10-11 复核。
+- 基线：恢复补验使用 Jittor `049bcc8548a63dfad654a605564e6f1949a1bbda`（上游 `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。原12步训练证据仍绑定其报告中记录的历史基线。
 - 范围：Qwen2-0.5B causal LM，全参数 FP32/eager，公开单卡 `swift rlhf --rlhf_type orpo`，两条 preference 样本、batch 2、SGD、三步。
 - 维护者：ms-swift CUDA 适配。
 - 复查条件：ORPO trainer 接入尊重 `train_dataloader_shuffle` 的数据加载路径后，使用多条固定数据重新完成输入、前向、梯度、状态与恢复对拍；ms-swift trainer MRO 或 Torch shim sampler/random generator 变化时复查。
@@ -41,22 +41,34 @@ GPU-worker 只读 artifact audit 新键 `20261010-qwen2-orpo-fixedbatch-converge
 | L0 | pass | 公开 CLI 构造同一真实模型、数据、ORPO trainer 与 SGD optimizer；290 个初始参数名称、shape、dtype、trainable 与 CUDA 状态一致。 |
 | L1 | pass | 12 步同输入；首步 forward 结构、dtype、有限值及可反向 loss 合法。跨 runtime 数值差只作诊断。 |
 | L2 | pass | 两侧各自 12 步 loss 窗口下降；逐步 290 参数梯度完整、有限、非零，真实更新非空，optimizer/scheduler/checkpoint 结构有效。 |
-| L3 | not-run | 未测同/新进程恢复、RNG 与 dataloader 游标续训。 |
+| L3 | pass（固定单行数据的恢复延伸） | 2026-10-11 补验同 Trainer 实例与新 CLI 进程恢复；完整状态、固定行游标、继续更新与 loss 窗口见下节。多行 sampler 顺序仍未覆盖。 |
 | L4 | pass | 两侧真正通过公开 `swift rlhf --rlhf_type orpo` CLI 并保存 checkpoint；仅此固定单样本配置。 |
-| L5 | blocked | 前级完整性能协议未运行；训练时间含 JIT，不作性能结论。 |
+| L5 | not-run | 未执行预热后稳态性能与显存协议；训练时间含 JIT，不作性能结论。 |
 
 该新 profile 不改变前述多样本 sampler 限制，也不覆盖其他 ORPO 数据、并行模式或 ms-swift 其他功能面。job15418 的 `/usr/bin/time` 缺失、job15427 的 marker 路径问题和 job15431 的比较器分组假设均为 harness 失败，已保留原日志；最终结论仅基于原生 15427 与严格 shim 15431 的现有产物及成功的只读审计 15441。
 
+### 单固定样本：L3 checkpoint 恢复补验
+
+恢复验证在当前 Jittor HEAD `049bcc8548a63dfad654a605564e6f1949a1bbda` 上完成，ms-swift checkout 为 `88d727951203256baa564c643c651b6f8d90fd7e`。只读输入是 Slurm job15427 的原生 PyTorch checkpoint-12 和 job15431 的 strict-shim checkpoint-12；未重跑或修改这两个旧训练。冻结运行键 `20261011-qwen2-orpo-fixedbatch-l3-restore-v16` / job16941 在 cscg-qh04 的 RTX 4090（GPU UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4`）上依次执行原生 oracle 和 strict shim；只读审计键 `20261011-qwen2-orpo-fixedbatch-l3-restore-audit-v2` / job16946 校验已完成产物。模型为 Qwen2-0.5B，单卡、FP32/eager、单固定偏好行、全参数 SGD，seed/data_seed 1234。原生与候选逐步 `input_ids`、`attention_mask`、`labels` 的身份 SHA 均为 `71157c71cea191871b2e56fb8b08e8f67e2bc911a00b47b691ee7a951536aed8`。
+
+两侧均完成两条恢复路径：同一个公开 CLI Trainer 从 checkpoint-12 继续到 step14，在同一 Trainer 对象载入新写出的 checkpoint-14 并继续到 step16；新进程路径由 CLI A 从 checkpoint-12 写到 step14，再由全新 CLI B 恢复 checkpoint-14 并到 step16。每次恢复时 290 个模型权重逐值匹配该 checkpoint，`lm_head.weight` 与 embedding 的 tied alias 共享 CUDA storage；optimizer 参数组（169/121）、optimizer state、scheduler、Python/NumPy/Torch CPU/CUDA RNG 均与各自保存状态精确相符。恢复段 global_step/epoch 正确推进。checkpoint-14 和 checkpoint-16 均确认含非空 `model.safetensors`、`optimizer.pt`、`scheduler.pt`、`rng_state.pth`、`trainer_state.json`，其中 TrainerState global_step 分别为14和16；checkpoint-14 还被后续同进程或新进程实际重新加载。
+
+steps 13–16 每一步的 290 个 trainable 参数梯度都在 CUDA 上、有限且非零，并执行了非空 SGD 参数更新。两侧各自 steps15–16 平均 loss 都低于 steps13–14：native `3.91392481 → 3.90198851`，strict shim `3.91392910 → 3.90199387`（同进程）；strict shim 新进程为 `3.91392684 → 3.90199125`。四条轨迹都重复同一固定行，因此 cursor 检查覆盖 global_step/epoch 恢复和单行数据续取；它不覆盖多行 sampler 的非平凡顺序。strict shim 的 worker 与公开 CLI 子进程均记录 `use_cuda=1`、fallback delta=0。跨 runtime 的逐步 loss 差最大约 `1.22e-5`，只作诊断。
+
+job16941 在三个轨迹都已训练并保存后，于 worker 内比较器因把原生文件名错误拼成 `native/native-same.jsonl` 而以 exit 1 结束；没有发现 CUDA 或恢复断言失败。job16946 修正路径分组后只读审计四条轨迹成功。两次日志、逐步梯度与更新摘要、checkpoint manifest 和比较 JSON 均未版本化，保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-orpo-fixedbatch-l3-restore-v16/` 与 `20261011-qwen2-orpo-fixedbatch-l3-restore-audit-v2/`。本节仅补齐固定单行 profile 的 L3；多行 sampler 问题仍未解决，L5 稳态性能未运行。
+
 新结论文档门禁 run key `20261010-qwen2-orpo-fixedbatch-convergence-docgate-v1` / Slurm 15445 在 cscg-qh04 完成：布局检查成功；Torch-mode `tests/structure` 为 1384 passed、8 skipped、1019 subtests passed。worker 未配置 nvcc，该门禁只验证仓库布局和结构契约，不构成 CUDA 兼容性证据。
+
+本次 L3 报告更新的门禁 run key `20261011-qwen2-orpo-l3-report-docgate-v3` / Slurm 16952 在 cscg-qh04 完成：`tools/check_repo_layout.sh` 通过，文档治理检查238个活动 Markdown；Torch-mode `tests/structure` 为1384 passed、8 skipped、1019 subtests passed（235.05秒）。复用已验证的结构专用持久 `JITTOR_HOME` 原绝对路径；Python/SOABI、g++ 11.5、Linux 6.1.188 主版本、source tree SHA、CPU arch/config一致，nvcc缺失且明确走CPU结构路径。`JITTOR_NO_BUILD=1` bootstrap检查1.7秒通过，门禁前后 `jittor_core` / `jit_utils_core` SHA相同，日志无core冷编译。v1/v2在工具链指纹的过严字符串断言处退出，未运行测试；日志保留在state，不影响v3结果。该门禁不是CUDA计算证据。
 
 | 层 | 状态 | 证据与缺口 |
 |---|---|---|
 | L0 | pass（单固定样本12步 profile）；partial（多样本轨迹） | 固定样本公开 CLI 的模型、trainer、optimizer 与 290 参数 CUDA 初态通过；两样本运行第 3 步批次顺序不同。 |
 | L1 | pass（单固定样本12步 profile）；partial（多样本轨迹） | 固定样本 12 步同输入、有效 forward 结构与有限 loss；多样本 sampler 顺序未对齐。 |
 | L2 | pass（单固定样本12步 profile）；partial（多样本轨迹） | 12 步梯度、更新、loss 趋势、optimizer/scheduler/checkpoint 结构通过；多样本第 3 步输入身份不同。 |
-| L3 | not-run | 未测试同进程/新进程恢复、optimizer/scheduler/RNG/dataloader 游标和续训轨迹。 |
+| L3 | pass（单固定样本恢复延伸）；not-run（多样本轨迹） | 固定单行 profile 的同/新进程、model/optimizer/scheduler/RNG、step/epoch、后续输入、更新和 loss 窗口通过；多样本 sampler cursor 次序没有恢复测试。 |
 | L4 | pass（单固定样本12步 profile）；partial（多样本轨迹） | 单固定样本 profile 的公开 CLI 端到端通过；多样本 sampler 次序问题仍在。 |
-| L5 | blocked | 前级未通过；shim 耗时含冷 JIT，未做预热后至少 10 次稳态性能及显存协议。 |
+| L5 | not-run | 固定单样本恢复后仍未执行预热及至少 10 次稳态性能/显存协议；多样本场景也未通过前级。 |
 
 原始脚本、模型/数据摘要、NPZ、逐步梯度、checkpoint 和日志未版本化，分别保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261009-qwen2-orpo-stock-cli-v1/`、`20261009-qwen2-orpo-fixedbatch-cli-v2/` 和 `20261009-qwen2-orpo-input-diagnose-v1/`。本报告仅适用于上述单卡 ORPO 配置，不代表其他偏好算法或整个 ms-swift。
 
