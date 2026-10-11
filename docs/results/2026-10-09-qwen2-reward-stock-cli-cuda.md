@@ -1,11 +1,11 @@
 # Qwen2-0.5B stock Reward Model CLI CUDA 入口审计
 
-- 状态：原生与 strict shim 均完成公开 `swift rlhf --rlhf_type rm` 三步 CLI。2026-10-12 新 shim 复验的三批 sampler 索引与逐批输入哈希和既有原生 oracle 一致，确认先前顺序分叉在当前 compat 基线已消失；job17482 的 Slurm 终态因训练后格式断言失败，不能将整个运行键标为自动门禁通过。新单步键 job17601 对齐首批输入并通过同权重 CUDA reward logits 前向，故 L1 首批证据通过；L0 仍 partial、L2 blocked（缺全量参数梯度/更新与收敛窗口）、L3 not-run。L4 公开入口已运行并保存 step-3 checkpoint，但功能层仍未通过；L5 blocked。不代表 RewardTrainer 或 ms-swift 整体兼容。
+- 状态：原生与 strict shim 均完成公开 `swift rlhf --rlhf_type rm` 训练。2026-10-12 新 shim 复验的三批 sampler 索引与逐批输入哈希和既有原生 oracle 一致，确认先前顺序分叉在当前 compat 基线已消失；job17482 的 Slurm 终态因训练后格式断言失败，不能将整个运行键标为自动门禁通过。job17601 对齐首批输入并通过同权重 CUDA reward logits 前向，L1 首批证据通过；job17714 两侧六步公开 CLI 的全参数梯度、更新、收敛窗口与 checkpoint 审计通过，L2 通过。L0 仍 partial、L3 not-run。L4 入口已运行并保存 step-6 checkpoint，但功能合同尚未完成；L5 blocked。不代表 RewardTrainer 或 ms-swift 整体兼容。
 - 日期：2026-10-09；当前基线补验：2026-10-11、2026-10-12。
-- 基线：历史严格对拍 Jittor `dfde300e618dffcf38965b08777cae67c641476c`；2026-10-11 追踪运行 Jittor `487935592dd6b42cc9cde4212c7713906beee819`；2026-10-12 sampler 修复代码提交 `5f70e7b3321abe2e131a9bb0557b27cf041b037a`；验证时 Jittor HEAD `84ba71788b1bfeae461bd1d13e631ba6d1166c27`（文档提交后代；上游 `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
-- 范围：Qwen2-0.5B `Qwen2ForSequenceClassification`、公开单卡 `swift rlhf --rlhf_type rm`、全参数 FP32/eager、SGD、六组固定 preference 数据、batch 2、三步。
+- 基线：历史严格对拍 Jittor `dfde300e618dffcf38965b08777cae67c641476c`；2026-10-11 追踪运行 Jittor `487935592dd6b42cc9cde4212c7713906beee819`；2026-10-12 sampler 修复代码提交 `5f70e7b3321abe2e131a9bb0557b27cf041b037a`；本轮 L2 验证 Jittor `3c6ac47f5a69aa0685dc5ea4615f9edd442f6247`（upstream `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
+- 范围：Qwen2-0.5B `Qwen2ForSequenceClassification`、公开单卡 `swift rlhf --rlhf_type rm`、全参数 FP32/eager、SGD、六行固定 preference 数据、batch 2；输入追踪和首批 L1 使用三步轨迹，新 L2 使用六步并固定 step1–2/5–6 loss 窗口。
 - 维护者：ms-swift CUDA 适配。
-- 复查条件：补齐两侧逐 trainable 梯度/真实更新和预先固定窗口 loss 证据，再评估恢复和性能层；若 sampler 实现改变，重新核对批次身份。
+- 复查条件：L0 仍需两侧逐参数初态 dtype/device 清单；随后评估同进程/新进程恢复和性能层。若 sampler 实现改变，重新核对批次身份。
 
 初始模型由原生 PyTorch 从固定 Qwen2 checkpoint 构造，确定性初始化 `score.weight` 后保存；同一 safetensors 被原生与候选 CLI 读取，SHA256 为 `415ca5ddc706cea55ef2a66850061291272c744bd5e1acdca6eeddc8d4035a1b`。底模文件 SHA256 为 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`。六条 preference JSONL SHA256 为 `dc072b5ee211afbb4c6e8f1a1f5689d7f4e5a98f4f79c86b70d4d39a4608eee4`。ms-swift 为 Python 3.11.15、PyTorch 2.6.0+cu124、Transformers 4.57.6。
 
@@ -17,9 +17,9 @@ Slurm 13784 在 `cscg-qh17` RTX 4090（UUID `GPU-2fd350e6-8fcd-9385-4e5e-4640583
 |---|---|---|
 | L0 | partial | 同一确定性初始 safetensors 和 291 个末态键；shim 日志显示全参数 Qwen2ForSequenceClassification、`device_map=cuda:0`，审计到的批输入为 CUDA。2026-10-12 输入身份补验通过；仍缺两侧逐参数初态 dtype/device 清单。 |
 | L1 | pass（首批） | job17601 在同一 RTX 4090 上先 native、后 strict shim，各跑公开 CLI 一步；首批 `input_ids`/`attention_mask` 的 shape、dtype、CUDA device 与 SHA 全等，也与旧 native 输入 oracle 和 sampler 修复后 shim 输入记录首批 SHA 一致。score logits shape `[4,1]`、CUDA `float32`、finite；`max_abs=3.8147e-6`、`max_rel=8.8035e-5`，满足预设 `atol=1e-5, rtol=1e-4`。该结论限定于此首批前向。 |
-| L2 | blocked | 两侧已有三步训练日志，但没有全部 trainable 参数逐项梯度、optimizer 状态或逐步更新证据，也没有按新协议预先固定的初末 loss 窗口。旧输入顺序问题已消失；数值逐值对拍本身不再是门槛。 |
+| L2 | pass（固定六步 CLI 配置） | job17714 两侧每步覆盖291个可训练参数的 CUDA 梯度与更新；step1–2和5–6预锁窗口各自下降；step-6模型、optimizer checkpoint及序列化公共状态审计通过。 |
 | L3 | not-run | 没有同进程或新进程恢复轨迹。 |
-| L4 | 入口已运行，功能未通过 | 原生 job16186 与 2026-10-12 strict shim CLI 均完成三步并保存 checkpoint；新 shim 端 strict CUDA 父子进程均 `fallback=0`。该 shim 作业的最终 Slurm 失败来自训练后的日志断言格式错误；本次仍缺满足下层门槛的完整验收证据。 |
+| L4 | 入口已运行，功能未通过 | 原生 job16186 与 strict shim CLI 已完成三步；job17714 又分别完成六步并保存 step-6 checkpoint，父子进程 strict CUDA 且 `fallback=0`。L0 仍 partial、L3 未运行，故公开入口的完整功能合同尚未通过。 |
 | L5 | blocked | 前级不通过；训练墙钟含冷 JIT，不作为性能结果。 |
 
 ## 2026-10-11 当前基线采样顺序追踪
@@ -49,4 +49,14 @@ GPU-worker 只读工件审计 v3/job17523 记录 native 与 shim 的 loader 索�
 
 job17601 在 `cscg-qh04` NVIDIA RTX 4090（UUID `GPU-3c43713b-3ee9-956f-d6cd-95e55d2cdfea`，driver `580.178.04`）按 native 后 strict shim 顺序，各执行公开 `swift rlhf --rlhf_type rm` 一步。两侧加载相同底模 SHA256 `9cd8fc8c…77cad` 与初始 safetensors SHA256 `415ca5dd…35a1b`，使用相同六行数据 SHA256 `dc072b5e…08eee4`、seed/data_seed 42、FP32/eager、batch 2/max length 32。采集器只将原有 `RewardTrainer.compute_loss` 调用改为 `return_outputs=True` 以记录其已计算的 chosen/rejected scores，随后按原调用约定只返回 loss；模型公式、输入和训练路径不变。双方首批 `input_ids` SHA256 `2a140ca4…361b87` 与 `attention_mask` SHA256 `c8b517ed…b7f6f8` 相同，且逐项匹配旧 native job16186 与 sampler 修复后 strict-shim job17482 的首批记录；输入 shape 均为 `[4,32]`、dtype `int64`、设备 `cuda:0`。
 
-两侧模型 score logits 都是 `[4,1]`、CUDA `float32` 且 finite。Native 值为 `[-1.51895797, -0.02369708, -1.70691741, -0.08534986]`，strict shim 值为 `[-1.51895499, -0.02369499, -1.70691359, -0.08534890]`；`max_abs=3.8146973e-6`，以 `max(|native|,|shim|)` 为分母的 `max_rel=8.8034590e-5`。所有元素满足 `abs(diff) <= 1e-5 + 1e-4*abs(native)`。Strict-shim 两进程均 `use_cuda=1`、fallback delta=0；`jittor_core` SHA 前后完全相同。两端均完成 Trainer 单步且未写 checkpoint；此单次前向不构成 L2 收敛/全梯度验收，也不改变 L0/L2/L3/L4/L5 边界。原始结果、完整值与采集脚本未版本化，保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-reward-stock-cli-l1-logits-v1/`、`...-v2/`；v1 保留为前向前的 harness 失败证据。
+两侧模型 score logits 都是 `[4,1]`、CUDA `float32` 且 finite。Native 值为 `[-1.51895797, -0.02369708, -1.70691741, -0.08534986]`，strict shim 值为 `[-1.51895499, -0.02369499, -1.70691359, -0.08534890]`；`max_abs=3.8146973e-6`，以 `max(|native|,|shim|)` 为分母的 `max_rel=8.8034590e-5`。所有元素满足 `abs(diff) <= 1e-5 + 1e-4*abs(native)`。Strict-shim 两进程均 `use_cuda=1`、fallback delta=0；`jittor_core` SHA 前后完全相同。两端均完成 Trainer 单步且未写 checkpoint；该单次前向不构成 L2 收敛/全梯度验收，后续 job17714 的独立六步训练和审计才通过 L2，不改变 L0/L3/L4/L5 边界。原始结果、完整值与采集脚本未版本化，保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-reward-stock-cli-l1-logits-v1/`、`...-v2/`；v1 保留为前向前的 harness 失败证据。
+
+## 2026-10-12 Reward CLI 全参数 L2 与收敛窗口
+
+新运行键 `20261012-qwen2-reward-stock-cli-l2-fullgrad-v1` / job17714 使用相同公开 RM CLI、Qwen2-0.5B 初始 safetensors、六行 preference 数据、FP32/eager、batch 2、SGD `lr=1e-5`、seed/data_seed 42，运行六步。收敛口径在作业前固定为 step 1–2 对 step 5–6 的平均 loss。Native 先运行，strict shim 后运行；外部插件只记录 `RewardTrainer.compute_loss` 收到的输入身份，并在 Transformers `on_pre_optimizer_step`/`on_step_end` 回调汇总梯度和参数差，不改 loss、数据或 optimizer 调用。原始逐参数记录、日志与 checkpoint 留在 state，未版本化。
+
+两侧每步都有291个可训练参数；必需梯度均存在、位于 CUDA、有限且非零，逐步摘要覆盖全部参数。逐步更新均有限且非空，变化的参数张量数依次为 native/shim 各自的 `290, 290, 291, 291, 290, 289`。六步 `input_ids` 与 `attention_mask` 的 shape、dtype、device 和 SHA256 逐步一致。Native loss step1–6 为 `0.63318646, 0.61140025, 0.57950896, 0.45711076, 0.53535688, 0.55675769`；strict shim 为 `0.63318640, 0.61140001, 0.57950920, 0.45711112, 0.53535432, 0.55675828`。预锁 step1–2 均值分别为 `0.62229335` / `0.62229320`，step5–6 均值分别为 `0.54605728` / `0.54605630`；两个 runtime 各自窗口均下降。
+
+step-6 checkpoint 的291个模型键均有限且相对初始模型均发生改变；每份权重共494,033,664个标量，native/shim 分别改变493,481,997/493,481,987个，最大绝对差分量均为 `2.5737472e-4`。两份 checkpoint 均有模型、optimizer、scheduler 与 `trainer_state` 文件，`global_step=6`。只读审计 job17756 使用 PyTorch `weights_only=True` 读取原生 optimizer，使用拒绝所有全局对象的受限 pickle reader 读取 strict-shim 便携状态；两边公共 state dict 完全相等，state 为空（SGD momentum=0 的预期），两组参数覆盖数为170/121，`lr=1e-5`、weight decay 为0.1/0.0且选项一致。optimizer 文件字节数不同（1768/894）对应不同序列化格式，不表示状态差异。
+
+job17714 的最终 Slurm exit 1 来自训练后的首版比较器错误假设 optimizer 只有一个参数组；训练本身两侧均完成六步并保存 checkpoint。修正为检查两组公开参数选项后，独立 artifact audit job17739 通过全部 L2 检查，optimizer checkpoint 又由 job17756 通过。GPU worker 为 `cscg-qh04` RTX 4090（UUID `GPU-3c43713b-3ee9-956f-d6cd-95e55d2cdfea`，driver `580.178.04`）；strict-shim 父子进程 `use_cuda=1`、fallback delta=0。复用匹配的 CUDA JIT 缓存，`JITTOR_NO_BUILD=1` bootstrap 在2.9秒通过，`jittor_core` SHA256 前后均为 `caf12a34ff55c770651ef2b95c9f1ceda48599496bec59aeae8e36c6f994dbd5`。此结论仅验收当前固定 Reward RM CLI 的 L2 配置，不提升 L0/L3/L4/L5，也不代表更广 Reward 或 ms-swift 支持。
