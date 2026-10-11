@@ -1,6 +1,6 @@
 # Qwen2-0.5B stock `swift rlhf --rlhf_type orpo` CUDA 输入身份审计
 
-- 状态：两条样本的三步公开 ORPO CLI 测试在 step 3 出现批次顺序反转。单固定样本12步 profile 的 L0–L4 通过（L3 恢复于2026-10-11补验），L5 not-run；多样本 sampler 次序问题仍未解决，不能将 ORPO 或整个 ms-swift 标为整体通过。
+- 状态：两条样本的三步公开 ORPO CLI 测试在 step 3 出现批次顺序反转。单固定样本12步 profile 的 L0–L4 通过（L3 恢复于2026-10-11补验）；原生 L5 完成十次稳态测量，strict shim 的测量轨迹在 step 16 backward 失败，故 L5 未通过。多样本 sampler 次序问题仍未解决，不能将 ORPO 或整个 ms-swift 标为整体通过。
 - 日期：2026-10-11 复核。
 - 基线：恢复补验使用 Jittor `049bcc8548a63dfad654a605564e6f1949a1bbda`（上游 `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。原12步训练证据仍绑定其报告中记录的历史基线。
 - 范围：Qwen2-0.5B causal LM，全参数 FP32/eager，公开单卡 `swift rlhf --rlhf_type orpo`，两条 preference 样本、batch 2、SGD、三步。
@@ -43,9 +43,15 @@ GPU-worker 只读 artifact audit 新键 `20261010-qwen2-orpo-fixedbatch-converge
 | L2 | pass | 两侧各自 12 步 loss 窗口下降；逐步 290 参数梯度完整、有限、非零，真实更新非空，optimizer/scheduler/checkpoint 结构有效。 |
 | L3 | pass（固定单行数据的恢复延伸） | 2026-10-11 补验同 Trainer 实例与新 CLI 进程恢复；完整状态、固定行游标、继续更新与 loss 窗口见下节。多行 sampler 顺序仍未覆盖。 |
 | L4 | pass | 两侧真正通过公开 `swift rlhf --rlhf_type orpo` CLI 并保存 checkpoint；仅此固定单样本配置。 |
-| L5 | not-run | 未执行预热后稳态性能与显存协议；训练时间含 JIT，不作性能结论。 |
+| L5 | blocked（strict shim 测量轨迹 step 16 失败） | 原生十次稳态测量完成；strict shim 在要求的测量 hook 下触发 `NanoVector` slice overflow，没有候选性能结论。诊断边界与运行键见下节。 |
 
 该新 profile 不改变前述多样本 sampler 限制，也不覆盖其他 ORPO 数据、并行模式或 ms-swift 其他功能面。job15418 的 `/usr/bin/time` 缺失、job15427 的 marker 路径问题和 job15431 的比较器分组假设均为 harness 失败，已保留原日志；最终结论仅基于原生 15427 与严格 shim 15431 的现有产物及成功的只读审计 15441。
+
+### 单固定样本：L5 稳态测量（2026-10-11）
+
+L5 新键 `20261011-qwen2-orpo-fixedbatch-l5-steady-v4` / Slurm job16970 绑定 Jittor HEAD `dd7e091d4242affbb2d2b53573a2382a1f3a16ad`、ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`，在 cscg-qh04 RTX 4090（GPU UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4`）执行。原生公开 CLI 从 checkpoint-12 训练至 step24，step13–14 预热，step15–24 同步计时十步：median `0.08785684 s`、P95 `0.08876179 s`、`11.35135` preference pairs/s、`658.37828` tokens/s；PyTorch allocator 峰值 allocated/reserved 为 `5,956,803,584 / 6,215,958,528` bytes。该 allocator 统计不能与 Jittor 内存池数值直接互换。原生记录 SHA256=`5c6b2081480a014de8796245af3021805eef9c3d592124c986b2041bb4ce28a3`。
+
+同一 job 的 strict shim 恢复与公开 CLI 参数相同，父/子进程均为 CUDA、fallback delta=0，完成 step13–15；step16 backward 在 `autograd_api.py::_backward → jt.core.grad_optional` 触发 `nano_vector.h:41 slice overflow`，没有 shim 稳态 JSON 或 L5 结论。最多五轮的最小化诊断保留如下：16971 去除外部测量插件后从 checkpoint-12 连续完成至 step16 并保存 checkpoint-16；16973 的同步探针因自身错误访问 Accelerate optimizer wrapper 的 `state.global_step`、在首个更新后退出，不作兼容证据；16974 只在每步前和 SGD 后同步、无张量审计仍在 step16 复现 overflow；16975 只保留步前 `torch.cuda.synchronize()` 可完成至 step16；16976 只保留优化器后的 `torch.cuda.synchronize()` 也可完成至 step16。结果将失败边界缩小到双侧同步/观测组合在该连续轨迹中的交互，尚未定位其更深层 C++ 根因；不据此断言普通未插桩训练失败。达到本轮故障诊断上限后停止该 L5 重试，保留 strict L5 为未通过。日志、脚本、清单和产物均未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-orpo-fixedbatch-l5-steady-v4/` 与相应 `l5-uninstrumented-v1`、`l5-sync-only-probe-v1/v2`、`l5-presync-only-probe-v1`、`l5-postsync-only-probe-v1` 目录。
 
 ### 单固定样本：L3 checkpoint 恢复补验
 
