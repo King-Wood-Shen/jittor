@@ -1,11 +1,11 @@
 # Qwen2 序列分类公开 SFT 双卡 NCCL CUDA 对拍
 
-- 状态：保留旧协议下固定配置的三步逐值结论。2026-10-11 的均衡标签双卡 profile 在第六步 backward 触发 Jittor slice overflow；另一组八行固定数据的当前基线双卡 profile 按新协议完成 L0–L4，L5 not-run。各结论仅适用于对应配置，不代表所有分类/embedding/reranker/reward 模型或整个 ms-swift。
+- 状态：保留旧协议下固定配置的三步逐值结论。2026-10-11 的均衡标签双卡 profile 在第六步 backward 触发 Jittor slice overflow；另一组八行固定数据的当前基线双卡 profile 按新协议完成 L0–L5。各结论仅适用于对应配置，不代表所有分类/embedding/reranker/reward 模型或整个 ms-swift。
 - 日期：2026-10-08。
 - 基线：Jittor `d2ea2dde9635ff7a5f4e9a5b7ecde86667a51546`；本轮最终重新 fetch 的 `origin/2.0-refactor` SHA 为 `7a18abf295668d9b19da5fa1657f5606e84b65a0`；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。开工时 HTTPS fetch 与 SSH `ls-remote` 曾分别遇到连接关闭和公钥认证失败，结束前 HTTPS fetch 成功并确认上游 SHA 与缓存相同。
 - 范围：公开 `python -m swift.cli.main sft --task_type seq_cls`，Qwen2-0.5B `Qwen2ForSequenceClassification`，双 RTX 4090、FP32/eager、全参数 SGD、固定 8 行数据、每卡 batch 2、三步，NCCL 2.21.5。
 - 维护者：ms-swift CUDA 适配。
-- 复查条件：为此固定 profile 补稳态双卡性能协议后再评 L5；扩展到其他分类数据、精度、优化器或 tuner 时须另行验收。
+- 复查条件：本报告的 L0–L5 仅适用于所列固定 profile；扩展到其他分类数据、精度、优化器或 tuner 时须另行验收。
 
 Slurm 13122 先运行原生 PyTorch oracle；三步公开训练、checkpoint、rank 0/1 每步输入/输出及 291 个全参数梯度均已保留。随后 Slurm 13123 运行 strict shim，先串行预热 Jittor/NCCL，再以公开 CLI 完成三步训练。两作业均在 `cscg-qh04`，GPU UUID 为 `GPU-3c43713b-3ee9-956f-d6cd-95e55d2cdfea` 与 `GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4`。双 rank 的 `RANK/WORLD_SIZE/LOCAL_RANK` 与 Jittor rank 变量一致，NCCL world size 为 2；候选每个 rank 导入/结束均 `use_cuda=1`、fallback `0`。初始 291 个参数名称、shape、dtype、值哈希相同，全部 trainable 且在 CUDA。基础 checkpoint SHA256 为 `5a7b969434ab0ab56d79153fc7ab344a3911b301f8f0b7b847a46c71de2abc7b`，数据 SHA256 为 `6b4c59a4db1d485ed940882326a83d31c26273c9e193a1e81d35dda6d5bd945c`。
 
@@ -65,6 +65,22 @@ Slurm 13121 是启动脚本指向缺失 NCCL 目录的 harness 错误，模型�
 
 两个恢复场景均通过。每 rank 在 step 4 checkpoint 中保存的 291 项模型 state 恢复后逐值相同且位于 CUDA FP32；optimizer 与 scheduler 恢复状态分别匹配该 checkpoint 保存前的完整状态摘要。Python、NumPy、Torch CPU 与 CUDA RNG 的 setter 输入摘要均与 step 4 保存值相同；本轮修正了 v3 观测器漏钩 `set_rng_state_all` 的问题。连续 oracle 与恢复运行的 step 5–8 输入张量逐项相同，证明此固定非 shuffle 数据配置的后续 batch 游标正确。每步均采集 291 项有限梯度和真实 optimizer 更新，global step 从 4 续到 8；按两 rank 等批次均值计算，native 的 step 5–6 到 7–8 loss 窗口均值为 `3.928749380 → 3.921428612`，shim 同进程为 `3.928752124 → 3.921426773`，shim 新进程为 `3.928752601 → 3.921425819`，恢复后各自继续下降。Skill 新协议不要求 native 与 shim 的状态或逐步数值跨运行时相等；这里的通过判据是各自 checkpoint 状态正确恢复、后续批次正确、梯度更新有效、loss 窗口下降及 strict CUDA/零 fallback。
 
-L3 完成后，此固定 profile 的 L0–L4 均通过，L5 仍未运行；其他数据顺序、模型、tuner、精度和训练策略仍为 `not-run` 或沿用各自独立失败记录。此前 L3 harness 运行键 v1/job16284、v2/job16318、v3/job16347 的错误和证据均保留在各自 state；其失败均不作为兼容性失败结论。v1 是 argv hook 安装错误，v2 是 checkpoint 文件散列时序竞争，v3 是 CUDA RNG setter 观测不完整；v4 才完成两种恢复场景。原始日志、checkpoint、事件与比较 JSON 未版本化，保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-seqcls-ddp-resume-l3-v4/`。
+L3 完成后，此固定 profile 的 L0–L5 均通过；其他数据顺序、模型、tuner、精度和训练策略仍为 `not-run` 或沿用各自独立失败记录。此前 L3 harness 运行键 v1/job16284、v2/job16318、v3/job16347 的错误和证据均保留在各自 state；其失败均不作为兼容性失败结论。v1 是 argv hook 安装错误，v2 是 checkpoint 文件散列时序竞争，v3 是 CUDA RNG setter 观测不完整；v4 才完成两种恢复场景。原始日志、checkpoint、事件与比较 JSON 未版本化，保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-seqcls-ddp-resume-l3-v4/`。
+
+
+### 当前固定数据 profile：双卡 L5 稳态性能
+
+L5 使用新运行键 `20261011-qwen2-seqcls-ddp-training-l5-v2` / Slurm 16432；基线为 Jittor `635cc578ae5dfd3b6bf911368c30f7a1fc39ca5f`、ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`，模型和数据 SHA256 分别为 `5a7b969434ab0ab56d79153fc7ab344a3911b301f8f0b7b847a46c71de2abc7b` 与 `6b4c59a4db1d485ed940882326a83d31c26273c9e193a1e81d35dda6d5bd945c`。在同一 cscg-qh04 allocation、同一双 RTX 4090 UUID（rank 0 `GPU-3c43713b-3ee9-956f-d6cd-95e55d2cdfea`，rank 1 `GPU-d813000b-1bfa-885e-cd61-0de97b365732`）上先运行独立 native oracle，再运行 strict shim。每侧各完成 12 个 optimizer step，前 2 步预热，后 10 步同步计时；全局步延迟取两 rank 较慢值，吞吐汇总两 rank 的 8 samples 与 74 non-padding tokens/step。审计键 `20261011-qwen2-seqcls-ddp-training-l5-artifact-audit-v2` / Slurm 16450 在 GPU worker 对既有产物只读复核：同 rank 的 native/shim 首批及 10 步 sample/token 数相同；两端每 rank 均有 291 个 trainable 参数，分类头 `score.weight` 有真实更新；CUDA pointer ordinal、设备 UUID、NCCL world size/rank 相符，strict shim 两 rank `use_cuda=1`、`fallback_count=0`。shim 预热后的 197 项 JIT `.so` 清单在测量结束时完全相同。
+
+| Runtime | 稳态延迟 mean / median / P95 | 全局吞吐 samples/s | 全局吞吐 tokens/s | 峰值 allocated / reserved（rank 0；rank 1） |
+| --- | --- | ---: | ---: | --- |
+| PyTorch CUDA | 0.2519 / 0.2518 / 0.2534 s | 31.76 | 293.75 | 7.39 / 7.63 GiB；7.39 / 7.68 GiB |
+| JTorch strict CUDA | 0.2979 / 0.2980 / 0.2995 s | 26.85 | 248.38 | 9.20 / 11.48 GiB；9.20 / 11.54 GiB |
+
+JTorch/PyTorch samples/s 比值为 `0.8456`。显存数据是各自 `torch.cuda` allocator 在第 2 步后 reset 的 peak allocated/reserved；两种 allocator 口径不同，不将字节数解释为可直接互换的物理显存占用。该结果只给出此固定双卡 profile 的性能比值，不外推到其他序列分类配置或整个 ms-swift。
+
+L5 v1/job16424 在 native 训练后被错误的“任意最小 bias 必须变化”采集断言中止，未运行 shim；不作兼容结论。v2/job16432 两侧训练与测量完整，最终原比较器因不支持的 walrus 语法退出；只读审计 v1/job16444 又误要求两个 rank 的数据分片相同。修正后的只读审计 v2/job16450 通过并生成上表；三次无效审计/采集路径均保留各自 state，不重跑训练。原始日志、逐 rank JSON、缓存清单和审计 JSON 未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-seqcls-ddp-training-l5-v2/` 与 `20261011-qwen2-seqcls-ddp-training-l5-artifact-audit-v2/`。
 
 最终文档门禁使用运行键 `20261011-qwen2-seqcls-ddp-resume-l3-docgate-v1` / Slurm 16402，在 cscg-qh04 完成：`tools/check_repo_layout.sh` 通过，Torch-mode `tests/structure` 为 `1384 passed, 8 skipped, 1019 subtests passed`（203.69 秒）。8 项 skip 中 2 项为 accelerator、2 项为 declared、4 项为 other（解释器未安装 Jittor 的 2 项检查及未安装 pytest-xdist 的 2 项检查）；结构测试解释器未找到 nvcc 并继续 CPU 路径。本门禁仅验证布局、文档和结构测试，不构成 CUDA 训练或恢复证据。
+
+加入双卡 L5 证据后的文档门禁使用运行键 `20261011-qwen2-seqcls-ddp-l5-report-docgate-v1` / Slurm 16453，在 cscg-qh04 完成：布局门禁通过（238 active Markdown）；Torch-mode `tests/structure` 为 `1384 passed, 8 skipped, 1019 subtests passed`（585.88 秒）。8 项 skip 为 2 accelerator、2 declared、4 other；后 4 项分别是两个子进程解释器未安装 Jittor 的解析检查，以及两个环境未安装 pytest-xdist 的检查。该运行使用独立空缓存，Jittor core 首次 CPU 编译耗时约 303.89 秒；解释器未找到 nvcc，结构测试继续 CPU 路径。本门禁仅验证布局、文档和结构契约，不构成 CUDA 训练或性能证据。
