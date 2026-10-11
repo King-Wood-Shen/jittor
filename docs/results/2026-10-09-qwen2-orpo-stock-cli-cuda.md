@@ -72,10 +72,16 @@ job16941 在三个轨迹都已训练并保存后，于 worker 内比较器因把
 | L0 | pass（单固定样本12步 profile）；partial（多样本轨迹） | 固定样本公开 CLI 的模型、trainer、optimizer 与 290 参数 CUDA 初态通过；两样本运行第 3 步批次顺序不同。 |
 | L1 | pass（单固定样本12步 profile）；partial（多样本轨迹） | 固定样本 12 步同输入、有效 forward 结构与有限 loss；多样本 sampler 顺序未对齐。 |
 | L2 | pass（单固定样本12步 profile）；partial（多样本轨迹） | 12 步梯度、更新、loss 趋势、optimizer/scheduler/checkpoint 结构通过；多样本第 3 步输入身份不同。 |
-| L3 | pass（单固定样本恢复延伸）；not-run（多样本轨迹） | 固定单行 profile 的同/新进程、model/optimizer/scheduler/RNG、step/epoch、后续输入、更新和 loss 窗口通过；多样本 sampler cursor 次序没有恢复测试。 |
+| L3 | pass（单固定样本恢复延伸）；partial（多样本仅原生子路径） | 固定单行 profile 的同/新进程恢复通过；多样本原生 new-process 子路径已恢复并续训至 step12，但 strict shim 未运行，完整多样本 L3 未验收。 |
 | L4 | pass（单固定样本12步 profile）；partial（多样本轨迹） | 单固定样本 profile 的公开 CLI 端到端通过；多样本 sampler 次序问题仍在。 |
 | L5 | not-run | 固定单样本恢复后仍未执行预热及至少 10 次稳态性能/显存协议；多样本场景也未通过前级。 |
 
 原始脚本、模型/数据摘要、NPZ、逐步梯度、checkpoint 和日志未版本化，分别保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261009-qwen2-orpo-stock-cli-v1/`、`20261009-qwen2-orpo-fixedbatch-cli-v2/` 和 `20261009-qwen2-orpo-input-diagnose-v1/`。本报告仅适用于上述单卡 ORPO 配置，不代表其他偏好算法或整个 ms-swift。
 
 文档门禁 Slurm 13894 在 RTX 4090 worker 上通过：`tools/check_repo_layout.sh` 成功，`JITTOR_TORCH_SHIM=1 pytest -q tests/structure` 为 1386 passed、6 skipped、1027 subtests passed。单样本证据更新后的第二次文档门禁 Slurm 13922 同样通过：布局成功，结构测试 1386 passed、6 skipped、1027 subtests passed。两次测试日志均说明 2 个跳过项因解释器未安装 Jittor、2 个因未安装 pytest-xdist；其余跳过项由门禁分类记录。
+
+### 多样本 L3：原生新进程恢复子路径（strict shim 未运行）
+
+多行 ORPO L3 的 v5 运行键 `20261011-qwen2-orpo-multisample-l3-resume-v5` / job16993 曾在原生 new-process B 的 step4 突然退出，日志没有 traceback、信号或 OOM 证据；strict shim 与比较阶段没有启动。新诊断键 `20261011-qwen2-orpo-multisample-l3-resume-v6` / job17008 只从 v5 不可变的 native checkpoint-1 执行原生公开 CLI 新进程 B，没有重跑 control、same-process、new-process A 或任何 strict-shim 阶段。该次恢复完成到 step12，CLI 返回0，checkpoint-1 关键文件前后 SHA 不变；v5 的 step4 退出未重现，原始原因仍未知。
+
+只读审计确认新进程恢复了 290 个模型张量及 optimizer、scheduler、Python/NumPy/Torch CPU/CUDA RNG；续训 step2–12 的批次身份与 v5 原生连续 control 相同，每步 290 个参数梯度均有限且非零并发生真实更新，loss 窗口均值从 step1–3 的 `3.46475267` 降至 step10–12 的 `3.42912006`，并保存 checkpoint-12。该证据只通过原生 new-process 子路径；strict shim 未运行，因此多样本 L3 整体仍未验收，也不改变已观察到的跨 runtime sampler 顺序差异或给出兼容结论。产物未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-orpo-multisample-l3-resume-v5/` 与 `20261011-qwen2-orpo-multisample-l3-resume-v6/`。
