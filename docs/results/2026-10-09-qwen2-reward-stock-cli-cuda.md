@@ -1,11 +1,11 @@
 # Qwen2-0.5B stock Reward Model CLI CUDA 入口审计
 
-- 状态：原生与 strict shim 均完成公开 `swift rlhf --rlhf_type rm` 训练。2026-10-12 新 shim 复验的三批 sampler 索引与逐批输入哈希和既有原生 oracle 一致，确认先前顺序分叉在当前 compat 基线已消失；job17482 的 Slurm 终态因训练后格式断言失败，不能将整个运行键标为自动门禁通过。job17601 对齐首批输入并通过同权重 CUDA reward logits 前向，L1 首批证据通过；job17714 两侧六步公开 CLI 的全参数梯度、更新、收敛窗口与 checkpoint 审计通过，L2 通过。L0 在当前固定构造配置通过；L3 not-run。L4 入口已运行并保存 step-6 checkpoint，但功能合同尚未完成；L5 blocked。不代表 RewardTrainer 或 ms-swift 整体兼容。
+- 状态：固定 Qwen2 RM stock CLI 配置的 L0–L4 通过；L5 未运行。2026-10-12 sampler、首批 logits、六步梯度/更新与收敛、同进程/新进程完整恢复均有独立 Slurm 证据。job17482 的旧格式断言错误仍按原结论保留，不用它覆盖后续通过的限定证据。不代表 RewardTrainer 或 ms-swift 整体兼容。
 - 日期：2026-10-09；当前基线补验：2026-10-11、2026-10-12。
-- 基线：历史严格对拍 Jittor `dfde300e618dffcf38965b08777cae67c641476c`；2026-10-11 追踪运行 Jittor `487935592dd6b42cc9cde4212c7713906beee819`；2026-10-12 sampler 修复代码提交 `5f70e7b3321abe2e131a9bb0557b27cf041b037a`；L2 验证 Jittor `3c6ac47f5a69aa0685dc5ea4615f9edd442f6247`；L0 验证 Jittor `60c62e9ce976bca3228fa644d8481918caaa0780`（upstream `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
+- 基线：历史严格对拍 Jittor `dfde300e618dffcf38965b08777cae67c641476c`；2026-10-11 追踪运行 Jittor `487935592dd6b42cc9cde4212c7713906beee819`；2026-10-12 sampler 修复代码提交 `5f70e7b3321abe2e131a9bb0557b27cf041b037a`；L2 验证 Jittor `3c6ac47f5a69aa0685dc5ea4615f9edd442f6247`；L0 验证 Jittor `60c62e9ce976bca3228fa644d8481918caaa0780`；L3 验证 Jittor `e6def72adad11aeb3a1ff924d5f99aa7eed950c5`（upstream `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 范围：Qwen2-0.5B `Qwen2ForSequenceClassification`、公开单卡 `swift rlhf --rlhf_type rm`、全参数 FP32/eager、SGD、六行固定 preference 数据、batch 2；输入追踪和首批 L1 使用三步轨迹，新 L2 使用六步并固定 step1–2/5–6 loss 窗口。
 - 维护者：ms-swift CUDA 适配。
-- 复查条件：随后评估同进程/新进程恢复和性能层。若 sampler 实现改变，重新核对批次身份。
+- 复查条件：补固定 profile 的 L5 稳态性能；若 sampler、Trainer/checkpoint 实现改变，重新核对恢复批次和状态。
 
 初始模型由原生 PyTorch 从固定 Qwen2 checkpoint 构造，确定性初始化 `score.weight` 后保存；同一 safetensors 被原生与候选 CLI 读取，SHA256 为 `415ca5ddc706cea55ef2a66850061291272c744bd5e1acdca6eeddc8d4035a1b`。底模文件 SHA256 为 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`。六条 preference JSONL SHA256 为 `dc072b5ee211afbb4c6e8f1a1f5689d7f4e5a98f4f79c86b70d4d39a4608eee4`。ms-swift 为 Python 3.11.15、PyTorch 2.6.0+cu124、Transformers 4.57.6。
 
@@ -18,9 +18,9 @@ Slurm 13784 在 `cscg-qh17` RTX 4090（UUID `GPU-2fd350e6-8fcd-9385-4e5e-4640583
 | L0 | pass（当前固定构造配置） | job17852 在 RTX 4090 上先 native 后 strict shim，直接走相同 `SwiftRLHF` 构造序列，止于训练前；两侧构造 Qwen2ForSequenceClassification、processor、template、长度5数据集、3 batch DataLoader、RewardTrainer、SGD 两参数组和 scheduler。291 个参数均为 `float32`、`cuda:0`，291 个 state 键也均在 `cuda:0`，494,033,664 个可训练标量；参数与 state 键清单及逐参数值 SHA256 完全匹配。job17862 在 GPU worker 对两份清单和 optimizer 组成员/显式 lr、weight_decay 做归一化比较通过；shim runtime `use_cuda=1`、fallback=0；没有执行 forward/optimizer step 或保存 checkpoint。该 L0 只覆盖报告中锁定的固定 RM 构造配置。 |
 | L1 | pass（首批） | job17601 在同一 RTX 4090 上先 native、后 strict shim，各跑公开 CLI 一步；首批 `input_ids`/`attention_mask` 的 shape、dtype、CUDA device 与 SHA 全等，也与旧 native 输入 oracle 和 sampler 修复后 shim 输入记录首批 SHA 一致。score logits shape `[4,1]`、CUDA `float32`、finite；`max_abs=3.8147e-6`、`max_rel=8.8035e-5`，满足预设 `atol=1e-5, rtol=1e-4`。该结论限定于此首批前向。 |
 | L2 | pass（固定六步 CLI 配置） | job17714 两侧每步覆盖291个可训练参数的 CUDA 梯度与更新；step1–2和5–6预锁窗口各自下降；step-6模型、optimizer checkpoint及序列化公共状态审计通过。 |
-| L3 | not-run | 没有同进程或新进程恢复轨迹。 |
-| L4 | 入口已运行，功能未通过 | 原生 job16186 与 strict shim CLI 已完成三步；job17714 又分别完成六步并保存 step-6 checkpoint，父子进程 strict CUDA 且 `fallback=0`。L0 仍 partial、L3 未运行，故公开入口的完整功能合同尚未通过。 |
-| L5 | blocked | 前级不通过；训练墙钟含冷 JIT，不作为性能结果。 |
+| L3 | pass（固定 step-2 中途恢复配置） | job17897 在 `checkpoint-2`（global step 2、epoch `2/3`）保存完整 model/optimizer/scheduler/RNG/trainer state；native 与 strict shim 均在同进程复用同一 Trainer 恢复到 step 6，并在独立新进程从 step 2 恢复到 step 6。恢复后 step 3–6 的输入/mask SHA 与各自旧 L2 oracle 及两侧互相逐步一致；291 个可训练参数的梯度均存在且有限，更新非空；scheduler `last_epoch=2`、optimizer 两组参数数 `170/121` 与 lr/weight decay 恢复，SGD momentum=0 因此 state slots 按预期为空；step 3 native/shim RNG fingerprint 各自同/新进程一致。job17898 在训练回调中逐项比较了291个模型张量与对应 step-2 checkpoint，native 与 shim 各自精确相等；job17899 随后只读复核这些结果并校验四组 strict-shim 父子进程 scope 计数，全部通过；唯一 buffer `model.rotary_emb.inv_freq` 位于 `cuda:0`、未持久化但同进程与新进程指纹相同。两侧 step 1–2 均值 `0.62229335` / `0.62229320`，step 5–6 均值 `0.54605728` / `0.54605645`（fresh shim `0.54605660`），各自末段下降。 |
+| L4 | pass（固定 stock CLI profile） | 通过公开入口 `python -m swift.cli.main rlhf --rlhf_type rm` 完成构造、首批 forward、六步训练和从 step-2 checkpoint 同/新进程恢复；保留输出/checkpoint。strict-shim 父子进程 scope 均为 CUDA 且零 fallback。结论仅覆盖本报告锁定配置。 |
+| L5 | not-run | 没有按协议完成真实尺寸预热及至少 10 次同步稳态测量；训练墙钟不作为性能结果。 |
 
 ## 2026-10-11 当前基线采样顺序追踪
 
@@ -30,7 +30,7 @@ job16186 中两侧 `seed=42`、`data_seed=42`、`train_dataloader_shuffle=false`
 
 静态源码追踪显示 `swift.rlhf_trainers.reward_trainer.RewardTrainer` 的基类为 `RLHFTrainerMixin, SwiftMixin, HFRewardTrainer`；它没有继承定义自有 `train_dataloader_shuffle` sampler 的 `DataLoaderMixin`，所以 CLI 保存的 `false` 未阻止有效 loader 的随机采样。Accelerate `SeedableRandomSampler` 对两侧使用同一 data seed，并经 `torch.randperm(generator=...)` 取样；shim 的 `torch.Generator` stream 当前由 `numpy.random.default_rng` 提供，`randperm` 使用 `Generator.permutation`。这解释了同 seed 下实测索引排列差异。该路径同时暴露 ms-swift RewardTrainer 的 shuffle 参数未作用于此继承链，以及 shim `Generator`/`randperm` 未复刻 PyTorch 的 CPU 随机序列；本轮只记录责任边界，未修改 ms-swift 或 shim 源码。
 
-等级按当前训练协议复核：L0 partial（两侧公开 CLI 与 CUDA 参数/输入可运行，但缺完整两侧初态 dtype/device 清单）；L1 partial（2026-10-12 已证明三批输入身份一致，但没有保存可对拍的 logits）；L2 blocked（尚无逐 trainable 参数梯度、optimizer 状态/逐步更新审计，也没有按固定窗口验证两侧 loss 趋势；跨实现逐值容差不再是门槛）；L3 not-run；L4 入口已运行、功能未通过；L5 blocked。当前基线结论不覆盖其它 RewardTrainer、RM 数据格式、采样设置或 ms-swift 训练面。
+以下是该次 sampler 追踪阶段的层级快照，不是当前结论：L0 partial（两侧公开 CLI 与 CUDA 参数/输入可运行，但缺完整两侧初态 dtype/device 清单）；L1 partial（2026-10-12 已证明三批输入身份一致，但没有保存可对拍的 logits）；L2 blocked（尚无逐 trainable 参数梯度、optimizer 状态/逐步更新审计，也没有按固定窗口验证两侧 loss 趋势；跨实现逐值容差不再是门槛）；L3 not-run；L4 入口已运行、功能未通过；L5 blocked。随后完成的各层证据与当前状态见本文顶部矩阵及后续分层记录。该固定配置结论不覆盖其它 RewardTrainer、RM 数据格式、采样设置或 ms-swift 训练面。
 
 仓库门禁：Slurm 13785 的布局与 Manifest 生成/校验通过。完整 `tests/structure` 为 1383 passed、8 skipped、1 failed；唯一失败是 CPU matmul 测试需要 oneDNN v3，而 GPU worker 下载源码时到 `codeload.github.com` 连接被拒。Slurm 13720、13738 已在前序文档验证中遇到同一环境限制；本次未把完整结构门禁标记为通过。
 
@@ -67,4 +67,14 @@ job17714 的最终 Slurm exit 1 来自训练后的首版比较器错误假设 op
 
 291 个参数均位于 `cuda:0` 且 dtype 为 `torch.float32`；291 个 state 键也均在 `cuda:0`，两侧 state 名、shape、dtype、device 与值 SHA256 完全匹配。可训练标量数为494,033,664。逐项参数的名称、shape、dtype、device、requires_grad 及值 SHA256 完全匹配，说明两侧加载了同一初态。两组 optimizer 的参数成员顺序一致，组大小为170/121，显式 `lr=1e-5`、`initial_lr=1e-5`、weight decay分别为0.1/0.0；optimizer 初始 state 为空，scheduler 初态相同。strict-shim `sitecustomize` 作用域记录 `use_cuda=1`、父进程 fallback=0；匹配缓存下 `JITTOR_NO_BUILD=1` bootstrap通过且 `jittor_core` SHA前后不变。比较器不比较原生与 shim 的 optimizer 类名，也不把各自 `param_groups` 内部表示强求相同；既有 L2 optimizer 工件审计负责完整公共 optimizer 状态/选项。
 
-job17852 的训练后比较器因比较 backend-specific optimizer 类/隐式默认及内部字段而以 exit 1 结束，但两侧构造和清单已写出。job17859 仅在 GPU worker 诊断组差异：两侧组成员和显式选项一致；原生把 momentum、dampening、nesterov、maximize 默认项放在参数组，shim 的 SGD 将默认值保存在 optimizer 实例上。job17862 在 GPU worker 用新运行键对原始清单作语义归一化比较并通过。为定位 job17852 比较器字段，曾在登录节点对 GPU 产出的 JSON 文件作一次只读字段诊断；未导入框架、未加载模型或运行计算，该诊断不计验收证据。最终验收比较由 Slurm GPU job17862 完成。原始 JSON、脚本与 Slurm 日志均保存在 state，未版本化。该结果补齐本固定配置的 L0，不改变 L3 not-run、L4 功能合同未完成、L5 blocked，也不代表其它 Reward/ms-swift 工作负载。
+job17852 的训练后比较器因比较 backend-specific optimizer 类/隐式默认及内部字段而以 exit 1 结束，但两侧构造和清单已写出。job17859 仅在 GPU worker 诊断组差异：两侧组成员和显式选项一致；原生把 momentum、dampening、nesterov、maximize 默认项放在参数组，shim 的 SGD 将默认值保存在 optimizer 实例上。job17862 在 GPU worker 用新运行键对原始清单作语义归一化比较并通过。为定位 job17852 比较器字段，曾在登录节点对 GPU 产出的 JSON 文件作一次只读字段诊断；未导入框架、未加载模型或运行计算，该诊断不计验收证据。最终验收比较由 Slurm GPU job17862 完成。原始 JSON、脚本与 Slurm 日志均保存在 state，未版本化。该段记录的是当时补齐 L0 后的状态快照；L3/L4 后续状态见顶部矩阵及后续记录，不改变本固定配置范围，也不代表其它 Reward/ms-swift 工作负载。
+
+## 2026-10-12 Reward RM 中途 checkpoint 恢复
+
+新运行键 `20261012-qwen2-reward-stock-cli-l3-resume-v1` / Slurm job17897 在 `cscg-qh04` RTX 4090（UUID `GPU-3c43713b-3ee9-956f-d6cd-95e55d2cdfea`，driver `580.178.04`）按 native 后 strict shim 顺序运行同一六行数据、初始模型、batch 2、FP32/eager、全参数 SGD `lr=1e-5` 配置。每侧先训练到 step 2 保存 epoch `2/3` 的中途 checkpoint，再在同一进程复用同一 RewardTrainer 恢复并继续至 step 6；随后由不同 CLI 进程从该 step-2 checkpoint 恢复至 step 6。恢复阶段关闭额外 checkpoint 保存，原始日志、逐参数梯度/更新、输入、RNG、callback 状态与 step-2 checkpoint 均留在 state，未版本化。
+
+checkpoint 包含 `model.safetensors`、`optimizer.pt`、`scheduler.pt`、`rng_state.pth` 和 `trainer_state.json`。恢复 callback 在训练继续前看到 `global_step=2`、`epoch=2/3`；两组 optimizer 参数数为170/121、lr均为`1e-5`、weight decay为0.1/0.0，scheduler `last_epoch=2`。SGD momentum为0，optimizer state slots 为空是该配置的预期。native 与 shim 的 step3–6 `input_ids`/`attention_mask` 哈希都与各自已完成的 L2 trace 逐项相同，且两侧互相相同；step 3 的 CUDA RNG 指纹在各自同进程与新进程恢复后相同。恢复后每一步291个 trainable 参数梯度均存在、有限，更新有限且非空。Native step1–2/5–6 平均 loss 为`0.62229335`/`0.54605728`；shim 为`0.62229320`/`0.54605645`（fresh process 末段`0.54605660`），每个运行时各自的末段低于初段。作业位于 `cscg-qh04` RTX 4090（UUID `GPU-3c43713b-3ee9-956f-d6cd-95e55d2cdfea`，driver `580.178.04`）；strict-shim 父子进程 `use_cuda=1`、fallback=0，匹配缓存下 bootstrap `--check` 通过，`jittor_core` SHA前后均为`caf12a34ff55c770651ef2b95c9f1ceda48599496bec59aeae8e36c6f994dbd5`。旧 L2 原生轨迹未重跑；native L3 为生成 step-2 oracle checkpoint 而按新运行键执行，恢复后批次与已存 L2 oracle 对照。
+
+为了直接核实模型状态，补充运行键 `20261012-qwen2-reward-stock-cli-l3-state-audit-v1` 的 job17898 只恢复既有 step-2 checkpoint，并在 native、shim 的同进程/新进程恢复 callback 处逐项比较291个模型 state tensor 与 checkpoint；所有值均精确相等。唯一命名 buffer `model.rotary_emb.inv_freq` 位于`cuda:0`且不持久化，其 shape/dtype/value fingerprint 在每次恢复相同。job17898 的训练和这些比较均完成；其最终 scope 计数断言误把两次 shim CLI 的父子进程记录预期为2组，导致 Slurm exit 1。只读复核运行键 `20261012-qwen2-reward-stock-cli-l3-state-audit-check-v1` / job17899 将计数修正为实际4组后通过：四组 `use_cuda=1`、`fallback=0`，291项模型比较和buffer指纹均通过，`jittor_core` SHA前后未变。该失败属于验收脚本计数错误，不是训练或恢复失败；没有重跑模型训练来修复它。
+
+L3 与本固定 stock CLI 的 L4 至此通过。L5 仍未运行；其它 RewardTrainer API、Reward 数据格式、采样配置和 ms-swift 任务均不在此结论范围内。
