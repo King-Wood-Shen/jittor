@@ -1,11 +1,11 @@
 # Qwen2-0.5B stock `swift rlhf --rlhf_type orpo` CUDA 输入身份审计
 
-- 状态：修复前两条样本的三步公开 ORPO CLI 在 step 3 出现批次顺序反转；2026-10-12 已修正 generator-backed CPU `randperm` 并在 strict CUDA loader-only CLI 中复核三轮输入身份与冻结 native 输入一致。该复核没有执行模型前向或训练，因此多样本完整训练/恢复仍未验收。单固定样本12步 profile 的 L0–L4 通过（L3 恢复于2026-10-11补验）；原生 L5 完成十次稳态测量，strict shim 的测量轨迹在 step 16 backward 失败，故 L5 未通过。不能将 ORPO 或整个 ms-swift 标为整体通过。
+- 状态：修复前两条样本的三步公开 ORPO CLI 在 step 3 出现批次顺序反转；2026-10-12 已修正 generator-backed CPU `randperm` 并在 strict CUDA loader-only CLI 中复核三轮输入身份与冻结 native 输入一致。后续两行12步 native 与 strict-shim control 输入身份、梯度/更新和各自loss窗口均通过；L3 strict-shim恢复仍未成套验收，L4受前置恢复层级限制。单固定样本12步 profile 的 L0–L4 通过（L3 恢复于2026-10-11补验）；原生 L5 完成十次稳态测量，strict shim 的测量轨迹在 step 16 backward 失败，故 L5 未通过。不能将 ORPO 或整个 ms-swift 标为整体通过。
 - 日期：2026-10-12 复核。
 - 基线：恢复补验使用 Jittor `049bcc8548a63dfad654a605564e6f1949a1bbda`（上游 `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。原12步训练证据仍绑定其报告中记录的历史基线。
 - 范围：Qwen2-0.5B causal LM，全参数 FP32/eager，公开单卡 `swift rlhf --rlhf_type orpo`，两条 preference 样本、batch 2、SGD、三步。
 - 维护者：ms-swift CUDA 适配。
-- 复查条件：ms-swift trainer MRO、Accelerate `SeedableRandomSampler` 或 Torch shim 的 generator-backed `randperm` 语义变化时复查；在多样本 ORPO 前向、梯度、状态和恢复对拍通过前，不提升其完整 L0–L4。
+- 复查条件：ms-swift trainer MRO、Accelerate `SeedableRandomSampler` 或 Torch shim 的 generator-backed `randperm` 语义变化时复查；在多样本 ORPO 的 L1输出结构、完整 strict-shim L3恢复和后续层级验收前，不提升其完整 L0–L4。
 
 运行键 `20261009-qwen2-orpo-stock-cli-v1` 的数据 SHA256 为 `80ace7504a35976e65bda0f8bf7f651b6efbef7257b2f5858290451d9f58450f`，Qwen2 权重 SHA256 为 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`。环境为 Python 3.11.15、PyTorch 2.6.0+cu124、Transformers 4.57.6、TRL 0.24.0。Slurm 13866 在 `cscg-qh04` RTX 4090（GPU UUID `GPU-3c43713b-3ee9-956f-d6cd-95e55d2cdfea`）完成 worker 预检；Slurm 13874 随后依次运行 native 与 strict shim CLI。两侧均训练三步并生成 `checkpoint-3`。候选父子进程均记录 `use_cuda=1`、`fallback=0`。
 
@@ -87,12 +87,12 @@ job16941 在三个轨迹都已训练并保存后，于 worker 内比较器因把
 
 | 层 | 状态 | 证据与缺口 |
 |---|---|---|
-| L0 | pass（单固定样本12步 profile）；partial（多样本 loader） | 固定样本公开 CLI 的模型、trainer、optimizer 与 290 参数 CUDA 初态通过；多样本 strict loader 三轮 sampler/输入身份匹配 native，但完整多样本训练构造面仍未整体验收。 |
-| L1 | pass（单固定样本12步 profile）；not-run（修复后的多样本 forward） | 固定样本 12 步 forward 通过；多样本复核拦截在 `Trainer.train` 前，没有模型前向。 |
-| L2 | pass（单固定样本12步 profile）；not-run（多样本） | 固定样本梯度、更新、loss 趋势与状态通过；修复后的多样本路径没有反向或 optimizer 更新。 |
-| L3 | pass（单固定样本恢复延伸）；partial（多样本仅原生子路径） | 固定单行 profile 的同/新进程恢复通过；多样本原生 new-process 子路径续训至 step12，但 strict shim 尚未恢复，完整多样本 L3 未验收。 |
-| L4 | pass（单固定样本12步 profile）；partial（多样本 loader-only） | 单固定样本公开 CLI 端到端通过；多样本公开 CLI 仅构造模型/Trainer 并核对 loader，训练被拦截。 |
-| L5 | not-run（多样本）；strict shim fixed-sample L5 failed | 多样本正确性前级未通过，未执行其性能协议；固定单样本 strict shim 的 step16 backward 故障仍保留为未通过。 |
+| L0 | pass（单固定样本12步 profile）；pass（两行12步 control） | 固定样本与两行 control 的公开 CLI 均构造真实模型、trainer、optimizer 和 CUDA 参数；loader-only 分支另有三轮 sampler/输入身份复核。 |
+| L1 | pass（单固定样本12步 profile）；partial（两行12步 control） | 两行 native 与 strict shim control 均使用相同步批次身份并完成有限loss的真实 forward；该多样本报告尚无成套 logits/hidden shape、dtype 和逐值诊断输出，故不提升为 L1 pass。 |
+| L2 | pass（单固定样本12步 profile）；partial（两行12步 control） | 两行 native 与 strict shim control 的各步 290 项梯度有限/非零且有真实更新，各自末段 loss 窗口下降；按层级顺序，L1 输出结构仍不完整，故多样本 L2 暂不验收为 pass。 |
+| L3 | pass（单固定样本恢复延伸）；partial（多样本） | 固定单行 profile 的同/新进程恢复通过；多样本原生 new-process 子路径通过。strict shim 的 12 步 control 已运行，实际 Trainer RNG restore 的独立状态比较通过，最小同进程 step1→2 通过；完整多样本同/新进程恢复的状态、游标、逐步梯度/更新及 loss 窗口证据仍未成套通过。SHA 类型标记误报已纠正；带额外观测 hook 的恢复续步 NanoVector 故障边界尚待定位。 |
+| L4 | pass（单固定样本12步 profile）；blocked（两行恢复未通过） | 单固定样本公开 CLI 端到端通过；多样本公开 CLI 的 loader-only 与 12 步 control 均已实际运行并保存 checkpoint，但完整恢复未通过，故多样本 L4 受 L1/L3 前置缺口阻塞。 |
+| L5 | not-run（多样本）；strict shim fixed-sample L5 failed | 多样本 L4 未通过，未执行其性能协议；固定单样本 strict shim 的 step16 backward 故障仍保留为未通过。 |
 
 原始脚本、模型/数据摘要、NPZ、逐步梯度、checkpoint 和日志未版本化，分别保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261009-qwen2-orpo-stock-cli-v1/`、`20261009-qwen2-orpo-fixedbatch-cli-v2/` 和 `20261009-qwen2-orpo-input-diagnose-v1/`。本报告仅适用于上述单卡 ORPO 配置，不代表其他偏好算法或整个 ms-swift。
 
@@ -103,3 +103,11 @@ job16941 在三个轨迹都已训练并保存后，于 worker 内比较器因把
 多行 ORPO L3 的 v5 运行键 `20261011-qwen2-orpo-multisample-l3-resume-v5` / job16993 曾在原生 new-process B 的 step4 突然退出，日志没有 traceback、信号或 OOM 证据；strict shim 与比较阶段没有启动。新诊断键 `20261011-qwen2-orpo-multisample-l3-resume-v6` / job17008 只从 v5 不可变的 native checkpoint-1 执行原生公开 CLI 新进程 B，没有重跑 control、same-process、new-process A 或任何 strict-shim 阶段。该次恢复完成到 step12，CLI 返回0，checkpoint-1 关键文件前后 SHA 不变；v5 的 step4 退出未重现，原始原因仍未知。
 
 只读审计确认新进程恢复了 290 个模型张量及 optimizer、scheduler、Python/NumPy/Torch CPU/CUDA RNG；续训 step2–12 的批次身份与 v5 原生连续 control 相同，每步 290 个参数梯度均有限且非零并发生真实更新，loss 窗口均值从 step1–3 的 `3.46475267` 降至 step10–12 的 `3.42912006`，并保存 checkpoint-12。该证据只通过原生 new-process 子路径；strict shim 未运行，因此多样本 L3 整体仍未验收，也不改变已观察到的跨 runtime sampler 顺序差异或给出兼容结论。产物未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261011-qwen2-orpo-multisample-l3-resume-v5/` 与 `20261011-qwen2-orpo-multisample-l3-resume-v6/`。
+
+### 多样本 L3：strict shim 恢复诊断（2026-10-12）
+
+strict-shim 运行键 `20261012-qwen2-orpo-multisample-l3-strict-shim-v2` / job17315 完成了两行 ORPO control 的 12 步并写出 checkpoint-12；same-process 场景生成了 step-1 checkpoint，但观测器随后以 CUDA RNG SHA 不同退出，new-process 场景及完整比较器没有启动。该断言不是兼容性失败：同一只读 checkpoint 的新诊断键 `20261012-qwen2-orpo-rng-state-digest-audit-v1` / job17333 在 cscg-qh04 RTX 4090（UUID `GPU-4b797e8c-3982-9b01-dc17-43d77960643c`）通过 strict CUDA scope 真实调用 Transformers 4.57.6 `Trainer._load_rng_state`。恢复后的 Jittor Var 与保存的 Torch Tensor 均为 28 个 `uint8` 值、shape `[28]`，原始字节 SHA256 相同（`06d2929f63149d025449ef25ad0534e63e454d07b274772292f2dd473a8ec884`），`torch.equal`、NumPy 元素比较和原始字节比较均为 true，fallback 0。旧观测器给两种容器分别加 `J`/`T` 类型前缀，所以即使值完全相同，复合 digest 仍不同；真实 mismatch 断言是比较器的类型标记误报。
+
+对 v2 已完成的独立 uninterrupted control 事件作只读复核后，native v5 control 与 strict-shim v2 control 的 12 个逐步输入身份 SHA 全部一致；两侧各 12 步都有 290 项 finite/nonzero gradients 与非空更新。loss step1–3 到 step10–12 窗口均值分别为 native `3.4647526741 → 3.4291200638`、strict shim `3.4647494952 → 3.4291232427`。strict-shim父/子进程均为 `use_cuda=1`、fallback delta=0。它补足两行独立 control 的训练轨迹证据，但不替代完整前向结构输出或恢复轨迹，因此不能将多样本 L1–L3 全部标为通过。原生事件来自 v5/job16993，strict shim 事件来自 v2/job17315；均为只读复核，没有重跑 oracle 或改写其产物。
+
+另一个最小公开 CLI 键 `20261012-qwen2-orpo-rng-restore-same-process-minrepro-v3` / job17323 带有 RNG、loss、batch、gradient、model 与 optimizer 观测 hook；它完成 step1/checkpoint-1 后，同一 Trainer 恢复到 step2 的 backward 在 `autograd_api.py::_backward → jt.core.grad_optional` 触发 `nano_vector.h:41 slice overflow`。新键 `20261012-qwen2-orpo-rng-restore-same-process-minrepro-v4` / job17330 去掉这些状态及张量观测 hook，仅保留同 Trainer step1→2 调用，严格 CUDA 下完成并保存 checkpoint-2，父子进程 `use_cuda=1`、fallback 0。两次最小运行表明该断点与额外观测配置相关，但具体触发 hook 或更深层原因尚未隔离；不能将 v4 的两步烟测推广为多样本 L3 通过。17317、17318、17321、17322 为在模型/恢复前退出的 harness 诊断，证据保留且不作兼容结论。以上键与日志位于各自 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-orpo-*/` 运行目录。
