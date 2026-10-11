@@ -1,11 +1,11 @@
 # Qwen2-0.5B stock `swift rlhf --rlhf_type orpo` CUDA 输入身份审计
 
-- 状态：修复前两条样本的三步公开 ORPO CLI 在 step 3 出现批次顺序反转；2026-10-12 已修正 generator-backed CPU `randperm` 并在 strict CUDA loader-only CLI 中复核三轮输入身份与冻结 native 输入一致。后续两行12步 native 与 strict-shim control 输入身份、梯度/更新和各自loss窗口均通过；L3 strict-shim恢复仍未成套验收，L4受前置恢复层级限制。恢复 smoke 中，两类完整 RNG 观察 hook 分别单独运行及仅含轻量日志的双 wrapper 组合都通过；但原失败运行还同时启用了 loss、batch、gradient、model 与 optimizer 观察器，因此目前只将 NanoVector 故障限定为复杂观察器栈相关，不能归因于 RNG 比较或某一具体 hook。单固定样本12步 profile 的 L0–L4 通过（L3 恢复于2026-10-11补验）；原生 L5 完成十次稳态测量，strict shim 的测量轨迹在 step 16 backward 失败，故 L5 未通过。不能将 ORPO 或整个 ms-swift 标为整体通过。
+- 状态：修复前两条样本的三步公开 ORPO CLI 在 step 3 出现批次顺序反转；2026-10-12 已修正 generator-backed CPU `randperm` 并在 strict CUDA loader-only CLI 中复核三轮输入身份与冻结 native 输入一致。后续两行12步 native 与 strict-shim control 输入身份、梯度/更新和各自loss窗口均通过；多样本两个 batch-1 样例的 L1 输出结构补验及原有12步 control 的 L2 均通过，native 新进程 L3 子路径通过；strict-shim 完整 L3 恢复仍未成套验收，L4受该前置缺口限制。恢复 smoke 中，两类完整 RNG 观察 hook 分别单独运行及仅含轻量日志的双 wrapper 组合都通过；但原失败运行还同时启用了 loss、batch、gradient、model 与 optimizer 观察器，因此目前只将 NanoVector 故障限定为复杂观察器栈相关，不能归因于 RNG 比较或某一具体 hook。单固定样本12步 profile 的 L0–L4 通过（L3 恢复于2026-10-11补验）；原生 L5 完成十次稳态测量，strict shim 的测量轨迹在 step 16 backward 失败，故 L5 未通过。不能将 ORPO 或整个 ms-swift 标为整体通过。
 - 日期：2026-10-12 复核。
 - 基线：恢复补验使用 Jittor `049bcc8548a63dfad654a605564e6f1949a1bbda`（上游 `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。原12步训练证据仍绑定其报告中记录的历史基线。
 - 范围：Qwen2-0.5B causal LM，全参数 FP32/eager，公开单卡 `swift rlhf --rlhf_type orpo`，两条 preference 样本、batch 2、SGD、三步。
 - 维护者：ms-swift CUDA 适配。
-- 复查条件：ms-swift trainer MRO、Accelerate `SeedableRandomSampler` 或 Torch shim 的 generator-backed `randperm` 语义变化时复查；在多样本 ORPO 的 L1输出结构、完整 strict-shim L3恢复和后续层级验收前，不提升其完整 L0–L4。
+- 复查条件：ms-swift trainer MRO、Accelerate `SeedableRandomSampler` 或 Torch shim 的 generator-backed `randperm` 语义变化时复查；在多样本 ORPO 的 strict-shim 完整 L3恢复和后续层级验收前，不提升其完整 L0–L4。
 
 运行键 `20261009-qwen2-orpo-stock-cli-v1` 的数据 SHA256 为 `80ace7504a35976e65bda0f8bf7f651b6efbef7257b2f5858290451d9f58450f`，Qwen2 权重 SHA256 为 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`。环境为 Python 3.11.15、PyTorch 2.6.0+cu124、Transformers 4.57.6、TRL 0.24.0。Slurm 13866 在 `cscg-qh04` RTX 4090（GPU UUID `GPU-3c43713b-3ee9-956f-d6cd-95e55d2cdfea`）完成 worker 预检；Slurm 13874 随后依次运行 native 与 strict shim CLI。两侧均训练三步并生成 `checkpoint-3`。候选父子进程均记录 `use_cuda=1`、`fallback=0`。
 
@@ -85,18 +85,30 @@ job16941 在三个轨迹都已训练并保存后，于 worker 内比较器因把
 
 本次 L3 报告更新的门禁 run key `20261011-qwen2-orpo-l3-report-docgate-v3` / Slurm 16952 在 cscg-qh04 完成：`tools/check_repo_layout.sh` 通过，文档治理检查238个活动 Markdown；Torch-mode `tests/structure` 为1384 passed、8 skipped、1019 subtests passed（235.05秒）。复用已验证的结构专用持久 `JITTOR_HOME` 原绝对路径；Python/SOABI、g++ 11.5、Linux 6.1.188 主版本、source tree SHA、CPU arch/config一致，nvcc缺失且明确走CPU结构路径。`JITTOR_NO_BUILD=1` bootstrap检查1.7秒通过，门禁前后 `jittor_core` / `jit_utils_core` SHA相同，日志无core冷编译。v1/v2在工具链指纹的过严字符串断言处退出，未运行测试；日志保留在state，不影响v3结果。该门禁不是CUDA计算证据。
 
+### 多样本 ORPO：L1 两种 batch-1 输入结构与 L2 收敛复核（2026-10-12）
+
+新运行键 `20261012-qwen2-orpo-multisample-l1-forward-structure-v3` / Slurm job17388 使用公开 `swift rlhf --rlhf_type orpo`，每侧构造真实 Trainer 并对两条 batch-size-1 样本各调用一次 `compute_loss`。只执行前向，不做 backward、optimizer 更新或 checkpoint。两侧使用同一模型 SHA256 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`、数据 SHA256 `80ace7504a35976e65bda0f8bf7f651b6efbef7257b2f5858290451d9f58450f`、seed/data_seed 1234 和单卡 FP32/eager 配置。对应两批的 `input_ids`/mask/labels 形状分别 `[2,33]`、`[2,29]`，每一批 native 与 strict shim 的整体输入身份 SHA256 完全相同：`9d1b0b2e00bf1392f9f0ac38b8a603d3aaec5af7fa3e36274312a271d1a92b35` 与 `71157c71cea191871b2e56fb8b08e8f67e2bc911a00b47b691ee7a951536aed8`。
+
+两种长度下 `concatenated_forward` 五项返回均与 native 结构完全相同：chosen/rejected log-probabilities shape `[1]`，chosen/rejected logits 分别 `[1,32,151936]` 与 `[1,28,151936]`，chosen NLL 和总 loss 为标量；所有浮点输出为 CUDA `float32`、有限并 `requires_grad=true`。strict-shim launcher 父进程和计算子进程均报告 `use_cuda=1`、fallback delta=0。模型文件与数据 SHA 在 worker 验证通过；Jittor core SHA 在运行前后不变。
+
+这次补验由 job17388 提供两条样本的 L1 前向结构证据；多样本 L2 则沿用 native job16993 与 strict-shim job17315 的两行12步 control 只读证据：每步290项 trainable 梯度均有限/非零、更新非空，native 与 strict shim 的输入身份序列相同，各自末三步 loss 均值相对首三步下降（native `3.46475267 → 3.42912006`，shim `3.46474950 → 3.42912324`）。因此多样本固定配置 L0–L2 通过；strict-shim 完整 L3 仍未通过，L4 仍受恢复缺口限制，L5 未运行。前置 batch-2 探针和 StopIteration 探针因覆盖/脚本假设不合适而排除；它们不作为验收证据。
+
+job17388 在 `cscg-qh04` 的 RTX 4090（UUID `GPU-d813000b-1bfa-885e-cd61-0de97b365732`）完成；worker 上的模型/数据摘要、CUDA bootstrap、strict preflight 与 core SHA 前后快照均保存在 state 运行目录。该次脚本 SHA、命令与逐进程事件也在同目录留档。
+
 | 层 | 状态 | 证据与缺口 |
 |---|---|---|
 | L0 | pass（单固定样本12步 profile）；pass（两行12步 control） | 固定样本与两行 control 的公开 CLI 均构造真实模型、trainer、optimizer 和 CUDA 参数；loader-only 分支另有三轮 sampler/输入身份复核。 |
-| L1 | pass（单固定样本12步 profile）；partial（两行12步 control） | 两行 native 与 strict shim control 均使用相同步批次身份并完成有限loss的真实 forward；该多样本报告尚无成套 logits/hidden shape、dtype 和逐值诊断输出，故不提升为 L1 pass。 |
-| L2 | pass（单固定样本12步 profile）；partial（两行12步 control） | 两行 native 与 strict shim control 的各步 290 项梯度有限/非零且有真实更新，各自末段 loss 窗口下降；按层级顺序，L1 输出结构仍不完整，故多样本 L2 暂不验收为 pass。 |
+| L1 | pass（单固定样本12步 profile）；pass（多样本两种 batch-1 输入） | 两种 padded 长度下 native 与 strict shim 的输入身份、chosen/rejected logits 与 NLL 结构、shape、dtype、有限性、CUDA 驻留及可反传 loss 均一致；strict shim fallback=0。 |
+| L2 | pass（单固定样本12步 profile）；pass（多样本12步 control） | 两侧每步290项梯度有限/非零、更新非空、输入身份逐步相同，各自固定 loss 窗口均下降；无跨runtime逐值训练轨迹门槛。 |
 | L3 | pass（单固定样本恢复延伸）；partial（多样本） | 固定单行 profile 的同/新进程恢复通过；多样本原生 new-process 子路径通过。strict shim 的 12 步 control 已运行，实际 Trainer RNG restore 的独立状态比较通过，最小同进程 step1→2 通过；完整多样本同/新进程恢复的状态、游标、逐步梯度/更新及 loss 窗口证据仍未成套通过。SHA 类型标记误报已纠正；无 hook 基线、分别启用单个完整 RNG hook、以及两个 RNG hook 的轻量日志组合均未触发 NanoVector。原失败运行还包含 loss/batch/gradient/model/optimizer observers，具体触发 hook 或交互未定位。 |
-| L4 | pass（单固定样本12步 profile）；blocked（两行恢复未通过） | 单固定样本公开 CLI 端到端通过；多样本公开 CLI 的 loader-only 与 12 步 control 均已实际运行并保存 checkpoint，但完整恢复未通过，故多样本 L4 受 L1/L3 前置缺口阻塞。 |
+| L4 | pass（单固定样本12步 profile）；blocked（多样本 L3 未通过） | 单固定样本公开 CLI 端到端通过；多样本公开 CLI 的 loader-only 与 12 步 control 均已实际运行并保存 checkpoint，但完整恢复未通过，故多样本 L4 仍受 L3 前置缺口阻塞。 |
 | L5 | not-run（多样本）；strict shim fixed-sample L5 failed | 多样本 L4 未通过，未执行其性能协议；固定单样本 strict shim 的 step16 backward 故障仍保留为未通过。 |
 
 原始脚本、模型/数据摘要、NPZ、逐步梯度、checkpoint 和日志未版本化，分别保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261009-qwen2-orpo-stock-cli-v1/`、`20261009-qwen2-orpo-fixedbatch-cli-v2/` 和 `20261009-qwen2-orpo-input-diagnose-v1/`。本报告仅适用于上述单卡 ORPO 配置，不代表其他偏好算法或整个 ms-swift。
 
 文档门禁 Slurm 13894 在 RTX 4090 worker 上通过：`tools/check_repo_layout.sh` 成功，`JITTOR_TORCH_SHIM=1 pytest -q tests/structure` 为 1386 passed、6 skipped、1027 subtests passed。单样本证据更新后的第二次文档门禁 Slurm 13922 同样通过：布局成功，结构测试 1386 passed、6 skipped、1027 subtests passed。两次测试日志均说明 2 个跳过项因解释器未安装 Jittor、2 个因未安装 pytest-xdist；其余跳过项由门禁分类记录。
+
+本次多样本补验文档门禁最终运行键 `20261012-qwen2-orpo-l1l2-report-docgate-v2` / Slurm job17434 在 `cscg-qh04` 通过：布局检查发现并验证238份活动Markdown；Torch-mode `tests/structure` 为1384 passed、8 skipped、1019 subtests passed（191.78秒）。使用专用 CPU 结构缓存的原绝对路径；Jittor、compat、structure Git tree SHA 与 CPython 3.11.15/SOABI `cpython-311-x86_64-linux-gnu`、g++ 11.5.0、Linux 6.1.188 匹配；worker 未发现 nvcc，明确走 CPU 结构路径。`JITTOR_NO_BUILD=1` bootstrap 前后通过（2.0秒/0.8秒），门禁前后 `jittor_core` 与 `jit_utils_core` 的两个文件 SHA 相同，日志无 core 冷编译；缓存锁以非阻塞 flock 成功获得。该门禁不构成 CUDA 计算证据。
 
 ### 多样本 L3：原生新进程恢复子路径（strict shim 未运行）
 
