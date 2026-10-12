@@ -40,16 +40,20 @@ Slurm 13834 在 `cscg-qh04` RTX 4090 上预检了 ms-swift 模块来源、CUDA �
 | L0 | PASS（当前树新键） | 当前树 `da7c978f1af8dec93bed3f827ec1887e945487a6` 的 stock CLI 构造审计覆盖 policy/reference 各 291 项 state、tokenizer/template/dataset/Trainer/optimizer/scheduler；两侧所需键、shape、dtype、CUDA device、值 hash、参数 trainability、数据/配置和调度状态相同。明确保留 `inv_freq.requires_grad`、实现类型路径及 optimizer 内部 group 表示差异，详见当前树 L0 小节。 |
 | L1 | PASS（当前树固定 profile） | 当前树训练路径中，policy/reference 输入和标签逐步相同；输出键、shape、dtype和有限性符合合同。跨实现 forward 数值误差作为诊断记录于 `20261012-qwen2-kto-current-tree-l2-shim-v2`，不设训练 logits 容差门槛。 |
 | L2 | PASS（当前树固定 profile） | 当前树 strict-shim 三步公开 CLI：290 个参数梯度逐项存在且有限、SGD 整体更新非空且有限、两个公开参数组和空状态语义有效、两侧各自固定 loss 窗口下降。job 18439 的首个比较器因逐张量非零断言过严退出，独立 posthoc comparator 对同一产物通过；详见上文。 |
-| L3 | partial（当前树） | native 与 strict-shim 新进程均从既有 step-3 checkpoint 继续至 step 4；step-4 权重、loss 和输入记录对拍见上文。未验证同进程恢复、完整 optimizer/scheduler/RNG 状态与可区分样本的 dataloader 游标轨迹。 |
+| L3 | partial（当前树） | native 与 strict-shim 新进程均从既有 step-3 checkpoint 继续至 step 4；另验证同一进程从 step-4 checkpoint 继续至 step 5。step-4 checkpoint 与 step-5 权重、loss 和输入记录证据见下文。尚未证明可区分样本的 dataloader 游标轨迹，也未对 optimizer/scheduler/RNG 完整恢复状态做跨连续训练与恢复路径的语义对拍。 |
 | L4 | PASS（当前树固定 profile） | strict-shim 真实公开 RLHF CLI 完成三步 KTO 并保存 step-3 checkpoint；复用同配置、同模型/数据和相同 `python/jittor` 基线的既有原生 CLI 轨迹。完整恢复合同仍归 L3。 |
 | L5 | blocked（当前树） | L3 尚未完成；本轮未做预热后至少 10 次同步稳态性能和显存测量。 |
 
 Slurm 13856 的原始报告门禁通过；报告更新门禁 15269、15307、15319 的布局检查均通过，Torch-mode `tests/structure` 各为 1384 passed、8 skipped、1019 subtests passed。三个 worker 均没有 nvcc，因此 Jittor 结构门禁部分运行于 CPU；这只验证布局和结构，不构成 CUDA 兼容性证据。旧 v1/v2 的环境错误及其复验记录在 state，不影响门禁结论。Slurm 13838 与 13843 的首次原始门禁仅因根 `MANIFEST.in` 未列入报告及新增行排序不符而失败，修正清单后的 13856 全部通过。该报告只覆盖上列单卡 Qwen2-0.5B KTO 配置。
 
-### 当前树 L3 新进程 step-3→4 continuation 子路径（partial）
+### 当前树 L3 恢复子路径（partial）
 
 运行键 `20261012-qwen2-kto-current-tree-l3-native-fresh-v2` / Slurm 18462 与 `20261012-qwen2-kto-current-tree-l3-shim-fresh-uninstrumented-v1` / Slurm 18457 分别从既有 native 与 strict-shim L2 step-3 checkpoint 启动新的 stock `swift rlhf --rlhf_type kto` 进程，使用同一模型/数据/训练配置并将 `max_steps`/`save_steps` 调至 4，不挂模型、状态或梯度观察器。两侧均完成 step 4 并写出 checkpoint-4；保存的 `trainer_state.json` 均为 `global_step=4`。step-4 loss 为 native `0.4995219707`、shim `0.4995220304`，grad norm 分别 `15.88393211` 和 `15.88395786`，scheduler learning rate 均为 `1e-5`。两份日志中的 chosen/rejected input IDs 与 labels 完全相同，但捕获日志没有 global-step 标签，故不据此声称已证明 step-4 dataloader 游标。
 
 GPU-worker 工件审计 `20261012-qwen2-kto-current-tree-l3-resume-parity-audit-v2` / Slurm 18465 在 RTX 4090 CUDA 上逐张量比较 checkpoint。native/shim step-4 checkpoint 有相同的 290 个键、494,032,768 个元素、shape/dtype，均有限；step-3→4 各自有 243 个权重张量变化。step-4 权重最大绝对差 `7.45058e-9`、相对 L2 `8.22838e-11`，仅作诊断，不新增容差门槛。strict-shim 训练父/子进程 CUDA=1、fallback=0，`jittor_core` 前后 SHA 一致；两个 step-3 源 checkpoint 均在恢复后保持原 SHA。
 
-job 18457 的 Slurm 状态如实为 `FAILED(exit 1)`：两侧训练与保存之后的 shell marker 检查 `^end .*cuda=1 fallback=0$` 漏掉 strict-shim 实际有效 marker 中的 `shim=True`，因此未写 `RESULT_PASS`；只读审计验证原产物，并未重跑训练或把调度状态改写为通过。此前带观察钩子的 job 18456 在 step-4 backward 报 slice overflow，而两条无观察器续训轨迹均到达 step 4；这是观察器相关性的线索，不据此断言具体钩子根因。此结果只覆盖两种 runtime 的新进程 step-3→4 单批恢复 continuation；同进程恢复、optimizer/scheduler/RNG 完整状态对拍，以及可区分样本的数据游标轨迹仍未验证，故 L3 仍为 partial。原始作业退出码和审计材料保存在未版本化 state。
+job 18457 的 Slurm 状态如实为 `FAILED(exit 1)`：两侧训练与保存之后的 shell marker 检查 `^end .*cuda=1 fallback=0$` 漏掉 strict-shim 实际有效 marker 中的 `shim=True`，因此未写 `RESULT_PASS`；只读审计验证原产物，并未重跑训练或把调度状态改写为通过。此前带观察钩子的 job 18456 在 step-4 backward 报 slice overflow，而两条无观察器续训轨迹均到达 step 4；这是观察器相关性的线索，不据此断言具体钩子根因。原始作业退出码和审计材料保存在未版本化 state。
+
+同进程续训新键 `20261012-qwen2-kto-current-tree-l3-sameproc-v2` / Slurm 18544 在 `cscg-qh04` RTX 4090 上分别以 native 与 strict shim 从各自既有 step-3 checkpoint 启动公开 KTO CLI；在同一 Python 进程内先完成 step 3→4，再从刚保存的 step-4 checkpoint 调用 `trainer.train(resume_from_checkpoint=...)` 续至 step 5。两侧均到达 `global_step=5`，step-4/5 checkpoint 中 model、optimizer、scheduler、RNG 文件均存在；同进程恢复返回 `TrainOutput`，scheduler `last_epoch=5`，optimizer 各有两个参数组。290 个模型键、494,032,768 个元素均有限；两侧 step 4→5 各有 243 个权重张量变化。step-4/5 loss：native `0.4995219707`/`0.4993632436`，shim `0.4995220900`/`0.4993629158`；step-4/5 grad norm：native `15.88393211`/`15.87830925`，shim `15.88396549`/`15.87823105`。两种 runtime 在 step-4 与恢复后 step-5 观察到的 batch row hash 完全一致，step-5 跨 runtime 权重 max-abs 与 relative-L2 分别为 `7.45058e-9`、`9.26173e-11`（诊断量）。
+
+该数据集每步只有一个 batch，且 batch 已包含全部两条样本；所以相同 row hash 不能区分 dataloader 游标是否正确推进。审计也只确认恢复产物包含 optimizer/scheduler/RNG 文件并检查了 scheduler step 与 optimizer 参数组数量，没有把这些状态与不中断的 step-5 轨迹逐项对拍。因此，本次补足“同进程 step-4→5 恢复执行”子路径，但不声称完整 L3 恢复合同通过，L3 继续为 partial。v1 只在 native 导入预检时因缺少 `PYTHONPATH=$MS` 退出、训练未启动；v2 使用新运行键成功，未复用或重跑 v1。原始日志、状态文件与审计 JSON 保存在未版本化 state。
