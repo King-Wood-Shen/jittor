@@ -1,5 +1,9 @@
 # Qwen2-0.5B 公开 SFT BF16 autocast CUDA 复验
 
+- 历史结论（2026-10-08）：当时 shim 将 FP32 autocast 操作数降为 FP16。该缺陷已由
+  [2026-10-12 新收敛协议复验](2026-10-12-qwen2-causal-sft-bf16-autocast-l0l4.md)
+  修复并验证；本文件保留原始历史证据，不代表当前状态。
+
 - 状态：已验证当前 shim 对 FP32 模型请求 BF16 autocast 时会降为 FP16，故该精度合同不兼容；固定三步训练可完成，但完整 L0–L5 未通过。
 - 仓库：Jittor `baa73bfdc3e3af949722659405e31ee70e5bb380`（2.0.0）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 维护者：ms-swift CUDA 适配。

@@ -37,6 +37,7 @@
 2026-10-08-qwen2-causal-sft-grad3-4a7e
 2026-10-08-qwen2-causal-sft-gradient-checkpointing-cuda
 2026-10-08-qwen2-causal-sft-bf16-amp-cuda
+2026-10-12-qwen2-causal-sft-bf16-autocast-l0l4
 2026-10-08-qwen2-causal-sft-l0-audit
 2026-10-08-qwen2-seqcls-sft-cuda
 2026-10-08-qwen2-seqcls-infer-cuda
@@ -102,7 +103,8 @@
 | [Qwen2-0.5B 公开全参数 SFT 三步复验](2026-10-07-qwen2-causal-sft-ffeb.md) | 补 scheduler 修复后的 step-3→4 新进程续训：290 键权重与 scheduler 对齐且零 fallback；optimizer、RNG 实值、数据游标和同进程恢复未验，L3 仍 blocked | 2026-10-09 |
 | [Qwen2-0.5B 公开全参数 SFT 三步逐参数梯度对拍](2026-10-08-qwen2-causal-sft-grad3-4a7e.md) | 290 项全参数梯度三步对齐；状态、更新轨迹与恢复仍未完成 L0–L4 验收 | 2026-10-08 |
 | [Qwen2-0.5B 公开 SFT gradient checkpointing CUDA 复验](2026-10-08-qwen2-causal-sft-gradient-checkpointing-cuda.md) | 三步数值与末态权重接近且零 fallback；shim 直通不重算激活、不节省显存，checkpointing 内存语义不兼容 | 2026-10-08 |
-| [Qwen2-0.5B 公开 SFT BF16 autocast CUDA 复验](2026-10-08-qwen2-causal-sft-bf16-amp-cuda.md) | FP32 模型请求 BF16 autocast 时兼容层实际转 FP16；三步训练零 fallback，末态权重接近但 loss/梯度轨迹不同，optimizer 状态未比对 | 2026-10-08 |
+| [Qwen2-0.5B 公开 SFT BF16 autocast CUDA 复验](2026-10-08-qwen2-causal-sft-bf16-amp-cuda.md) | 2026-10-08 历史结论；BF16 路由缺陷已由后续报告修复并验证 | 2026-10-08，2026-10-12 复核 |
+| [Qwen2-0.5B 公开 SFT BF16 autocast 新收敛协议复验](2026-10-12-qwen2-causal-sft-bf16-autocast-l0l4.md) | 修复 FP32 输入/权重下 BF16 autocast 落到 FP16；指定公开 SFT profile 的 L0–L4 通过，L5 未跑；通用 25% 跨实现数值阈值仅保留为独立诊断 | 2026-10-12 |
 | [Qwen2-0.5B 公开 SFT 单卡初始参数 CUDA 审计](2026-10-08-qwen2-causal-sft-l0-audit.md) | 290 个 trainable 参数的 CUDA 初态跨运行时逐项相同；state-dict 参数名和后续层仍未验，L0 partial | 2026-10-08 |
 | [Qwen2-0.5B 序列分类公开 SFT CUDA 对拍](2026-10-08-qwen2-seqcls-sft-cuda.md) | 共用 checkpoint/首批后 logits 与 loss 对齐；参数名映射、梯度状态与恢复未验，L0/L1 partial | 2026-10-08 |
 | [Qwen2-0.5B 序列分类公开 infer CLI CUDA 对拍](2026-10-08-qwen2-seqcls-infer-cuda.md) | 固定 checkpoint 与输入下预测类别一致、首批 logits 达容差、严格 CUDA/零 fallback；L0/L1 partial，恢复和性能未验 | 2026-10-08 |
