@@ -39,23 +39,27 @@ def test_broadcast_forward_and_gradients(batch1, batch2, transposed):
     b = rng.randn(*(batch2 + ((4, 3) if transposed else (3, 4))))
     import jittor as jt
     op = load_bmm(jt)(transposed)
-    left, right = jt.array(a, dtype="float64"), jt.array(b, dtype="float64")
-    value = op.execute(left, right)
-    output = value.numpy()
-    np.testing.assert_allclose(output, a @ (b.swapaxes(-1, -2) if transposed else b))
-    weight = rng.randn(*output.shape)
-    gradients = jt.grad((value * jt.array(weight, dtype="float64")).sum(), [left, right])
-    # Finite differences independently check reductions across singleton and
-    # missing batch dimensions, including the transposed-right backward path.
-    for source, gradient in zip((a, b), gradients):
-        assert tuple(gradient.shape) == source.shape
-        numerical = np.empty_like(source)
-        for index in np.ndindex(source.shape):
-            original = source[index]
-            source[index] = original + 1e-5
-            positive = ((a @ (b.swapaxes(-1, -2) if transposed else b)) * weight).sum()
-            source[index] = original - 1e-5
-            negative = ((a @ (b.swapaxes(-1, -2) if transposed else b)) * weight).sum()
-            source[index] = original
-            numerical[index] = (positive - negative) / 2e-5
-        np.testing.assert_allclose(gradient.numpy(), numerical, atol=1e-8, rtol=1e-7)
+    # This is the CPU graph contract for an ACL implementation. On an ACL
+    # worker, explicitly keep these float64 finite-difference operations on CPU;
+    # the mapped ACL kernel is intentionally replaced by cpu_matmul above.
+    with jt.flag_scope(use_acl=0, use_cuda=0):
+        left, right = jt.array(a, dtype="float64"), jt.array(b, dtype="float64")
+        value = op.execute(left, right)
+        output = value.numpy()
+        np.testing.assert_allclose(output, a @ (b.swapaxes(-1, -2) if transposed else b))
+        weight = rng.randn(*output.shape)
+        gradients = jt.grad((value * jt.array(weight, dtype="float64")).sum(), [left, right])
+        # Finite differences independently check reductions across singleton and
+        # missing batch dimensions, including the transposed-right backward path.
+        for source, gradient in zip((a, b), gradients):
+            assert tuple(gradient.shape) == source.shape
+            numerical = np.empty_like(source)
+            for index in np.ndindex(source.shape):
+                original = source[index]
+                source[index] = original + 1e-5
+                positive = ((a @ (b.swapaxes(-1, -2) if transposed else b)) * weight).sum()
+                source[index] = original - 1e-5
+                negative = ((a @ (b.swapaxes(-1, -2) if transposed else b)) * weight).sum()
+                source[index] = original
+                numerical[index] = (positive - negative) / 2e-5
+            np.testing.assert_allclose(gradient.numpy(), numerical, atol=1e-8, rtol=1e-7)
