@@ -888,6 +888,12 @@ worker comparator 发现两侧加载参数与 prefill 输入精确一致，prefi
 
 新预检键 `qwen3-public-infer-batch2-nocache-greedy4-world1-20261012-r1` 的 srun job 2677 只检查 CLI、未启动模型；worker 显示此版本公开 `swift infer` 不暴露 `--use_cache`，故没有运行独立的 cache-on/off 对照。已核验的 tiny fixture `generation_config.json` 将 `use_cache` 设为 `false`，但这不替代成对 cache 配置验收。该尝试是公开控制参数未暴露的前置限制，不是 ACL/模型兼容失败；保留运行键且不重跑。
 
+后续以本地只读模型副本（只修改 `config.json` 与 `generation_config.json` 的 `use_cache=true`，其余已校验权重和 tokenizer 使用符号链接）补齐 cache-enabled 公开入口格。初始键 `qwen3-public-infer-batch2-cacheon-greedy4-world1-20261012-r1` 的 worker 预检 job 2691 通过，但随后发现尚未执行模型前的 gate 草稿仍按两个 batch 请求计数；没有 native/candidate 模型作业在该键运行。新键 `...cacheon...-r2` 的预检 job 2692 通过：实际模型目录 `cache-on-base`、adapter `checkpoint-3`，两条原始提示各 115 token，权重与 adapter 清单/hash 可读、离线不下载；native 身份为 torch_npu/Ascend910B3，candidate 为 ACL，核心 SHA256 `7c2d5edd…3294bc`、`backend_fallback=error` 且预检 fallback=0。Native public infer job 2693 退出 0；gate job 2694 暴露 gate 自身把单个 batch-2 请求误数成 8 次前向的 harness 断言错误，不启动 ACL candidate。
+
+修正计数后的 gate-only 键 `qwen3-public-infer-batch2-cacheon-greedy4-gatefix1-20261012-r1` 以只读链接复用 jobs 2692/2693 的产物，worker gate job 2695 通过：有效 `GenerationConfig.use_cache=true`，实际 batch=2，4 次模型输入长度为 `[124,1,1,1]`，确认 prefill 后为三步单 token decode。候选 job 2696 在模型前因复制的 observer 输出目录已被 setup 预创建、而 observer 使用 `mkdir(exist_ok=False)` 退出；这是 harness 目录冲突，不是 ACL 兼容结论。新键 `qwen3-public-infer-batch2-cacheon-greedy4-aclfix1-20261012-r1` 删除该预创建目录并只读复用原生/预检/gate 证据；strict ACL public infer job 2697 与 worker comparator 2698 均通过。Comparator 检查了两侧完整有效 GenerationConfig 相同且 `use_cache=true`、加载参数和所有输入精确相同、4 组 logits 满足 `atol=1e-5, rtol=1e-4`（最大绝对差 0）、greedy token ID 与响应精确相同；candidate 全程 NPU、ACL `backend_fallback=error`、fallback=0。未下载权重。
+
+因此该锁定 cache-enabled tiny Qwen3 单 NPU、batch-2、公开 `swift infer` case 的 L0/L1/L4 通过；通过模型本地配置启用缓存，不代表公开 CLI 提供 `--use_cache` 开关，也不构成配对 on/off 数值/性能比较或 L5 结论。历史 job 2677 的 CLI 探针和两次 harness 失败均保留，不追溯改写。原始清单、脚本、worker 日志与数组快照未版本化，位于 `$TASK_STATE/runs/qwen3-public-infer-batch2-cacheon-greedy4-world1-20261012-r1/`、`...-r2/`、`...-gatefix1-20261012-r1/`、`...-aclfix1-20261012-r1/`。
+
 
 ### Qwen3 tiny 公开 top-k=4 与 top-p=0.8 组合 sampling（2026-10-12）
 
