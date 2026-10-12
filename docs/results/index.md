@@ -38,6 +38,7 @@
 2026-10-08-qwen2-causal-sft-gradient-checkpointing-cuda
 2026-10-08-qwen2-causal-sft-bf16-amp-cuda
 2026-10-12-qwen2-causal-sft-bf16-autocast-l0l4
+2026-10-12-ms-swift-cuda-grpo-ppo-handoff
 2026-10-08-qwen2-causal-sft-l0-audit
 2026-10-08-qwen2-seqcls-sft-cuda
 2026-10-08-qwen2-seqcls-infer-cuda
@@ -74,6 +75,8 @@
 2026-10-11-tinyllama-public-infer-l01
 2026-10-11-qwen2-ia3-public-infer-cuda
 ```
+
+| [ms-swift CUDA 算法覆盖：GRPO 阻塞与 PPO 交接](2026-10-12-ms-swift-cuda-grpo-ppo-handoff.md) | GRPO 因 worker 无法安装 trl>=0.26 在训练前受阻；PPO worker 依赖与公开 CLI help 预检通过，完整 PPO 因共享 NFS 无有效配额而未运行 | 2026-10-12 |
 
 ## 按主题索引
 
