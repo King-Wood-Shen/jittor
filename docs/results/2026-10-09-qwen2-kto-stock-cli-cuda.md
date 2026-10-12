@@ -1,11 +1,11 @@
 # Qwen2-0.5B stock `swift rlhf --rlhf_type kto` CUDA 入口审计
 
-- 状态：固定配置当前树 L0–L2、L4 通过；L3 未运行、L5 因 L3 前置范围未完成而 blocked。L0 清单与 L1/L2/L4 训练基线分别见下文。结论不代表其他偏好算法或 ms-swift 整体兼容。
+- 状态：固定配置当前树 L0–L2、L4 通过；L3 有一条 strict-shim 新进程恢复子路径通过到 step 4，但完整恢复合同仍 partial；L5 因 L3 前置范围未完成而 blocked。L0 清单与 L1/L2/L4 训练基线分别见下文。结论不代表其他偏好算法或 ms-swift 整体兼容。
 - 日期：2026-10-12 复核。
 - 历史基线：Jittor `35963c2e047dfa81751f82e8127064adf865d6bd`（上游 `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；当前树的复验 SHA 单列于各小节；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 范围：Qwen2-0.5B causal LM，全参数 FP32/eager，公开单卡 `swift rlhf --rlhf_type kto`，固定二条 preference 数据（chosen/rejected）、batch 2、SGD、三步；早期单步调用栈与完整 logits 证据仍保留。
 - 维护者：ms-swift CUDA 适配。
-- 复查条件：当前树的 L1/L2/L3/L4/L5 尚未逐层验收；恢复与完整公开训练流程需用新运行键继续。若调整自动 graph replay 的首次 capture 行为，复核该 CUDA 训练调用路径；Torch shim、Transformers、TRL 或 ms-swift KTO 入口变更时重跑受影响层。
+- 复查条件：当前树 L3 的同进程恢复、native 对照续训、scheduler/RNG/dataloader 游标与后续轨迹仍未验收。若调整自动 graph replay 的首次 capture 行为，复核该 CUDA 训练调用路径；Torch shim、Transformers、TRL 或 ms-swift KTO 入口变更时重跑受影响层。
 
 模型权重 SHA256 为 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`；固定 preference 数据 SHA256 为 `05640c5363ecd9bf8162504ffee786a21f4c92a2bcd3fd64403a2269dd53baec`。运行环境为 Python 3.11.15、PyTorch 2.6.0+cu124、Transformers 4.57.6、TRL 0.24.0，ms-swift 自报版本 `4.6.0.dev0`。
 
@@ -45,3 +45,9 @@ Slurm 13834 在 `cscg-qh04` RTX 4090 上预检了 ms-swift 模块来源、CUDA �
 | L5 | blocked（当前树） | L3 尚未完成；本轮未做预热后至少 10 次同步稳态性能和显存测量。 |
 
 Slurm 13856 的原始报告门禁通过；报告更新门禁 15269、15307、15319 的布局检查均通过，Torch-mode `tests/structure` 各为 1384 passed、8 skipped、1019 subtests passed。三个 worker 均没有 nvcc，因此 Jittor 结构门禁部分运行于 CPU；这只验证布局和结构，不构成 CUDA 兼容性证据。旧 v1/v2 的环境错误及其复验记录在 state，不影响门禁结论。Slurm 13838 与 13843 的首次原始门禁仅因根 `MANIFEST.in` 未列入报告及新增行排序不符而失败，修正清单后的 13856 全部通过。该报告只覆盖上列单卡 Qwen2-0.5B KTO 配置。
+
+### 当前树 L3 strict-shim 新进程恢复子路径（partial）
+
+运行键 `20261012-qwen2-kto-current-tree-l3-shim-fresh-uninstrumented-v1` / Slurm 18457 从当前树 L2 strict-shim 的 immutable step-3 checkpoint 启动新的公开 `swift rlhf --rlhf_type kto` 进程，移除了 job 18456 使用的模型/状态/梯度观察钩子，并将 `max_steps`/`save_steps` 设为 4。worker 日志显示训练到 `global_step=4`、step-4 loss `0.49952203`、有限 `grad_norm=15.88395786`，并保存 step-4 checkpoint；保存的 `trainer_state.json` 确认 `global_step=4`。strict-shim 父子进程结束标记均为 `cuda=1, shim=True, fallback=0`，`jittor_core` SHA 前后相同。恢复前后源 step-3 checkpoint 的模型、optimizer、scheduler、RNG 文件 SHA 相同。
+
+Slurm 作业如实为 `FAILED(exit 1)`，但失败发生于训练保存之后的 shell 收尾检查：检查式 `^end .*cuda=1 fallback=0$` 漏掉实际有效标记中的 `shim=True`，导致未写入 `RESULT_PASS`。只读 posthoc 审计确认上述产物与收尾谓词不匹配；没有重跑训练或把作业状态改写为通过。该结果只支持 strict-shim 新进程从 step 3 继续到 step 4 的一条子路径；尚未对照 native 续训，也未验证同进程恢复、scheduler/RNG/dataloader 游标的跨实现续训轨迹和完整 L3 合同，因此 L3 仍是 partial。此前带观察钩子的 job 18456 在恢复断言后 step-4 backward 报 slice overflow，而无观察钩子的这条轨迹完成 step 4；这是观察器相关性的线索，不据此断言具体钩子根因或完整恢复兼容性。原始作业退出码与 posthoc 审计保存在未版本化 state。
