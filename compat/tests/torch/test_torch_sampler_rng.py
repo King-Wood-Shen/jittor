@@ -70,3 +70,49 @@ def test_generator_state_round_trips():
 
     g.set_state(state)
     assert torch.randint(0, 100, (5,), generator=g).tolist() == after_state
+
+
+def test_single_process_dataloader_iterator_consumes_global_cpu_rng():
+    from torch.utils.data import DataLoader
+
+    torch.manual_seed(1234)
+    loader = DataLoader(["a", "b"], batch_size=2, shuffle=False,
+                        num_workers=0)
+    before = torch.get_rng_state().tolist()
+    iterator = iter(loader)
+    after = torch.get_rng_state().tolist()
+
+    assert before != after
+    assert next(iterator) == ["a", "b"]
+
+
+def test_dataloader_iterator_consumes_explicit_generator_only():
+    from torch.utils.data import DataLoader
+
+    torch.manual_seed(4321)
+    global_before = torch.get_rng_state().tolist()
+    generator = torch.Generator(device="cpu").manual_seed(99)
+    generator_before = generator.get_state().tolist()
+    loader = DataLoader(["a", "b"], batch_size=2, shuffle=False,
+                        num_workers=0, generator=generator)
+
+    iterator = iter(loader)
+    assert torch.get_rng_state().tolist() == global_before
+    assert generator.get_state().tolist() != generator_before
+    assert next(iterator) == ["a", "b"]
+
+
+def test_worker_dataloader_iterator_consumes_explicit_generator_only():
+    from torch.utils.data import DataLoader
+
+    torch.manual_seed(6543)
+    global_before = torch.get_rng_state().tolist()
+    generator = torch.Generator(device="cpu").manual_seed(101)
+    generator_before = generator.get_state().tolist()
+    loader = DataLoader(["a", "b"], batch_size=1, shuffle=False,
+                        num_workers=1, generator=generator)
+
+    batches = list(iter(loader))
+    assert torch.get_rng_state().tolist() == global_before
+    assert generator.get_state().tolist() != generator_before
+    assert batches == [["a"], ["b"]]

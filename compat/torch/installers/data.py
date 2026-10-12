@@ -271,13 +271,25 @@ def _default_collate(batch):
 
 
 class _BaseDataLoaderIter:
+    def __init__(self, loader):
+        self._loader = loader
+        # PyTorch draws a base seed from the loader generator (or the global
+        # CPU stream) whenever an iterator is created, even when there are no
+        # worker processes. The single-process iterator does not use the seed,
+        # but consuming it is observable through RNG state and matters when a
+        # training checkpoint resumes the surrounding stream.
+        torch = _torch_ns()
+        self._base_seed = int(torch.randint(
+            0, 2**63 - 1, (), dtype=torch.int64, device="cpu",
+            generator=loader.generator).item())
+
     def __iter__(self):
         return self
 
 
 class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
     def __init__(self, loader):
-        self._loader = loader
+        super().__init__(loader)
         self._batch_iter = iter(loader.batch_sampler)
 
     def __next__(self):
@@ -318,24 +330,18 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
     """
 
     def __init__(self, loader):
-        self._loader = loader
+        super().__init__(loader)
         self._batch_iter = iter(loader.batch_sampler)
         self._num_workers = max(1, int(loader.num_workers or 0))
         prefetch = loader.prefetch_factor
         self._prefetch = max(1, int(prefetch if prefetch else 2))
         self._timeout = float(loader.timeout or 0) or None
         self._pending = _collections_data.deque()
-        base_seed = 0
-        try:
-            base_seed = int(jt.get_seed())
-        except EXPECTED as exc:
-            swallowed("torch/installers/data.py __init__: base_seed = int(jt.get_seed())", exc)
-            base_seed = 0
         self._pool = _futures_data.ThreadPoolExecutor(
             max_workers=self._num_workers,
             thread_name_prefix="jt-dataloader",
             initializer=_init_worker,
-            initargs=(loader, base_seed))
+            initargs=(loader, self._base_seed))
         _stub_policy_data.degraded(
             "torch.utils.data.DataLoader(num_workers>0)",
             "batches are prefetched by %d worker THREADS rather than "
