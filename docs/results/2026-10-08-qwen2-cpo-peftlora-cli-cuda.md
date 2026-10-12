@@ -1,10 +1,10 @@
 # Qwen2-0.5B 公开 CPO LoRA `swift rlhf` CUDA 对拍
 
-- 状态：固定单偏好对 CPO profile 的当前代码基线（Jittor `python/jittor`/`compat` tree 对应 `73232b9`）L0–L2 与 L4 已通过；L3 恢复仍明确绑定 `67228d557`，不自动转移到新提交；L5 未运行。完整模型 state/buffer 清单已补齐，唯一 buffer `rotary_emb.inv_freq` 的 `requires_grad` 标志差异单独记录。原三步异批次轨迹和其批次顺序根因保留为历史结论，不把跨实现数值差异外推为算子错误。
+- 状态：固定单偏好对 CPO profile 在相同 Jittor 实现树（`python/jittor`=`b066dc9`、`compat`=`5580020`）下 L0–L4 已通过：L0/L1/L2/L4 绑定 Jittor `73232b9` 训练基线，L3 由新运行键在当前 Jittor HEAD `45dbf2f` 复验；L5 未运行。完整模型 state/buffer 清单已补齐，唯一 buffer `rotary_emb.inv_freq` 的 `requires_grad` 标志差异单独记录。原三步异批次轨迹和其批次顺序根因保留为历史结论，不把跨实现数值差异外推为算子错误。
 - 仓库：Jittor `7751f74e8405adda9cd30c950bc037dda19bd5d4`（2.0.0）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 环境：Python 3.11.15，PyTorch 2.6.0+cu124 / TRL 0.24.0；RTX 4090，CUDA 12.2，驱动 580.178.04。
 - 维护者：ms-swift CUDA 适配。
-- 复查条件：固定并核实初始 LoRA adapter 和每步样本 ID 后，补同批 logits/loss、逐参数梯度和 optimizer 状态对拍，再隔离本次轨迹与 adapter 分歧。
+- 复查条件：实现树、固定模型/adapter/数据或 CLI 配置变化时重验相应层；多样本 sampler 和稳态 L5 仍是独立未覆盖项。
 
 Slurm 13530 在 `cscg-qh17`（GPU UUID `GPU-d892cd13-505f-f0a8-be2f-ee118c4155b8`）依次运行原生 PyTorch oracle 和 strict shim。模型 Qwen2-0.5B 权重 SHA256 为 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`；固定四条偏好数据 SHA256 为 `57b44eaa07bdf2f2a82d5f407df5b04e7ae81ac4f3be04f65ef3ed07322cde28`。配置为公开 `python -m swift.cli.main rlhf --rlhf_type cpo`、LoRA rank 4 / alpha 8 / `all-linear`、FP32、sigmoid CPO、beta 0.1、cpo_alpha 1、SGD `1e-5`、batch 2、固定顺序三步。两侧均保存 checkpoint-3；模型共约 496.23M 参数，2.20M 可训练 adapter 参数。
 
@@ -104,7 +104,7 @@ Slurm job 17994 最终被 harness 标成 `FAILED(exit1)`，唯一失败发生在
 | L0 | pass（绑定当前代码 tree `73232b9`） | job 18025/18029 完整核对 626 个参数、627 个 state 键和 1 个 buffer 的键/shape/dtype/device；336 个 trainable 参数元数据相同。唯一独立记录的差异是 RoPE buffer 的 `requires_grad`，见下节。 |
 | L1 | pass（绑定当前代码 tree `73232b9`） | native/shim 首步前向输出结构、shape、dtype、有限性有效；16 步输入身份相同，误差仅作诊断。 |
 | L2 | pass（绑定当前代码 tree `73232b9`） | 两侧各 16 步，全部 trainable 梯度有限非零、真实更新且各自 loss 窗口下降；跨 runtime 训练数值只作诊断。 |
-| L3 | pass（绑定 `67228d557`） | 仅引用前节已通过的固定单样本同/新进程恢复；本节 fresh-start 与 L0 补审没有重跑恢复。 |
+| L3 | pass（绑定当前 Jittor HEAD `45dbf2f`） | 新运行键在与 L0–L2/L4 完全相同的 `python/jittor`、`compat` tree 上重新验收同进程和新进程恢复；旧 `67228d557` 结论仍保留其自身绑定。 |
 | L4 | pass（绑定当前代码 tree `73232b9`） | native 与 strict shim 的公开 CPO CLI 均完成 16 步并保存 checkpoint-16，严格 CUDA、fallback=0。 |
 | L5 | not-run | 没有做不含逐步张量采集的稳态性能测量；不同 GPU UUID，也不作性能比较。 |
 
@@ -116,4 +116,19 @@ Slurm job 17994 最终被 harness 标成 `FAILED(exit1)`，唯一失败发生在
 
 初版比较器将 buffer `requires_grad` 也当成硬匹配条件，导致 job 18025 在两个构造清单均成功后以 exit 1 结束；只读复核键 `20261012-qwen2-cpo-fixedinit-l0-inventory-compare-v1` / job `18029` 按本 Skill 的 L0 键/shape/dtype/device 合同重比，确认全量 inventory 通过，输入 JSON SHA 前后不变。唯一 buffer `base_model.model.model.rotary_emb.inv_freq` 的 `requires_grad` 为 native `false`、shim `true`，但 buffer 键、shape `[32]`、`torch.float32` 与 `cuda:0` 均一致；336 个 trainable 参数的 `requires_grad` 完全一致。此标志差异保留为结构元数据边界，不据此推断其对其他任务、梯度或恢复语义的影响。该差异与已有 Qwen2 seq-cls 报告的同名 buffer 观察相符。
 
-worker 预检通过用户 NFS 导出上的 64 KiB fsync、精确输入摘要、匹配 Jittor/compat tree、现有 CUDA cache 路径及 no-build bootstrap。job 18029 前后 `jittor_core`/`jit_utils_core` SHA 不变，无 core 冷编译；其 CPU JSON inventory comparator 不构成额外 CUDA 数值证据。完整 JSON、脚本、日志均未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-cpo-fixedinit-l0-inventory-v1/` 和 `20261012-qwen2-cpo-fixedinit-l0-inventory-compare-v1/`。fresh-start 当前代码 tree 的 L0–L2/L4 现在可提升；L3 仍绑定其原先已通过的 `67228d557`，L5 仍未运行。
+worker 预检通过用户 NFS 导出上的 64 KiB fsync、精确输入摘要、匹配 Jittor/compat tree、现有 CUDA cache 路径及 no-build bootstrap。job 18029 前后 `jittor_core`/`jit_utils_core` SHA 不变，无 core 冷编译；其 CPU JSON inventory comparator 不构成额外 CUDA 数值证据。完整 JSON、脚本、日志均未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-cpo-fixedinit-l0-inventory-v1/` 和 `20261012-qwen2-cpo-fixedinit-l0-inventory-compare-v1/`。fresh-start 的 L0–L2/L4 证据绑定训练提交 `73232b9399042d83d3d352264d5ab0fa4df74f75`；L3 后续在 Jittor HEAD `45dbf2fc2190eee0389a1a24ab7b594debf73ccf` 新键复验通过。两者 `python/jittor` 与 `compat` tree SHA 完全一致，故固定单样本 CPO 在该实现树上 L0–L4 通过；更早 `67228d557` 的 L3 记录仍保留原始绑定，L5 未运行。
+
+### 当前 Jittor HEAD 固定初态 L3 恢复复验（2026-10-12）
+
+运行键 `20261012-qwen2-cpo-fixedinit-l3-restore-current-tree-v1` 的 worker 预检 job `18040` 与恢复 job `18041` 均在 `cscg-qh04` 完成。恢复作业使用 Jittor HEAD `45dbf2fc2190eee0389a1a24ab7b594debf73ccf`、ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`，RTX 4090 UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4`，Python 3.11.15 / PyTorch 2.6.0+cu124、CUDA 12.2、driver 580.178.04。该 Jittor HEAD 的 `python/jittor` tree `b066dc9e303d2d3e7eb2c4bd4a824ab68657e835` 和 `compat` tree `558002060ff0d29791daa7402c2ecc6fcd5fa49e` 与 L0–L2/L4 训练基线 `73232b9399042d83d3d352264d5ab0fa4df74f75` 完全相同；ms-swift、模型 SHA、初始 adapter SHA 和固定单条 preference 数据 SHA 也与既有 profile 相同。
+
+作业只读复用既有 native 与 strict-shim checkpoint-12；未重跑控制训练、生成源 checkpoint 或任何此前 L3 键。工作前后两份源 checkpoint 文件 SHA 清单逐项相同。每个 runtime 的同进程路径在一个 Trainer 中从 checkpoint-12 恢复至 step14，再从 checkpoint-14 继续至 step16；新进程路径由 A 从 checkpoint-12 到 step14，再由独立 B 从 checkpoint-14 到 step16。比较器逐次核对 336 个 adapter 张量、optimizer 参数组/状态、scheduler SHA，以及 Python/NumPy/Torch CPU/CUDA RNG，全部精确恢复。step13–16 的样本身份均为 `1920e2fd87aac1da093272baaa95ad9dee542e47d8def60f7aecdd34dd88aa7d`；每步 336 个 trainable 参数均有有限非零梯度并发生更新，global-step/epoch 与恢复游标一致。strict shim 六个 CLI worker 均记录 CUDA=1、fallback=0。native-only gate 与完整比较器分别输出 `CPO_FIXEDINIT_L3_NATIVE_GATE_PASS` 和 `CPO_FIXEDINIT_L3_RESTORE_AUDIT_PASS`。
+
+| runtime / 路径 | step 13–14 平均 loss | step 15–16 平均 loss |
+| --- | ---: | ---: |
+| native / 同进程 | 1.49561375 | 1.49188954 |
+| native / 新进程 | 1.49561375 | 1.49188954 |
+| strict shim / 同进程 | 1.49561340 | 1.49189109 |
+| strict shim / 新进程 | 1.49561542 | 1.49189132 |
+
+四条恢复轨迹的后两步平均 loss 均低于前两步。单条 preference 只证明该固定样本的恢复身份与游标；不推断多样本 sampler 顺序或其他 CPO 配置。L3 结论限于此 profile，不代表 L5 或 ms-swift 整体。worker 预检 job `18040` 确认当前用户 NFS export、64 KiB fsync、模型/adapter/data SHA、源 checkpoint SHA、缓存路径指纹与 strict CUDA 小算子；配额命令无适用记录，可用空间超过此任务未知配额门槛 6 GiB。完整脚本和逐步 JSONL 未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-cpo-fixedinit-l3-restore-current-tree-v1/`；该 run 目录在报告整理时含日志和脚本共 533,133,767 bytes。
