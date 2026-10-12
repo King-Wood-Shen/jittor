@@ -131,7 +131,7 @@
 | [Qwen2-0.5B causal LM `TransformersEngine` Python API CUDA 对拍](2026-10-08-qwen2-causal-transformersengine-api.md) | 固定两请求非流式生成在 31 步 logits、token IDs 和文本上对齐；L0/L1/L4/L5 通过、L2/L3 不适用、strict CUDA/零 fallback | 2026-10-08 |
 | [Qwen2-0.5B ms-swift `swift deploy` 服务端/客户端 CUDA 复验](2026-10-08-qwen2-service-infer-361bf.md) | 固定 Qwen2 FP32/eager 服务 profile 的 L0/L1/L4/L5 通过，L2/L3 不适用；L5 同卡稳态 HTTP 与进程显存口径已补齐 | 2026-10-11 |
 | [Qwen2-0.5B PEFT LoRA 公开 `swift export --merge_lora` CUDA 对拍](2026-10-08-qwen2-peftlora-export-merge-82c2.md) | 历史 `82c2` 严格结论保留；当前基线 L0/L1/L4 通过、零 fallback，L3 not-run；固定配置范围受限 | 2026-10-11 |
-| [Qwen2-0.5B stock `swift rlhf --rlhf_type kto` CUDA 入口审计](2026-10-09-qwen2-kto-stock-cli-cuda.md) | 固定配置当前树 L0-L2、L4 通过；strict-shim 新进程 step-3→4 恢复子路径通过，L3 仍 partial（缺 native 续训与完整状态/游标合同），L5 blocked | 2026-10-12 |
+| [Qwen2-0.5B stock `swift rlhf --rlhf_type kto` CUDA 入口审计](2026-10-09-qwen2-kto-stock-cli-cuda.md) | 固定配置当前树 L0-L2、L4 通过；native/strict-shim 新进程 step-3→4 continuation 对拍通过，L3 仍 partial（缺同进程、完整状态和可区分样本游标合同），L5 blocked | 2026-10-12 |
 | [Qwen2-0.5B stock `swift rlhf --rlhf_type rm` CUDA 入口审计](2026-10-09-qwen2-reward-stock-cli-cuda.md) | 固定配置 L0–L5 通过（含 step-2 同/新进程完整恢复及10次稳态性能测量）；范围仅限报告中的固定 Reward RM CLI profile，不代表其它 Reward/ms-swift 范围 | 2026-10-12 |
 | [Qwen2-0.5B RewardTrainer Python API CUDA 对拍](2026-10-09-qwen2-rewardtrainer-api-cuda.md) | 保留2026-10-09旧协议三步严格对拍；新协议 native 与 strict shim 新进程恢复均通过，同进程恢复仍因审计面轮次上限未结案，L3 partial | 2026-10-12 |
 | [Qwen2-0.5B stock `swift rlhf --rlhf_type simpo` 双卡 CUDA 对拍](2026-10-09-qwen2-simpo-2gpu-cli-cuda.md) | 固定六行重复 preference 数据下双卡三步输入/梯度及 step-3→4 新进程恢复轨迹对齐；strict shim 零 fallback，跨 runtime 状态哈希不同，同进程恢复与可区分样本游标未验；L0-L4 partial，L5 blocked | 2026-10-10 |
