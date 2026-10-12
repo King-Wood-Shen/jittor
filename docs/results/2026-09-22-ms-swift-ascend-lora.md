@@ -994,3 +994,11 @@ Worker 预检确认模型实际目录名 `cache-on-base-topk4`、Adapter `checkp
 实际模型/Adapter 目录为 `cache-on-base-topk4` / `checkpoint-3`；权重、输入与初态清单摘要一致，离线未下载。两侧启用 KV cache；native 为 Ascend910B3 `torch_npu`，candidate 为 ACL、`backend_fallback=error`、fallback=0，core SHA256 `7c2d5edd…3294bc`。四条固定 prompt 分两个实际 batch=2 请求，每条最多生成四 token。native gate 观察到八次 NPU 前向，序列长度分别为 `[15,1,1,1]`、`[17,1,1,1]`。fix3 比较器确认加载参数与 prefill IDs 完全一致、prefill logits 最大绝对差为 0，六组相同 decode 输入的 logits 满足 `atol=1e-5, rtol=1e-4`。每侧每步样本都属于各自 top-k=2 后 top-p=.8 的组合候选集合，后续 cache 输入消费上一 token。两侧这次序列相同，不声称 RNG 等价。此锁定配置 L0/L1/L4 通过，L5 未运行；不外推至其它采样参数、cache-off、beam、训练/恢复或其它模型。
 
 日志、manifest、脚本及快照位于 `$TASK_STATE/runs/qwen3-public-infer-batch2-cacheon-topk2-topp08-temp07-sample-multistep4-world1-20261012-r2/`，只读比较器修复证据位于 `$TASK_STATE/runs/qwen3-topk2-topp08-temp07-comparator-fix3-20261012-r1/`。基线 HEAD `c547d29cecedd5a1bed7f630cd880a89bd2eb034`；dirty source patch SHA256 `192171d2616b3494cd3fe94f91141e168827e471d7519c56362b7c1d269c04b3`。本格开始前同步的 mirror `2.0-refactor` SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0` 是该基线祖先。
+
+### Qwen3 tiny cache-enabled top-k=8 + top-p=0.8、temperature=0.7 四步 sampling（2026-10-12）
+
+新独立格 `qwen3-public-infer-batch2-cacheon-topk8-topp08-temp07-sample-multistep4-world1-20261012-r1` 完成公开 `swift infer` 的原生 torch_npu 与 strict ACL 对照。预检 2803、原生 oracle 2804、原生 gate 2805、candidate 2806、只读 worker 比较器 2807 均退出 0。实际模型/Adapter 目录 `cache-on-base-topk4` / `checkpoint-3`；权重、输入和初态清单摘要匹配，下载关闭。native 为 Ascend910B3 `torch_npu`；candidate 为 ACL、`backend_fallback=error`、fallback=0，core SHA256 `7c2d5edd…3294bc`；两侧 cache-on。
+
+四条固定 prompt 分两个真实 batch=2 请求，每条最多生成四 token。native gate 观察到八次 NPU 前向，解码长度分别为 `[15,1,1,1]` 与 `[17,1,1,1]`。比较器确认加载参数及 prefill IDs 精确一致，prefill logits 最大绝对差为 0；六组相同 decode 输入的 logits 满足 `atol=1e-5, rtol=1e-4`。两侧每步 token 均在各自 top-k=8 后 top-p=.8 的组合候选集内，下一步 cache 输入消费上一 token。观察到的采样序列相同不代表跨 runtime RNG 等价。此锁定配置 L0/L1/L4 通过，L5 未运行；不外推到其它采样参数、cache-off、beam、训练/恢复或其它模型。
+
+原始日志、manifest、脚本与快照位于 `$TASK_STATE/runs/qwen3-public-infer-batch2-cacheon-topk8-topp08-temp07-sample-multistep4-world1-20261012-r1/`。基线 HEAD `8ceffd78a835876503816c351528461f40a9d600`；dirty source patch SHA256 `192171d2616b3494cd3fe94f91141e168827e471d7519c56362b7c1d269c04b3`。本格开始前同步的 mirror `2.0-refactor` SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0` 是该基线祖先。
