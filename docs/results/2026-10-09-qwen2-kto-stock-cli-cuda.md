@@ -1,8 +1,8 @@
 # Qwen2-0.5B stock `swift rlhf --rlhf_type kto` CUDA 入口审计
 
-- 状态：本报告原有固定配置 L1 前向、L2 三步训练证据绑定 Jittor `35963c2e047dfa81751f82e8127064adf865d6bd`；新的当前树构造审计在 Jittor `2f0de6f8d51694bf1903a95cc7855d972132efd2` 对该 profile 的 L0 通过。L3 未运行，L4 入口已运行但完整功能合同未通过，L5 blocked；结论不代表其他偏好算法或 ms-swift 整体兼容。
+- 状态：固定配置当前树 L0–L2、L4 通过；L3 未运行、L5 因 L3 前置范围未完成而 blocked。L0 清单与 L1/L2/L4 训练基线分别见下文。结论不代表其他偏好算法或 ms-swift 整体兼容。
 - 日期：2026-10-12 复核。
-- 基线：Jittor `35963c2e047dfa81751f82e8127064adf865d6bd`（上游 `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
+- 历史基线：Jittor `35963c2e047dfa81751f82e8127064adf865d6bd`（上游 `2.0-refactor` `7a18abf295668d9b19da5fa1657f5606e84b65a0`）；当前树的复验 SHA 单列于各小节；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 范围：Qwen2-0.5B causal LM，全参数 FP32/eager，公开单卡 `swift rlhf --rlhf_type kto`，固定二条 preference 数据（chosen/rejected）、batch 2、SGD、三步；早期单步调用栈与完整 logits 证据仍保留。
 - 维护者：ms-swift CUDA 适配。
 - 复查条件：当前树的 L1/L2/L3/L4/L5 尚未逐层验收；恢复与完整公开训练流程需用新运行键继续。若调整自动 graph replay 的首次 capture 行为，复核该 CUDA 训练调用路径；Torch shim、Transformers、TRL 或 ms-swift KTO 入口变更时重跑受影响层。
@@ -14,6 +14,12 @@
 新运行键 `20261012-qwen2-kto-current-tree-l0-inventory-v3` / Slurm 18419 在 `cscg-qh04` RTX 4090 上分别经 stock `swift rlhf --rlhf_type kto` 构造 native 与 strict shim 的真实模型、reference model、tokenizer/template、数据集、Trainer、SGD 和 LambdaLR，然后在任何 forward、backward、更新或 checkpoint 前停止。基线为 Jittor HEAD `2f0de6f8d51694bf1903a95cc7855d972132efd2`（`python/jittor` tree `b066dc9e303d2d3e7eb2c4bd4a824ab68657e835`，`compat` tree `558002060ff0d29791daa7402c2ecc6fcd5fa49e`）和 ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。两侧 policy/reference 各有 291 个 state 条目（290 参数、1 buffer）；名称、shape、dtype、CUDA device、元素数和值 SHA256 相同。policy 的 290 个参数均可训练，reference 的 290 个参数均冻结，两侧对应标志逐项一致；模型类/config、Trainer、数据首行摘要、tokenizer、template 类、collator 与本 profile 参数也一致。optimizer 按语义类比较为 SGD，两个有序组的参数名和次序、显式 `lr`/`initial_lr`/`weight_decay` 一致，构造后 state 均为空；scheduler 按语义类比较为 LambdaLR，完整 state 相等。
 
 只读 worker 投影审计键 `20261012-qwen2-kto-current-tree-l0-projection-audit-v3` / Slurm 18423 对以上保存清单完成断言，结果 `KTO_CURRENT_TREE_L0_PROJECTION_PASS`。审计明确保留三项运行时表示差异：policy/reference 的非持久 RoPE buffer `model.rotary_emb.inv_freq` 原生 `requires_grad=false`、shim `true`，但它不属于 `named_parameters` 或 optimizer groups；native 与 shim 分别将 SGD/LambdaLR 以不同实现模块路径发布，Jittor SGD 的 group 还含内部 `values` 缓冲，故比较的是语义类、公共选项和状态而非完整 Python 类型路径/group 字典；native 报告 Torch `2.6.0+cu124`，shim 报告其 Torch API 兼容版本 `2.0.0`。RoPE buffer 标志差异也见同一兼容树下其他固定 profile，仍是显式兼容性边界，本项不据此声称训练期 buffer/autograd 等价。两侧 strict shim 父/子进程均为 CUDA、`fallback=0`；worker 核对的 `jittor_core` 与 `jit_utils_core` SHA 前后相同，未重编核心。初始严格比较作业 18419 因比较器将实现类路径当成必须相同而退出；只读审计 v1/18421 的额外“所有 policy 参数均需可训练”假设、v2/18422 的诊断字符串语法错误也均未产生新的兼容性结论。以上原始脚本、清单、日志和失败均保存在未版本化 state。
+
+### 当前树 L1/L2/L4 固定配置复验
+
+新运行键 `20261012-qwen2-kto-current-tree-l2-shim-v2` 使用当前 Jittor HEAD `da7c978f1af8dec93bed3f827ec1887e945487a6`（`python/jittor` tree `b066dc9e303d2d3e7eb2c4bd4a824ab68657e835`、`compat` tree `558002060ff0d29791daa7402c2ecc6fcd5fa49e`）和 ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。Slurm 18432 在 `cscg-qh04` RTX 4090 预检通过，确认 Python 3.11.15/CPython 3.11 ABI、g++ 11.5、CUDA 12.2、模型与数据 SHA、相同实现缓存指纹和独占锁；`JITTOR_NO_BUILD=1` 检查前后 `jittor_core`/`jit_utils_core` 哈希相同。训练作业 18439 在同节点另一张 RTX 4090（UUID `GPU-d813000b-1bfa-885e-cd61-0de97b365732`）通过实际公开 `python -m swift.cli.main rlhf --rlhf_type kto` 执行 strict-shim 三步全参数 FP32/eager profile，父/子进程均 `cuda=1`、`shim=True`、`fallback=0`，运行期核心缓存哈希不变，写出 step-3 checkpoint。复用原生公开 CLI oracle `20261010-qwen2-kto-stock-cli-l2-three-step-v2` / job 15311；其与本次运行的 `python/jittor`、模型、数据、ms-swift、Torch/Transformers/TRL 及参数一致，变化仅在 native 不加载的 compat 层，原始 oracle 只读复用未重跑。
+
+原生与 shim 的 policy/reference 输入、标签逐步完全相同；forward 输出键、shape、dtype 与有限性满足合同，跨实现误差只记录诊断。全部 290 个参数的梯度均采集且有限；每步梯度跨实现相对 L2 分别为 `6.64e-6`、`8.33e-6`、`8.27e-6`。SGD 两个公开参数组语义、选项、参数次序和空状态相符，更新公式舍入 FP32 残差不超过 `7.46e-9`。每步 native/shim 非零更新元素分别约 `493,818,744/746`、`493,818,709/711`、`493,818,659/656`；47 个 shim 参数张量的逐张量更新为零（局部 FP32 舍入诊断），但每步整体更新均有限且非空。比较器初版曾错误地要求每个梯度/更新张量都非零，故 job 18439 如实以 harness assertion 退出；训练及产物已经完成。只读 posthoc 比较器 `compare-posthoc-v2.py` 按本 Skill 的“梯度存在且有限、整体更新非空”合同修正该断言，未重跑训练，并对相同原始产物通过。两侧三步 loss 分别为 native `0.50000000, 0.49984092, 0.49968153` 与 shim `0.50000030, 0.49984118, 0.49968162`；各自 step 1 到 step 2–3 均值下降。末态 checkpoint 的 290 个权重键匹配，171 个张量变化，native/shim 最大绝对差 `7.45e-9`、相对 L2 `7.05e-11`。据此当前树固定配置 L1、L2、L4 通过；不据此声称恢复或性能通过。
 
 Slurm 13834 在 `cscg-qh04` RTX 4090 上预检了 ms-swift 模块来源、CUDA 可用性和公开 RLHF CLI 帮助。Slurm 13836 随后在同一设备运行 native，再运行 shim。native 和 shim 的完整 290 项参数初态名称、shape、dtype、trainable 状态和值 hash 一致，均位于 `cuda:0`；策略与 reference 两次 KTO forward 所用的 CUDA 输入键、张量值及标签 `[false, true]` 完全相同。strict shim 的父、子 CLI 进程均记录 `use_cuda=1`、`shim=True` 和 `fallback=0`。
 
@@ -31,11 +37,11 @@ Slurm 13834 在 `cscg-qh04` RTX 4090 上预检了 ms-swift 模块来源、CUDA �
 
 | 层 | 状态 | 证据与缺口 |
 |---|---|---|
-| L0 | PASS（当前树新键） | 当前树 `2f0de6f8d51694bf1903a95cc7855d972132efd2` 的 stock CLI 构造审计覆盖 policy/reference 各 291 项 state、tokenizer/template/dataset/Trainer/optimizer/scheduler；两侧所需键、shape、dtype、CUDA device、值 hash、参数 trainability、数据/配置和调度状态相同。明确保留 `inv_freq.requires_grad`、实现类型路径及 optimizer 内部 group 表示差异，详见当前树 L0 小节。原有 L1/L2 证据仍绑定旧 Jittor 基线。 |
-| L1 | pass（历史基线） | 仅基线 `35963c2e`：两侧 reference 输入逐项一致；KL 与 completion 的完整 logits、25 层 hidden states 均有限且达容差。strict shim 第一次 no-grad completion 触发自动 GraphReplay eager warm-up/capture；两输出逐元素相同，capture 返回与 native completion 的最大相对 L2 `3.59102e-6`、最大绝对差 `3.29972e-4`。当前树未重验。 |
-| L2 | pass（历史基线） | 仅基线 `35963c2e`：固定二条 preference 数据、batch 2、FP32/eager、SGD 的公开单卡 KTO CLI 三步轨迹。每步 290 项全参数梯度与更新、两路输入和 loss 均对齐；三步 loss 最大差 `2.68221e-7`，末态权重最大差 `7.45058e-9`。optimizer 两组公共选项、空 state 和 checkpoint 解码内容相等；严格 shim CUDA 父子进程 fallback=0。当前树未重验。 |
+| L0 | PASS（当前树新键） | 当前树 `da7c978f1af8dec93bed3f827ec1887e945487a6` 的 stock CLI 构造审计覆盖 policy/reference 各 291 项 state、tokenizer/template/dataset/Trainer/optimizer/scheduler；两侧所需键、shape、dtype、CUDA device、值 hash、参数 trainability、数据/配置和调度状态相同。明确保留 `inv_freq.requires_grad`、实现类型路径及 optimizer 内部 group 表示差异，详见当前树 L0 小节。 |
+| L1 | PASS（当前树固定 profile） | 当前树训练路径中，policy/reference 输入和标签逐步相同；输出键、shape、dtype和有限性符合合同。跨实现 forward 数值误差作为诊断记录于 `20261012-qwen2-kto-current-tree-l2-shim-v2`，不设训练 logits 容差门槛。 |
+| L2 | PASS（当前树固定 profile） | 当前树 strict-shim 三步公开 CLI：290 个参数梯度逐项存在且有限、SGD 整体更新非空且有限、两个公开参数组和空状态语义有效、两侧各自固定 loss 窗口下降。job 18439 的首个比较器因逐张量非零断言过严退出，独立 posthoc comparator 对同一产物通过；详见上文。 |
 | L3 | not-run（当前树） | 当前树未验证同进程/新进程 checkpoint 恢复、scheduler/RNG/dataloader 游标与后续轨迹。 |
-| L4 | 未验（当前树） | 历史基线的 native 与 strict shim 曾通过 stock CLI 完成三步并保存 checkpoint，但当前树公开入口端到端未验；历史也未满足完整 L4 功能合同。 |
-| L5 | not-run（当前树） | 当前树未执行预热后至少 10 次同步稳态性能与显存协议；历史基线的 L5 因前置范围未完成而 blocked。 |
+| L4 | PASS（当前树固定 profile） | strict-shim 真实公开 RLHF CLI 完成三步 KTO 并保存 step-3 checkpoint；复用同配置、同模型/数据和相同 `python/jittor` 基线的既有原生 CLI 轨迹。完整恢复合同仍归 L3。 |
+| L5 | blocked（当前树） | L3 尚未完成；本轮未做预热后至少 10 次同步稳态性能和显存测量。 |
 
 Slurm 13856 的原始报告门禁通过；报告更新门禁 15269、15307、15319 的布局检查均通过，Torch-mode `tests/structure` 各为 1384 passed、8 skipped、1019 subtests passed。三个 worker 均没有 nvcc，因此 Jittor 结构门禁部分运行于 CPU；这只验证布局和结构，不构成 CUDA 兼容性证据。旧 v1/v2 的环境错误及其复验记录在 state，不影响门禁结论。Slurm 13838 与 13843 的首次原始门禁仅因根 `MANIFEST.in` 未列入报告及新增行排序不符而失败，修正清单后的 13856 全部通过。该报告只覆盖上列单卡 Qwen2-0.5B KTO 配置。
