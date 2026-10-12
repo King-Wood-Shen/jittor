@@ -1,6 +1,6 @@
 # Qwen2-0.5B 公开 CPO LoRA `swift rlhf` CUDA 对拍
 
-- 状态：公开 CPO LoRA 入口在两侧均可运行；原三步轨迹没有同输入条件。新的一步控制诊断确认初始 adapter 相同、实际 batch 不同，且 `train_dataloader_shuffle=false` 未被当前 CPO dataloader 路径采用。该批次顺序缺陷已定位；同输入 CPO 数值兼容仍未验收，不把原三步差异判作算子数值错误。
+- 状态：固定单偏好对公开 CPO CLI 的新基线 L3 恢复补验已通过（同进程和新进程）；此前 L0–L2/L4 仍绑定本报告旧章节中的 Jittor SHA，不自动转移到新基线。新基线 L5 未运行。原三步异批次轨迹和其批次顺序根因保留为历史结论，不把跨实现数值差异外推为算子错误。
 - 仓库：Jittor `7751f74e8405adda9cd30c950bc037dda19bd5d4`（2.0.0）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 环境：Python 3.11.15，PyTorch 2.6.0+cu124 / TRL 0.24.0；RTX 4090，CUDA 12.2，驱动 580.178.04。
 - 维护者：ms-swift CUDA 适配。
@@ -64,3 +64,29 @@ Slurm 13539 在 worker 上比较 safetensors adapter：336 个键、2,199,552 �
 | L5 | blocked | L3 未运行；没有至少 10 次稳态性能测量。 |
 
 审计产物位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261010-qwen2-cpo-fixedinit-artifact-audit-v8/`；原始模型运行产物位于对应 v3/v4 state 目录。v1/v2 仅为 CLI/harness 前置失败；v3 shim 的首步在 harness 序列化内部 Var 时退出；v4 训练成功但首个离线比较器未接受重复记录。最后一次 provenance probe v5 因 `sitecustomize.py` f-string 语法错误未启用 strict shim，明确排除为兼容证据。CPO 本轮问题达到五轮上限，不再重复训练。
+
+### 固定初态单样本 checkpoint-12 恢复补验（2026-10-12）
+
+本节只补本固定单偏好对 profile 的 L3，并绑定 Jittor `67228d5578495ad35f35d157a2e2c61a7d46b5c7` 与 ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。旧章节的 L0–L2/L4 结果仍绑定各自记录的旧 SHA 和运行键；本次不把它们自动提升为新基线结论。运行键为 `20261012-qwen2-cpo-fixedinit-l3-restore-v2`，Slurm job `17940` 在 `cscg-qh04` 完成，终态 `COMPLETED (0:0, 00:03:58)`。GPU 为 RTX 4090，UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4`。启动前 job `17937` 的独立 worker 预检通过：当前用户 NFS export、64 KiB fsync 探针、容量/inode、同指纹 Jittor cache、no-build bootstrap 和 strict CUDA 小算子均通过。
+
+固定配置仍为公开 `swift rlhf --rlhf_type cpo`、Qwen2-0.5B、单条 preference JSONL、PEFT LoRA `r=4/a=8/all-linear`、FP32/eager、SGD `lr=2e-4/weight_decay=0`、batch 1、seed/data_seed 1234、step 12 到 16。模型、初始 adapter、数据 SHA256 分别为 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`、`4033d97f2838b3bdebfb8fbaea2b4d582fa24d12472eae460545afe97172fc4e`、`5fd06bff17bc409ce5d69325b68abcef5bdd4d9549ba317746c1d0be051808e4`。输入 native checkpoint-12 来自旧运行键 `20261010-qwen2-cpo-fixedinit-convergence-v3`，strict shim checkpoint-12 来自 `...convergence-v4`；两份输入 checkpoint 的文件 SHA 清单在 job 前后完全一致。
+
+同进程路径由同一个公开 CLI Trainer 从 checkpoint-12 恢复至 step14，再在同一 Trainer 对象中加载 checkpoint-14 并继续至 step16。新进程路径由进程 A 从 checkpoint-12 到 step14，再由独立进程 B 从 checkpoint-14 到 step16。每个恢复点都逐项验证 336 个 CUDA adapter 张量精确恢复；optimizer 参数组与状态、scheduler 状态、Python/NumPy/Torch CPU/CUDA RNG 均与对应 checkpoint 精确匹配。每个逻辑 step 13–16 均记录相同输入身份 `1920e2fd87aac1da093272baaa95ad9dee542e47d8def60f7aecdd34dd88aa7d`、预期 epoch/global-step 关系、336 个有限非零 CUDA 梯度和 336 个实际更新参数。原生与 strict shim 的样本身份一致；strict shim 六个 CLI worker 进程均记录 CUDA=1、fallback=0。
+
+| runtime / 路径 | step 13–14 平均 loss | step 15–16 平均 loss |
+| --- | ---: | ---: |
+| 原生 CUDA / 同进程 | 1.49561375 | 1.49188954 |
+| 原生 CUDA / 新进程 | 1.49561375 | 1.49188954 |
+| strict shim CUDA / 同进程 | 1.49561477 | 1.49189341 |
+| strict shim CUDA / 新进程 | 1.49561512 | 1.49189025 |
+
+各 runtime、各恢复路径的末段窗口均低于初段窗口。这里的数据只有一个 preference pair，因此只验证该单样本 profile 中恢复后的批次身份；不据此声称多样本 dataloader/sampler 游标顺序正确。L3 不要求跨实现 loss 逐值相等，本次表格用于展示各自恢复后的固定窗口趋势。
+
+| 层 | 当前基线证据 | 边界 |
+| --- | --- | --- |
+| L0–L2 | historical pass | 仅适用于上文明确记录的旧 Jittor SHA 和运行键；本节没有重跑这些层。 |
+| L3 | pass | 新基线 `67228d5578495ad35f35d157a2e2c61a7d46b5c7` 下完成同进程及新进程恢复；范围仅限固定单条 preference。 |
+| L4 | historical pass | 绑定上文旧基线；本次恢复借助公开 CLI，但不是新初态端到端 L4 复验。 |
+| L5 | not-run | 本次未测稳态性能；不从恢复作业推断性能。 |
+
+所有运行日志、JSONL、比较结果及 checkpoint 保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-cpo-fixedinit-l3-restore-v2/`；本节只记录已通过的 L3 补验，不表示其他 CPO 配置或 ms-swift 整体完成。
