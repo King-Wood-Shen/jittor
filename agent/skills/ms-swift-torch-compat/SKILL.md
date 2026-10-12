@@ -7,7 +7,7 @@ description: 在真实 NVIDIA CUDA 上按 ms-swift 公开入口及 L0-L5 覆盖�
 
 ## 目标与边界
 
-回答当前 ms-swift checkout 的公开训练、推理和生态入口在 Jittor torch shim 上能否保持真实 CUDA 执行、训练收敛、推理输出、状态恢复及性能合同。单个 `ms_swift_lora_llama` 生态用例只属于入口烟测，不能代表整个 ms-swift。结论只适用于真实 NVIDIA CUDA；CPU 可作独立 oracle，不把 NPU、ROCm 或软件回退计入 CUDA 通过。
+回答当前 ms-swift checkout 的公开训练、推理和生态入口在 Jittor torch shim 上能否保持真实 CUDA 执行、训练收敛、推理输出、状态恢复及性能合同。适配范围随实际共享机制扩展：ms-swift 暴露的 Torch 语义或 Jittor core 缺陷，即使影响其他库，也要在正确归属层修复并验证受影响的公共行为；不能只让一个 ms-swift profile 通过。单个 `ms_swift_lora_llama` 生态用例只属于入口烟测，不能代表整个 ms-swift。结论只适用于真实 NVIDIA CUDA；CPU 可作独立 oracle，不把 NPU、ROCm 或软件回退计入 CUDA 通过。
 
 开始前读仓库 `AGENTS.md`、`agent/manuals/collaboration.md`、`agent/manuals/project-context.md`、`../downstream-library-adaptation/SKILL.md`、`../transformers-torch-compat/SKILL.md` 与 `../github-collaboration-commit/SKILL.md`。以历史提交 `fb23d894e:refactor-wip/results/2026-09-26-ms-swift-cuda-compat.md` 及最新实验目录为历史证据；历史 PASS 必须绑定原 SHA、运行键和验收层级，不自动继承到新基线。
 
@@ -15,7 +15,7 @@ description: 在真实 NVIDIA CUDA 上按 ms-swift 公开入口及 L0-L5 覆盖�
 
 本任务以本 Skill 的 L0–L5 表为唯一等级：L0 构造、L1 前向、L2 梯度与更新、L3 完整恢复、L4 公开入口、L5 稳态性能。通用 `downstream-library-adaptation` 的同名等级只供其自身使用，不能换算为本任务等级。缺陷的 C 类是问题归属/严重度，不是验收等级；每个断点分别记录 C 类、首个失败 L 层与负责代码层。
 
-先冻结本轮必须交付的代表性工作负载清单及其模型、tuner、设备、拓扑和公开入口。按实际调用机制选代表用例，不逐个穷举 ms-swift 注册的所有模型；未列入本轮合同或未执行的面仍在矩阵标为 `not-run`，不得推断为支持。新增功能面须有任务要求或具体共享机制缺口，不能因为探针容易跑就自动扩大必验范围。
+先冻结本轮必须交付的代表性工作负载清单及其模型、tuner、设备、拓扑和公开入口。按实际调用机制选代表用例，不逐个穷举 ms-swift 注册的所有模型；未列入本轮合同或未执行的面仍在矩阵标为 `not-run`，不得推断为支持。扩展覆盖时优先选能区分新机制的用例：训练与推理、全参与 adapter、FP32 与混合精度、单卡与双卡、模型架构或任务类型、保存恢复与公开 CLI/API。先复用同机制已有证据，再补覆盖缺口；只有真实任务需求或已证实的共享机制缺口才增加运行键。完成一个 profile 后按矩阵推进下一独立面，不把该 profile 当全库结论。
 
 每个格子同时记录“入口是否实际运行/产出”和“L0–L5 哪层已验收”。公开 CLI 跑完但 BF16 autocast、激活重算或完整状态合同不符时，写“入口已运行，功能未通过”，不能以 L4 通过，也不能把“L4 blocked”误写成 CLI 未运行。诊断性性能数字可记录，但只有适用正确性层与 L4 通过后才授予 L5。
 
@@ -56,9 +56,11 @@ manifest 至少逐面列状态、公开入口、真实代表用例、首个断�
 
 ## 执行与归属
 
+每次开始新的代码修复，先在当前分支记录干净工作树与 HEAD，建立可恢复的 Git 节点，再 fetch 并整合最新 `origin/2.0-refactor`；若已有未提交工作，按 `github-collaboration-commit` 保留并隔离，不能 stash、reset 或覆盖。记录同步后的 SHA。旧基线结果按引入的实际变更判断是否需要复验，不机械重跑无关实验。整合期间停止该工作树的测试和协作者写入。
+
 只经 Slurm NVIDIA worker 做所有导入、JIT、测试和计算；登录节点只用于静态阅读、编辑、Git、提交和调度。原生 PyTorch CUDA 在没有 shim 标记的独立进程先跑；候选随后在 `JITTOR_TORCH_SHIM=1` 下跑同一 checkpoint、初始权重、输入与数据顺序。候选从导入到结果保存启用 `jt.runtime.scope(use_cuda=1, backend_fallback="error")` 和 `forbid_backend_fallbacks()`，证明模型参数、输入、输出和梯度均为 CUDA，`fallback_count=0`。并行 JIT 使用不同 `JITTOR_HOME`，首次编译串行；单测与 benchmark 不共用正在使用的缓存。
 
-按三行判据归属：Jittor core/CUDA 负责能力、autograd、kernel、optimizer；`jittor.compat.torch` 负责公开 Torch API 的名称、签名、容器、device/dtype/state 语义；adapter 只处理经验证确属 ms-swift 私有 glue 的可迁移逻辑。不得修改 ms-swift 源码掩盖失败。每个问题最多五轮；失败保存根因、日志、受影响层和解除条件，随后推进独立面。已达到上限的历史问题不重启，除非目标或证据发生实质变化。
+按三行判据归属：Jittor core/CUDA 负责能力、autograd、kernel、optimizer；`jittor.compat.torch` 负责公开 Torch API 的名称、签名、容器、device/dtype/state 语义；adapter 只处理经验证确属 ms-swift 私有 glue 的可迁移逻辑。最小复现须同时覆盖触发用例与共享语义，检查 dtype、device、数值、梯度和零 fallback；修复不能局限于 ms-swift 特有代码，且不能修改 ms-swift 源码掩盖失败。若根因确在 Jittor 仓库外，先保留独立证据并告知用户需要改哪个外部项目及原因，之后再动外部代码。每个问题最多五轮；失败保存根因、日志、受影响层和解除条件，随后推进独立面。已达到上限的历史问题不重启，除非目标或证据发生实质变化。
 
 双卡须验证实际安装的 NCCL include/lib、`RANK`/`WORLD_SIZE`/`LOCAL_RANK` 与 Jittor rank 变量，逐进程记录 `CUDA_VISIBLE_DEVICES` 和设备 UUID。提交前查 `squeue`/`sacct` 与已有产物，避免重复作业。
 
