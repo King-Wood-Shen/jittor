@@ -121,7 +121,7 @@
 | [ms-swift 公开 `swift eval`：依赖前置阻断](2026-10-08-ms-swift-eval-dependency-block.md) | Slurm worker 缺 `evalscope` 且代理拒绝连接；模型评估未运行，L0-L5 blocked/not-run | 2026-10-08 |
 | [Qwen2-0.5B 公开全参数 DPO 三步 CUDA 对拍](2026-10-08-qwen2-dpo-full-cuda.md) | 原生三步成功；strict CUDA shim 首步反向触发 `NanoVector` 断言；固定 batch 汇总前向标量接近但完整张量未验，L1 partial、L2 failed | 2026-10-08 |
 | [Qwen2-0.5B 公开 ORPO CLI 固定样本收敛与多样本输入身份](2026-10-09-qwen2-orpo-stock-cli-cuda.md) | 单固定样本 profile 的 L0-L4 通过（含同/新进程 L3 恢复）；native L5完成、strict shim测量轨迹在step16触发slice overflow，L5未通过；多样本 L0-L2 通过（含两种 batch-1 长度的 L1 结构与12步 L2 control）、native L3 新进程子路径通过，strict-shim完整 L3 恢复未通过；复杂观察器栈相关故障边界仍未定位具体hook/交互 | 2026-10-12 |
-| [Qwen2-0.5B 公开 CPO LoRA `swift rlhf` CUDA 对拍](2026-10-08-qwen2-cpo-peftlora-cli-cuda.md) | 新基线 `67228d557` 下固定单偏好对同/新进程 L3 恢复通过；L0-L2/L4 保留旧 SHA 绑定结论，L5 新基线未运行。其他 CPO 场景仍未覆盖 | 2026-10-12 |
+| [Qwen2-0.5B 公开 CPO LoRA `swift rlhf` CUDA 对拍](2026-10-08-qwen2-cpo-peftlora-cli-cuda.md) | 固定单偏好对 L3 恢复绑定 `67228d557` 通过；当前 `73232b9` fresh-start native/strict shim 16 步训练与数值采集通过，但 L0 缺完整模型 state/buffer 清单，L1/L2/L4 不升级；L5 未运行。多样本与其他 CPO 场景仍未覆盖 | 2026-10-12 |
 | [Torch `RandomSampler` 显式 Generator CUDA 运行时对拍](2026-10-08-torch-randomsampler-generator.md) | 同 seed 跨 runtime 的样本顺序不同；各 runtime 内 generator 状态恢复可重放；仅测试 sampler API，不包含模型或 Swift CLI | 2026-10-08 |
 | [Qwen2-0.5B ms-swift 私有 Swift LoRA 固定状态前向](2026-10-08-qwen2-swiftlora-forward.md) | 当前基线下直接 `Swift.prepare_model` 前向通过数值门槛，严格 CUDA/零 fallback；L0 partial，训练/恢复/公开入口/性能未运行 | 2026-10-08 |
 | [Qwen2-0.5B ms-swift 私有 Swift LoRA 三步梯度与更新对拍](2026-10-08-qwen2-swiftlora-grad3.md) | 96 个 trainable 参数三步梯度、AdamW 状态和 adapter 更新通过固定直接 API 对拍；公开 Trainer/CLI、恢复与性能未验证 | 2026-10-08 |

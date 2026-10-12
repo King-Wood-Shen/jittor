@@ -1,6 +1,6 @@
 # Qwen2-0.5B 公开 CPO LoRA `swift rlhf` CUDA 对拍
 
-- 状态：固定单偏好对公开 CPO CLI 的新基线 L3 恢复补验已通过（同进程和新进程）；此前 L0–L2/L4 仍绑定本报告旧章节中的 Jittor SHA，不自动转移到新基线。新基线 L5 未运行。原三步异批次轨迹和其批次顺序根因保留为历史结论，不把跨实现数值差异外推为算子错误。
+- 状态：固定单偏好对公开 CPO CLI 的新基线 L3 恢复补验已通过（同进程和新进程）。当前 SHA 下 fresh-start 已补跑 native 与 strict shim 的公开 CLI 16 步，前向/梯度/更新及 loss 窗口证据通过；但 L0 缺完整模型 state key 与 buffer 清单，故 L1/L2/L4 仍不升级为层级 PASS。L0–L2/L4 的旧结论仍绑定原章节 SHA，不自动转移。L5 未运行。原三步异批次轨迹和其批次顺序根因保留为历史结论，不把跨实现数值差异外推为算子错误。
 - 仓库：Jittor `7751f74e8405adda9cd30c950bc037dda19bd5d4`（2.0.0）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 环境：Python 3.11.15，PyTorch 2.6.0+cu124 / TRL 0.24.0；RTX 4090，CUDA 12.2，驱动 580.178.04。
 - 维护者：ms-swift CUDA 适配。
@@ -90,3 +90,22 @@ Slurm 13539 在 worker 上比较 safetensors adapter：336 个键、2,199,552 �
 | L5 | not-run | 本次未测稳态性能；不从恢复作业推断性能。 |
 
 所有运行日志、JSONL、比较结果及 checkpoint 保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-cpo-fixedinit-l3-restore-v2/`；本节只记录已通过的 L3 补验，不表示其他 CPO 配置或 ms-swift 整体完成。
+
+### 当前 SHA 下 fresh-start 公开 CLI 复验（2026-10-12）
+
+新基线为 Jittor `73232b9399042d83d3d352264d5ab0fa4df74f75`，ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。运行键 `20261012-qwen2-cpo-fixedinit-l0l2l4-v5` / job `17972` 的 native 侧在 RTX 4090（UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4`）完成公开 CPO CLI 16 步并保存 checkpoint-16；同一 job 的 shim 侧在首次 backward 前失败，stack 中出现两层相同的 `capture_training_step`。诊断键 `20261012-qwen2-cpo-fixedinit-l2-minimal-shim-v1` / job `17980`（无捕获插件）和 `20261012-qwen2-cpo-fixedinit-l2-instrumentation-once-v1` / job `17985`（只由 `--external_plugins` 加载一次捕获插件）均在严格 CUDA 下完成一步并保存 checkpoint-1；后者采集到 336 个梯度及 300 项实际更新。该对照支持重复安装审计 monkeypatch 是 job 17972 首步失败原因，不指向 Jittor CPO backward 缺陷。
+
+新键 `20261012-qwen2-cpo-fixedinit-l0l2l4-shimonly-v1` / job `17994` 只运行 strict shim 16 步，复用 job 17972 native 侧的只读采集文件；模型、初始 adapter、数据 SHA256 与前述固定 profile 一致，分别为 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`、`4033d97f2838b3bdebfb8fbaea2b4d582fa24d12472eae460545afe97172fc4e`、`5fd06bff17bc409ce5d69325b68abcef5bdd4d9549ba317746c1d0be051808e4`。该侧在 RTX 4090（UUID `GPU-d813000b-1bfa-885e-cd61-0de97b365732`，driver `580.178.04`）经公开 `swift rlhf --rlhf_type cpo` 完成 16 步并保存 checkpoint-16。native/shim 初始 336 个 trainable adapter 张量逐项相同，16 步输入张量逐步相同；每步 336 个梯度均存在、在 CUDA、有限且非零，step 1 更新 300 项，step 2–16 各更新 336 项，SGD(m=0) 的状态项为空。两侧 loss 窗口均下降：native step 1–3 / 14–16 均值 `1.51681169 / 1.49282102`，strict shim 为 `1.51681133 / 1.49282189`。首步 forward 输出结构、shape、dtype 与有限性通过；最大 logits 绝对差 `8.82149e-5`、相对 L2 `2.39016e-6` 仅作诊断。离线比较器输出 `CPO_FIXEDINIT_CONVERGENCE_AUDIT_PASS`；worker 在训练前后确认 core `.so` 清单 SHA 相同且 no-build bootstrap 未触发 core 冷编译。runtime 日志记录两个 CLI 进程均 `cuda=1`、strict shim 标记真、`fallback=0`。
+
+Slurm job 17994 最终被 harness 标成 `FAILED(exit1)`，唯一失败发生在训练和比较器均成功之后：末尾脚本检查了不存在的 `shim-runtime.log`，而本运行实际 runtime 文件为 `runtime.jsonl`。训练、checkpoint、16 步采集、比较器和 core 哈希比较均已完成；runtime 文件内容直接核实为两个进程 start/end、`fallback=0`。该退出码是 post-check 路径拼写错误，不是训练兼容失败。原始状态与未修改的日志保留在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-cpo-fixedinit-l0l2l4-shimonly-v1/`。
+
+| 层 | 当前 SHA 下状态 | 证据边界 |
+| --- | --- | --- |
+| L0 | partial | 真实模型、tokenizer/template、固定数据、LoRA、trainer 与 SGD 经公开 CLI 构造；初始 336 个 trainable adapter、dtype/device 和优化器配置核实，但未保存完整模型 state key 与 buffer 清单。 |
+| L1 | blocked（前层不完整；诊断执行通过） | native/shim 的初始 trainable、16 步输入相同；首个 forward 输出结构、shape、dtype、有限性有效，误差仅诊断。因 L0 尚未完成，不升级层级状态。 |
+| L2 | blocked（前层不完整；训练证据通过） | 两侧各 16 步，全部 trainable 梯度有限非零、真实更新且各自窗口下降；因 L0 未完整验收，不升级层级状态。 |
+| L3 | pass（绑定 `67228d557`） | 仅引用上一节已通过的固定单样本同/新进程恢复；本节 fresh-start 不重跑恢复。 |
+| L4 | blocked（前层不完整；入口已运行） | native 与 strict shim 的公开 CPO CLI 均完成并保存 checkpoint-16；依 L0 层级缺口不授予端到端 L4 PASS。 |
+| L5 | not-run | 没有做不含逐步张量采集的稳态性能测量；不同 GPU UUID，也不作性能比较。 |
+
+此补验仅覆盖 Qwen2-0.5B、固定单偏好对、PEFT LoRA、FP32/eager、SGD(momentum=0) 的单卡公开 CPO profile；不代表多样本 sampler、其他 CPO 配置或 ms-swift 整体通过。
