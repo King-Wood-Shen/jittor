@@ -413,7 +413,7 @@ def _mixed_float_compute_dtype(a, b):
     names = (_jittor_dtype_name(a.dtype), _jittor_dtype_name(b.dtype))
     amp_reg = int(jt.flags.amp_reg)
     if amp_reg & jt.amp_flags.prefer16:
-        return "bfloat16" if "bfloat16" in names else "float16"
+        return "bfloat16" if ("bfloat16" in names or amp_reg & jt.amp_flags.prefer_bf16) else "float16"
     if amp_reg & jt.amp_flags.prefer32:
         return "float32"
     for wider in ("float64", "float32"):

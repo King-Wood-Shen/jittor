@@ -595,6 +595,19 @@ class TestTorchAutocastNumerics(cu.JittorTestCase):
                                    reference.numpy().astype("float32"),
                                    rtol=1e-3, atol=1e-3)
 
+    def test_bfloat16_region_uses_bfloat16_for_float32_inputs(self, device):
+        a = jt.random((8, 8), dtype="float32")
+        b = jt.random((8, 8), dtype="float32")
+        with torch.autocast(region_device(device), dtype=torch.bfloat16):
+            product = a @ b
+            elementwise = a * b
+        self.assertEqual(dtype_name(product), "bfloat16")
+        self.assertEqual(dtype_name(elementwise), "bfloat16")
+        product.sync()
+        elementwise.sync()
+        self.assertTrue(np.isfinite(product.float32().numpy()).all())
+        self.assertTrue(np.isfinite(elementwise.float32().numpy()).all())
+
     def test_matmul_computes_in_the_region_dtype(self, device):
         """torch's autocast list puts matmul in the fast dtype on every backend.
 

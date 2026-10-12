@@ -69,6 +69,7 @@ class TestAmpBitNames(unittest.TestCase):
             "amp_keep_reduce": jt.amp_flags.keep_reduce,
             "amp_keep_white": jt.amp_flags.keep_white,
             "amp_array_prefer": jt.amp_flags.array_prefer,
+            "amp_prefer_bf16": jt.amp_flags.prefer_bf16,
         }
         for name, value in expected.items():
             self.assertIn(name, found, f"{name} vanished from nano_string.h")
