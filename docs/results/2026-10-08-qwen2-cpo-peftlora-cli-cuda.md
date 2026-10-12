@@ -1,6 +1,6 @@
 # Qwen2-0.5B 公开 CPO LoRA `swift rlhf` CUDA 对拍
 
-- 状态：固定单偏好对 CPO profile 在相同 Jittor 实现树（`python/jittor`=`b066dc9`、`compat`=`5580020`）下 L0–L4 已通过：L0/L1/L2/L4 绑定 Jittor `73232b9` 训练基线，L3 由新运行键在当前 Jittor HEAD `45dbf2f` 复验；L5 未运行。完整模型 state/buffer 清单已补齐，唯一 buffer `rotary_emb.inv_freq` 的 `requires_grad` 标志差异单独记录。原三步异批次轨迹和其批次顺序根因保留为历史结论，不把跨实现数值差异外推为算子错误。
+- 状态：固定单偏好对 CPO profile 在相同 Jittor 实现树（`python/jittor`=`b066dc9`、`compat`=`5580020`）下 L0–L5 已通过：L0/L1/L2/L4 绑定 Jittor `73232b9` 训练基线，L3 由新运行键在 HEAD `45dbf2f` 复验，L5 在 HEAD `5e32f45` 完成十次稳态测量；不同章节的 HEAD 仅在对应实现子树相同时合并该固定 profile 证据。完整模型 state/buffer 清单已补齐，唯一 buffer `rotary_emb.inv_freq` 的 `requires_grad` 标志差异单独记录。原三步异批次轨迹和其批次顺序根因保留为历史结论，不把跨实现数值差异外推为算子错误。
 - 仓库：Jittor `7751f74e8405adda9cd30c950bc037dda19bd5d4`（2.0.0）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 环境：Python 3.11.15，PyTorch 2.6.0+cu124 / TRL 0.24.0；RTX 4090，CUDA 12.2，驱动 580.178.04。
 - 维护者：ms-swift CUDA 适配。
@@ -106,9 +106,29 @@ Slurm job 17994 最终被 harness 标成 `FAILED(exit1)`，唯一失败发生在
 | L2 | pass（绑定当前代码 tree `73232b9`） | 两侧各 16 步，全部 trainable 梯度有限非零、真实更新且各自 loss 窗口下降；跨 runtime 训练数值只作诊断。 |
 | L3 | pass（绑定当前 Jittor HEAD `45dbf2f`） | 新运行键在与 L0–L2/L4 完全相同的 `python/jittor`、`compat` tree 上重新验收同进程和新进程恢复；旧 `67228d557` 结论仍保留其自身绑定。 |
 | L4 | pass（绑定当前代码 tree `73232b9`） | native 与 strict shim 的公开 CPO CLI 均完成 16 步并保存 checkpoint-16，严格 CUDA、fallback=0。 |
-| L5 | not-run | 没有做不含逐步张量采集的稳态性能测量；不同 GPU UUID，也不作性能比较。 |
+| L5 | pass（同实现子树新键测量，见下节） | job 18126 在同一 RTX 4090 上按当前稳态协议完成 native/shim 各 10 次；本节的旧 L0–L4 训练基线未重跑。 |
 
 此补验仅覆盖 Qwen2-0.5B、固定单偏好对、PEFT LoRA、FP32/eager、SGD(momentum=0) 的单卡公开 CPO profile；不代表多样本 sampler、其他 CPO 配置或 ms-swift 整体通过。
+
+### 当前 Jittor HEAD 固定初态 L5 稳态性能测量（2026-10-12）
+
+运行键 `20261012-qwen2-cpo-fixedinit-l5-steady-v1` / Slurm job `18126` 在 `cscg-qh04` 依次运行 native PyTorch 与 strict Jittor torch shim，二者共用同一作业分配、RTX 4090 UUID `GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4` 与输入。预检 job `18122` 核验了 worker NFS 挂载、64 KiB fsync、CUDA 和依赖环境；Jittor HEAD 为 `5e32f4539c6133b628708df29339f021457ae52b`，`python/jittor` tree `b066dc9e303d2d3e7eb2c4bd4a824ab68657e835`、`compat` tree `558002060ff0d29791daa7402c2ecc6fcd5fa49e` 与既有 L0–L4 实现树一致。ms-swift 为 `88d727951203256baa564c643c651b6f8d90fd7e`。模型、初始 adapter、单行 preference 数据 SHA256 分别为 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`、`4033d97f2838b3bdebfb8fbaea2b4d582fa24d12472eae460545afe97172fc4e`、`5fd06bff17bc409ce5d69325b68abcef5bdd4d9549ba317746c1d0be051808e4`。
+
+测量仍使用公开 `swift rlhf --rlhf_type cpo`、Qwen2-0.5B、PEFT LoRA `r=4/a=8/all-linear`、FP32/eager、SGD `lr=2e-4/weight_decay=0`、batch 1、seed/data-seed 1234、16 步；不保存 checkpoint。每侧 6 个预热步，step 7–16 为 10 个测量样本。计时区间为同步后的 Trainer `on_step_begin` 至 `on_step_end`，包括 forward/backward/optimizer/scheduler，不包括 dataloader fetch 和计时后的 CPU 输入身份散列。两侧测量步的 `input_ids`、`attention_mask` 和可用 labels 身份逐步一致；一条 preference pair 每步由 chosen/rejected 两行组成，合计 95 个非 padding token。shim 运行父子进程均为 CUDA，`fallback=0`；预热后 JIT cache 稳定，核心库 SHA 前后不变。
+
+| runtime | step latency mean / median / nearest-rank P95 (s) | pairs/s | chosen+rejected nonpadding tokens/s | allocator peak allocated / reserved after warmup (bytes) |
+| --- | ---: | ---: | ---: | ---: |
+| Native PyTorch CUDA | 0.113275 / 0.113026 / 0.114475 | 8.828058 | 838.665 | 2,472,180,736 / 2,615,148,544 |
+| Strict Jittor torch shim CUDA | 0.266905 / 0.266855 / 0.270599 | 3.746656 | 355.932 | 2,555,253,760 / 3,200,253,952 |
+
+shim/native median latency ratio 为 `2.3610`（等价地 native/shim 为 `0.42355`）；shim/native pair throughput ratio 为 `0.42440`。分配器峰值是各 runtime 自己重置预热高水位后的 allocated/reserved 值，不能当成 NVML 进程总显存，也不直接比较不同 allocator 的语义。首次 shim step 约 7.87 秒的编译/预热成本不计入测量窗口，step 6 后 cache 稳定；结果只报告该固定输入/配置的实测，不设未定义的性能合格阈值，也不外推到其他 CPO 或 ms-swift 场景。作业未保存 checkpoint。原始日志和逐步采样位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-cpo-fixedinit-l5-steady-v1/`，比较结果 `comparison.json` 可复核。
+
+| 层 | 当前实现树证据 | 边界 |
+| --- | --- | --- |
+| L0–L4 | pass（绑定上文明确列出的实现树） | 此 L5 作业不重跑 L0–L4 的训练或 oracle；完整状态差异与历史观察仍按各节保留。 |
+| L5 | pass | 相同 RTX 4090 UUID、相同输入、各 10 个同步稳态样本、strict CUDA/零 fallback、无测量期 JIT；仅限固定单偏好对 profile。 |
+
+因此固定单偏好对 CPO profile 在相同 `python/jittor` 与 `compat` 实现树下具备 L0–L5 证据；多样本 sampler/训练、其他 CPO 配置和 ms-swift 整体仍未覆盖。
 
 ### 当前代码基线固定初态 L0 完整 inventory（2026-10-12）
 
