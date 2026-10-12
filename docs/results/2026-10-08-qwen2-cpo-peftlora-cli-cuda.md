@@ -1,6 +1,6 @@
 # Qwen2-0.5B 公开 CPO LoRA `swift rlhf` CUDA 对拍
 
-- 状态：固定单偏好对公开 CPO CLI 的新基线 L3 恢复补验已通过（同进程和新进程）。当前 SHA 下 fresh-start 已补跑 native 与 strict shim 的公开 CLI 16 步，前向/梯度/更新及 loss 窗口证据通过；但 L0 缺完整模型 state key 与 buffer 清单，故 L1/L2/L4 仍不升级为层级 PASS。L0–L2/L4 的旧结论仍绑定原章节 SHA，不自动转移。L5 未运行。原三步异批次轨迹和其批次顺序根因保留为历史结论，不把跨实现数值差异外推为算子错误。
+- 状态：固定单偏好对 CPO profile 的当前代码基线（Jittor `python/jittor`/`compat` tree 对应 `73232b9`）L0–L2 与 L4 已通过；L3 恢复仍明确绑定 `67228d557`，不自动转移到新提交；L5 未运行。完整模型 state/buffer 清单已补齐，唯一 buffer `rotary_emb.inv_freq` 的 `requires_grad` 标志差异单独记录。原三步异批次轨迹和其批次顺序根因保留为历史结论，不把跨实现数值差异外推为算子错误。
 - 仓库：Jittor `7751f74e8405adda9cd30c950bc037dda19bd5d4`（2.0.0）；ms-swift `88d727951203256baa564c643c651b6f8d90fd7e`。
 - 环境：Python 3.11.15，PyTorch 2.6.0+cu124 / TRL 0.24.0；RTX 4090，CUDA 12.2，驱动 580.178.04。
 - 维护者：ms-swift CUDA 适配。
@@ -101,11 +101,19 @@ Slurm job 17994 最终被 harness 标成 `FAILED(exit1)`，唯一失败发生在
 
 | 层 | 当前 SHA 下状态 | 证据边界 |
 | --- | --- | --- |
-| L0 | partial | 真实模型、tokenizer/template、固定数据、LoRA、trainer 与 SGD 经公开 CLI 构造；初始 336 个 trainable adapter、dtype/device 和优化器配置核实，但未保存完整模型 state key 与 buffer 清单。 |
-| L1 | blocked（前层不完整；诊断执行通过） | native/shim 的初始 trainable、16 步输入相同；首个 forward 输出结构、shape、dtype、有限性有效，误差仅诊断。因 L0 尚未完成，不升级层级状态。 |
-| L2 | blocked（前层不完整；训练证据通过） | 两侧各 16 步，全部 trainable 梯度有限非零、真实更新且各自窗口下降；因 L0 未完整验收，不升级层级状态。 |
-| L3 | pass（绑定 `67228d557`） | 仅引用上一节已通过的固定单样本同/新进程恢复；本节 fresh-start 不重跑恢复。 |
-| L4 | blocked（前层不完整；入口已运行） | native 与 strict shim 的公开 CPO CLI 均完成并保存 checkpoint-16；依 L0 层级缺口不授予端到端 L4 PASS。 |
+| L0 | pass（绑定当前代码 tree `73232b9`） | job 18025/18029 完整核对 626 个参数、627 个 state 键和 1 个 buffer 的键/shape/dtype/device；336 个 trainable 参数元数据相同。唯一独立记录的差异是 RoPE buffer 的 `requires_grad`，见下节。 |
+| L1 | pass（绑定当前代码 tree `73232b9`） | native/shim 首步前向输出结构、shape、dtype、有限性有效；16 步输入身份相同，误差仅作诊断。 |
+| L2 | pass（绑定当前代码 tree `73232b9`） | 两侧各 16 步，全部 trainable 梯度有限非零、真实更新且各自 loss 窗口下降；跨 runtime 训练数值只作诊断。 |
+| L3 | pass（绑定 `67228d557`） | 仅引用前节已通过的固定单样本同/新进程恢复；本节 fresh-start 与 L0 补审没有重跑恢复。 |
+| L4 | pass（绑定当前代码 tree `73232b9`） | native 与 strict shim 的公开 CPO CLI 均完成 16 步并保存 checkpoint-16，严格 CUDA、fallback=0。 |
 | L5 | not-run | 没有做不含逐步张量采集的稳态性能测量；不同 GPU UUID，也不作性能比较。 |
 
 此补验仅覆盖 Qwen2-0.5B、固定单偏好对、PEFT LoRA、FP32/eager、SGD(momentum=0) 的单卡公开 CPO profile；不代表多样本 sampler、其他 CPO 配置或 ms-swift 整体通过。
+
+### 当前代码基线固定初态 L0 完整 inventory（2026-10-12）
+
+本节补齐 fresh-start 章节的 L0 缺口，不重跑 job 17972/17994 的训练、原生 oracle 或 checkpoint。运行键 `20261012-qwen2-cpo-fixedinit-l0-inventory-v1` / job `18025` 在 `cscg-qh04` RTX 4090（UUID `GPU-d813000b-1bfa-885e-cd61-0de97b365732`）分别构造 native 与 strict-shim 的 `SwiftRLHF` CPO pipeline、Qwen2-0.5B、tokenizer/template、固定单行数据、PEFT LoRA、CPOTrainer、SGD 与 scheduler；只枚举状态元数据，不调用 `train()`、不执行前向/反向，也不写 checkpoint。Jittor 运行 HEAD 为 `4f1f06b6c36def432d492259cb317ea013c6e11a`；`python/jittor` tree `b066dc9e303d2d3e7eb2c4bd4a824ab68657e835` 与 `compat` tree `558002060ff0d29791daa7402c2ecc6fcd5fa49e` 和训练基线 `73232b9399042d83d3d352264d5ab0fa4df74f75` 一致；ms-swift 为 `88d727951203256baa564c643c651b6f8d90fd7e`。模型、初始 adapter 和数据 SHA 与固定 profile 一致。两侧均为 RTX 4090、FP32、626 个参数、336 个 trainable 参数/2,199,552 个元素、627 个 state 键、1 个 buffer、单行数据、相同 optimizer 参数分组及 lr/weight-decay、scheduler 状态；完整 parameter 元数据及 state 键的 shape/dtype/device 逐项一致。strict shim `use_cuda=1`、`fallback=0`，native 与 shim 独立标记正确。
+
+初版比较器将 buffer `requires_grad` 也当成硬匹配条件，导致 job 18025 在两个构造清单均成功后以 exit 1 结束；只读复核键 `20261012-qwen2-cpo-fixedinit-l0-inventory-compare-v1` / job `18029` 按本 Skill 的 L0 键/shape/dtype/device 合同重比，确认全量 inventory 通过，输入 JSON SHA 前后不变。唯一 buffer `base_model.model.model.rotary_emb.inv_freq` 的 `requires_grad` 为 native `false`、shim `true`，但 buffer 键、shape `[32]`、`torch.float32` 与 `cuda:0` 均一致；336 个 trainable 参数的 `requires_grad` 完全一致。此标志差异保留为结构元数据边界，不据此推断其对其他任务、梯度或恢复语义的影响。该差异与已有 Qwen2 seq-cls 报告的同名 buffer 观察相符。
+
+worker 预检通过用户 NFS 导出上的 64 KiB fsync、精确输入摘要、匹配 Jittor/compat tree、现有 CUDA cache 路径及 no-build bootstrap。job 18029 前后 `jittor_core`/`jit_utils_core` SHA 不变，无 core 冷编译；其 CPU JSON inventory comparator 不构成额外 CUDA 数值证据。完整 JSON、脚本、日志均未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261012-qwen2-cpo-fixedinit-l0-inventory-v1/` 和 `20261012-qwen2-cpo-fixedinit-l0-inventory-compare-v1/`。fresh-start 当前代码 tree 的 L0–L2/L4 现在可提升；L3 仍绑定其原先已通过的 `67228d557`，L5 仍未运行。
