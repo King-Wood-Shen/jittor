@@ -68,6 +68,12 @@ import os
 print("cache_name=%r" % os.environ.get("JITTOR_HOME"), flush=True)
 """
 
+_PRINT_TORCHRUN_RANKS = """
+import os
+keys = ("RANK", "LOCAL_RANK", "WORLD_SIZE", "JT_NCCL_RANK", "JT_NCCL_LOCAL_RANK", "JT_NCCL_WORLD_SIZE")
+print("ranks=" + repr({k: os.environ.get(k) for k in keys}), flush=True)
+"""
+
 
 def _launch(nproc, code, logdir, timeout):
     # Pin the repository path for every child. An explicit backend keeps the
@@ -191,6 +197,25 @@ class TestLaunchFailurePropagation(unittest.TestCase):
             names.add(text.strip().split("cache_name=", 1)[1])
         self.assertEqual(len(names), 3,
                          "ranks shared JIT homes: %s" % sorted(names))
+
+    def test_torchrun_rank_aliases_are_exported(self):
+        """Torch-compatible children see the same rank as Jittor children.
+
+        Downstream torch shims inspect the conventional variables before they
+        import their distributed module. The Jittor-specific variables remain
+        the launcher contract; these aliases make the launcher a drop-in
+        replacement for torchrun.
+        """
+        done, _ = _launch(2, _PRINT_TORCHRUN_RANKS, self.tmp.name, timeout=120)
+        self.assertEqual(done.returncode, 0, done.stdout[-3000:])
+        for rank in range(2):
+            text = Path(self.tmp.name, "rank%d.log" % rank).read_text()
+            self.assertIn("'RANK': '%d'" % rank, text)
+            # Each child receives one entry in CUDA_VISIBLE_DEVICES, so its
+            # local device index is always zero even when its global rank is 1.
+            self.assertIn("'LOCAL_RANK': '0'", text)
+            self.assertIn("'WORLD_SIZE': '2'", text)
+            self.assertIn("'JT_NCCL_RANK': '%d'" % rank, text)
 
 
     def test_ranks_get_torchrun_variables(self):

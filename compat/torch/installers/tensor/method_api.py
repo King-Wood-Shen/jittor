@@ -489,7 +489,7 @@ def _is_basic_index(index):
 
 def _torch_getitem(self, slices):
     # PyTorch accepts NumPy integer/bool arrays as advanced indices.
-    # Convert them before the Jittor ACL dispatcher sees the index.
+    # Convert them before the native fast path or the dispatcher sees them.
     def normalize(index):
         if isinstance(index, _owner.np.ndarray) and index.ndim:
             if index.dtype.kind not in ("b", "i", "u"):
