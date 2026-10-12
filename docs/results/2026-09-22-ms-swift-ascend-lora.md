@@ -1026,3 +1026,11 @@ Worker 预检确认模型实际目录名 `cache-on-base-topk4`、Adapter `checkp
 四条固定 prompt 分两个真实 batch=2 请求，每条最多生成四 token。native gate 观察到 8 次 NPU 前向，解码长度分别为 `[15,1,1,1]`、`[17,1,1,1]`。比较器确认初始参数与 prefill IDs 精确，prefill logits 最大绝对差为 0，六组匹配 decode logits 满足 `atol=1e-5, rtol=1e-4`；两侧每步 sample 都符合自身 top-k=64 后 top-p=.8 的组合候选集，后续 cache 输入消费上一 token。本次两侧序列相同，不据此声称 RNG 等价。该锁定配置 L0/L1/L4 通过，L5 未运行；不外推其他采样配置、cache-off、beam、训练/恢复或其他模型。
 
 原始日志、manifest、脚本与快照位于 `$TASK_STATE/runs/qwen3-public-infer-batch2-cacheon-topk64-topp08-temp07-sample-multistep4-world1-20261012-r1/`。基线 HEAD `6aede08bf`；dirty source patch SHA256 `192171d2616b3494cd3fe94f91141e168827e471d7519c56362b7c1d269c04b3`。本格开始前同步的 mirror `2.0-refactor` SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0` 是基线祖先。
+
+### Qwen3 tiny cache-enabled top-k=64 + top-p=0.9、temperature=0.7 四步 sampling（2026-10-12）
+
+新独立格 `qwen3-public-infer-batch2-cacheon-topk64-topp09-temp07-sample-multistep4-world1-20261012-r1` 完成公开 `swift infer` 原生 torch_npu 与 strict ACL 对照。worker 预检 2838、native oracle 2839、只读 native gate 2840、strict ACL candidate 2841、只读比较器 2842 均退出 0。预检核实模型/Adapter 实际目录 `cache-on-base-topk4` / `checkpoint-3`、配置与清单一致、无下载；native 为 Ascend910B3 `torch_npu`，candidate 为 ACL、`backend_fallback=error`、fallback=0，core SHA256 `7c2d5edd…3294bc`，两侧均启用 KV cache。
+
+四条固定 prompt 分为两个真实 batch=2 请求，每条最多生成四个 token。native gate 检查到八次 NPU 前向，两请求解码长度为 `[15,1,1,1]` 与 `[17,1,1,1]`。比较器确认加载参数与 prefill IDs 精确一致，prefill logits 最大绝对差为 0，六组匹配 decode logits 满足 `atol=1e-5, rtol=1e-4`；采样 token 按比较器中的 top-k64 后 top-p=.9 候选集合规则检查，下一步 cache 输入消费前一 token。两侧本次 token 序列恰好相同，不据此声明 RNG 等价。该锁定配置 L0/L1/L4 通过，L5 未运行；不外推到其他采样设置、cache-off、beam、训练/恢复或其他模型。
+
+原始日志、manifest、脚本与快照未版本化，位于 `$TASK_STATE/runs/qwen3-public-infer-batch2-cacheon-topk64-topp09-temp07-sample-multistep4-world1-20261012-r1/`。基线 HEAD `14804c5f3`；dirty source patch SHA256 `192171d2616b3494cd3fe94f91141e168827e471d7519c56362b7c1d269c04b3`。本格开始前同步的 mirror `2.0-refactor` SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0` 是该基线祖先。
