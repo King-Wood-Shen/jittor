@@ -508,7 +508,23 @@ def _is_basic_index(index):
 
 
 def _torch_getitem(self, slices):
+    # CPU index tensors and NumPy index arrays are both accepted by Torch.
+    # Normalize each before native fast-path dispatch while preserving the
+    # local cross-device tensor-index transfer behavior.
     slices = _indices_on_target(self, slices)
+
+    def normalize(index):
+        if isinstance(index, _owner.np.ndarray) and index.ndim:
+            if index.dtype.kind not in ("b", "i", "u"):
+                return index
+            return _owner.jt.array(index, dtype=str(index.dtype))
+        if isinstance(index, tuple):
+            return tuple(normalize(item) for item in index)
+        if isinstance(index, list):
+            return [normalize(item) for item in index]
+        return index
+
+    slices = normalize(slices)
     # A basic index, natively (`src/bindings/pyjt/py_compat_fast.h`).
     fast = _owner.jt.core._fast_getitem(self, slices)
     if fast is not NotImplemented:
