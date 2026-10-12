@@ -1002,3 +1002,11 @@ Worker 预检确认模型实际目录名 `cache-on-base-topk4`、Adapter `checkp
 四条固定 prompt 分两个真实 batch=2 请求，每条最多生成四 token。native gate 观察到八次 NPU 前向，解码长度分别为 `[15,1,1,1]` 与 `[17,1,1,1]`。比较器确认加载参数及 prefill IDs 精确一致，prefill logits 最大绝对差为 0；六组相同 decode 输入的 logits 满足 `atol=1e-5, rtol=1e-4`。两侧每步 token 均在各自 top-k=8 后 top-p=.8 的组合候选集内，下一步 cache 输入消费上一 token。观察到的采样序列相同不代表跨 runtime RNG 等价。此锁定配置 L0/L1/L4 通过，L5 未运行；不外推到其它采样参数、cache-off、beam、训练/恢复或其它模型。
 
 原始日志、manifest、脚本与快照位于 `$TASK_STATE/runs/qwen3-public-infer-batch2-cacheon-topk8-topp08-temp07-sample-multistep4-world1-20261012-r1/`。基线 HEAD `8ceffd78a835876503816c351528461f40a9d600`；dirty source patch SHA256 `192171d2616b3494cd3fe94f91141e168827e471d7519c56362b7c1d269c04b3`。本格开始前同步的 mirror `2.0-refactor` SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0` 是该基线祖先。
+
+### Qwen3 tiny cache-enabled top-k=16 + top-p=0.8、temperature=0.7 四步 sampling（2026-10-12）
+
+新独立格 `qwen3-public-infer-batch2-cacheon-topk16-topp08-temp07-sample-multistep4-world1-20261012-r2` 完成公开 `swift infer` 原生 torch_npu 与 strict ACL 对照。r1 的预检脚本残留 `top_k==8` 检查，与 top-k16 CLI/清单冲突，因此 job 2811 在 worker 检查前取消；未执行模型。修订为新键 r2 后，worker 预检 2812、native oracle 2813、只读 native gate 2814、strict ACL candidate 2815、只读比较器 2816 均退出 0。
+
+模型/Adapter 实际目录为 `cache-on-base-topk4` / `checkpoint-3`；本地权重、Adapter、输入与初态摘要可读且匹配，下载关闭。两侧启用 KV cache。native 为 Ascend910B3 `torch_npu`；candidate 使用 ACL、`backend_fallback=error`、fallback=0，core SHA256 `7c2d5edd…3294bc`。四条固定 prompt 分两个真实 batch=2 请求，每条最多生成四 token。native gate 观察到八次 NPU 前向，输入长度为 `[15,1,1,1]` 与 `[17,1,1,1]`。比较器确认加载参数、prefill IDs 精确相同，prefill logits 最大绝对差为 0；六组匹配 decode logits 满足 `atol=1e-5, rtol=1e-4`。每侧 token 均属于自身 top-k=16 后 top-p=.8 的组合候选集，并由下一步 cache 输入消费。两侧本次 token 恰好相同，不据此声称 RNG 等价。此锁定配置 L0/L1/L4 通过，L5 未运行；不外推其他采样配置、cache-off、beam、训练/恢复或其他模型。
+
+原始日志、清单、脚本与快照位于 `$TASK_STATE/runs/qwen3-public-infer-batch2-cacheon-topk16-topp08-temp07-sample-multistep4-world1-20261012-r2/`。基线 HEAD `0d6d1c095`；dirty source patch SHA256 `192171d2616b3494cd3fe94f91141e168827e471d7519c56362b7c1d269c04b3`。本格开始前同步的 mirror `2.0-refactor` SHA `7a18abf295668d9b19da5fa1657f5606e84b65a0` 是基线祖先。
