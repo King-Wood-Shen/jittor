@@ -1,9 +1,9 @@
 # CUDA DPO 反向传播中的越界切片归一化
 
-- 状态：修复后在真实 CUDA 设备上完成单步训练；CPU 定向回归通过。
+- 状态：修复后在真实 CUDA 设备上完成三步训练和 checkpoint 保存；CPU 定向回归通过。
 - 日期：2026-10-13。
 - 同步基线：`4896af611650d1436302c06b0653ac61726fd10c`（`origin/2.0-refactor`）。
-- 范围：Jittor 共享 `Slice::fill`、单卡 CUDA、公开 ms-swift DPO 单步。
+- 范围：Jittor 共享 `Slice::fill`、单卡 CUDA、公开 ms-swift DPO 三步。
 - 维护者：Jittor core maintainers。
 - 复查条件：切片归一化、getitem/setitem 梯度、PySlice 转换或 CUDA 执行路径变更。
 
@@ -22,9 +22,12 @@
 | `21661` | CUDA 最小回归，修复前 | 预期失败：`slice overflow: 100000000000000 0 1 size: 2` |
 | `21662` | CUDA 最小回归，修复后 | `1 passed`；实际 CUDA 运算；fallback 增量为 0 |
 | `21663` | 公开 ms-swift DPO 单步，修复后 | `global_step/max_steps=1/1`；Slurm `COMPLETED`、退出码 0；两个 shim 进程退出时 `use_cuda=1`、fallback 增量均为 0 |
+| `21695` | 公开 ms-swift DPO 三步及保存，修复后 | `global_step/max_steps=3/3`；Slurm `COMPLETED`、退出码 0；`checkpoint-3/model.safetensors` 已生成；两个 shim 进程退出时 `use_cuda=1`、fallback 增量均为 0 |
+
+三步运行使用提交 `9ffe7cbd9973caf161c756b5b6bb5aebb4684c7f`，与此前原生作业 `13176` 使用同一模型和四条 DPO 数据（SHA256 分别为 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`、`57b44eaa07bdf2f2a82d5f407df5b04e7ae81ac4f3be04f65ef3ed07322cde28`），ms-swift 提交均为 `88d727951203256baa564c643c651b6f8d90fd7e`。两次训练的模型、数据、超参数和随机种子相同，但前三步样本顺序不同：原生第 1 步的 chosen log probability 约为 `-21.33`，shim 在第 2 步出现对应量级；原生第 2 步约为 `-22.63`，shim 在第 3 步出现对应量级。因此这组日志只证明公开工作负载完成和无 fallback，不能证明逐步损失或最终权重与原生运行数值一致。尚未定位采样顺序差异，未重复已完成的原生作业。
 
 同一最小回归在 CPU 上以 `JITTOR_TEST_DEVICES=cpu use_mkl=0` 运行，`1 passed`。仓库布局门禁通过。首次 core 门禁未设置 `use_mkl=0`，13 项失败均由当前解释器缺少 `cmake`、无法构建 oneDNN 引起；该环境失败保留在未版本化的 `core-gate.log` 中。设置 `use_mkl=0` 后 core 的 native/Torch 两个会话合计 `322 passed, 42 skipped, 1 xfailed`，退出码 0。
 
-结构门禁首次运行 `1381 passed, 8 skipped, 3 failed`。3 项失败分别是同一 oneDNN 环境问题、新增报告后尚未再生的 `MANIFEST.in`，以及 ROCm 结构测试错误地在绝对源码路径中查找 `cuda`（当前工作树目录名包含 `cuda`）。清单已再生；前两项在 `use_mkl=0` 下定向复验 `2 passed`。ROCm 路径误报不涉及本次切片代码，未修改该测试。
+结构门禁首次运行 `1381 passed, 8 skipped, 3 failed`。3 项失败分别是同一 oneDNN 环境问题、新增报告后尚未再生的 `MANIFEST.in`，以及 ROCm 结构测试错误地在绝对源码路径中查找 `cuda`（当前工作树目录名包含 `cuda`）。清单已再生；前两项在 `use_mkl=0` 下定向复验 `2 passed`。三步训练后的完整结构门禁以 `use_mkl=0` 运行，结果为 `1385 passed, 6 skipped, 1 failed`；唯一失败仍是同一 ROCm 绝对路径误报，不涉及本次切片代码，未修改该测试。
 
 原始日志、Slurm 脚本及运行产物未版本化，保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261013-nanovector-minrepro/`。DPO 的第一次修复后运行耗时约 7 分 37 秒，包含首次 CUDA 算子编译，不作为性能比较。未修改外部 ms-swift checkout；ROCm 与 NPU 未验。
