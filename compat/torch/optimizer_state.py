@@ -4,6 +4,7 @@ import jittor as jt
 from .optimizer_step_state import (
     _torch_param_steps, _torch_step_tensor, _torch_optimizer_kind,
 )
+from jittor.optim.algorithms.sgd import momentum_initialized_flags as _momentum_initialized_flags
 
 
 class _ParamState(dict):
@@ -47,6 +48,8 @@ class _OptState:
                     yield p
     def _reset_slot(self, pg, i):
         _torch_param_steps(pg)[i] = 0
+        if _torch_optimizer_kind(self._opt) == "sgd":
+            _momentum_initialized_flags(pg)[i] = False
         for key in ("m", "values", "v", "d", "pre_grad"):
             buffers = pg.get(key)
             if not isinstance(buffers, list) or i >= len(buffers):
@@ -78,24 +81,33 @@ class _OptState:
         }
         target = mappings.get(kind, {}).get(key)
         buffers = pg.get(target) if target is not None else None
+        if kind == "sgd" and key == "momentum_buffer" and value is None:
+            if isinstance(buffers, list) and i < len(buffers) \
+                    and isinstance(buffers[i], jt.Var):
+                buffers[i] = jt.zeros_like(buffers[i]).stop_grad()
+            _momentum_initialized_flags(pg)[i] = False
+            return
         if isinstance(buffers, list) and i < len(buffers):
             buffers[i] = value
+            if kind == "sgd" and key == "momentum_buffer":
+                _momentum_initialized_flags(pg)[i] = True
     def get(self, param, default=None):
         pg, i = self._find(param)
         if pg is None:
+            return default
+        kind = _torch_optimizer_kind(self._opt)
+        if kind == "sgd" and not _momentum_initialized_flags(pg)[i]:
             return default
         steps = _torch_param_steps(pg)
         if int(steps[i]) <= 0:
             slot = self._views.get(id(param))
             return default if slot is None else slot[1]
-        kind = _torch_optimizer_kind(self._opt)
         if kind in ("adam", "adamw") and "m" in pg and "values" in pg:
             return self._view(param, {
                 "exp_avg": pg["m"][i],
                 "exp_avg_sq": pg["values"][i],
                 "step": _torch_step_tensor(self._opt, pg, i)})
-        if kind == "sgd" and "values" in pg and pg.get(
-                "momentum", getattr(self._opt, "momentum", 0)):
+        if kind == "sgd" and "values" in pg and _momentum_initialized_flags(pg)[i]:
             return self._view(param, {
                 "momentum_buffer": pg["values"][i]})
         if kind == "rmsprop" and "values" in pg:
@@ -166,5 +178,3 @@ def _refresh_state_views(opt):
     state = _OptState(opt)
     for param, _view in list(state._views.values()):
         state.get(param)
-
-

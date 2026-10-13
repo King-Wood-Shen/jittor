@@ -25,6 +25,9 @@
 2026-09-14-jittor-vs-pytorch
 2026-09-14-vllm-omni-h3-enablement
 2026-09-19-torch-compat-runbook-verification
+2026-09-21-flowey-merge-verification
+2026-09-22-complex-svd-grad-and-complex128
+2026-09-22-sgd-dampening-and-native-vmap-gaps
 2026-09-24-torch-compat-real-models
 2026-09-25-profiling-tools
 2026-10-07-ms-swift-cuda-compat-sync
@@ -74,6 +77,8 @@
 2026-10-11-qwen2-seqcls-convergence-cuda
 2026-10-11-tinyllama-public-infer-l01
 2026-10-11-qwen2-ia3-public-infer-cuda
+2026-10-05-high-rank-and-downstream-core-gaps
+2026-10-09-downstream-p1-allocator-protocol-transpose
 ```
 
 | [ms-swift CUDA 算法覆盖：GRPO 阻塞与 PPO 交接](2026-10-12-ms-swift-cuda-grpo-ppo-handoff.md) | GRPO 因 worker 无法安装 trl>=0.26 在训练前受阻；PPO worker 依赖与公开 CLI help 预检通过，完整 PPO 因共享 NFS 无有效配额而未运行 | 2026-10-12 |
@@ -143,3 +148,5 @@
 | [Qwen2-0.5B stock `swift rlhf --rlhf_type simpo` CUDA 对拍](2026-10-09-qwen2-simpo-stock-cli-cuda.md) | 保留旧协议单样本数值对拍；当前树 L0 构造清单通过、L3 partial（同进程恢复到 step 6；新进程 step 6 backward 触发 NanoVector slice overflow）；L1/L2/L4仍按既有范围 partial，L5 blocked | 2026-10-12 |
 | [JTorch 学习率调度器状态字段 CUDA 对拍](2026-10-09-torch-lrscheduler-state-cuda.md) | 修复 verbose 与瞬态 `_is_initial` 状态差异；LambdaLR/MultiplicativeLR/StepLR 的 CUDA 状态、学习率轨迹和参数值对齐；定向测试 11 passed，core tier 仍有环境与无关失败 | 2026-10-09 |
 | [Qwen2-0.5B 公开双卡全参数 SFT：strict shim 第六步 backward 失败](2026-10-10-qwen2-causal-ddp-sft-cuda.md) | native 12 步完成；strict shim 在 step 6 `grad_optional` 触发 NanoVector slice overflow，前五步逐参数梯度已审计；L2 未完成、无恢复或性能结论 | 2026-10-10 |
+| [张量维度上限 10 → 32 与下游评测的核心缺口](2026-10-05-high-rank-and-downstream-core-gaps.md) | 已修复，CPU 与 RTX 4090 验证 | 2026-10-05 |
+| [下游 P1：分配器并存上限、数值协议与 transpose 的运行时置换](2026-10-09-downstream-p1-allocator-protocol-transpose.md) | 已修复，CPU 验证，transpose/协议另在 RTX 4090 验证 | 2026-10-09 |
