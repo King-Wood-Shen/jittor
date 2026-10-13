@@ -42,6 +42,7 @@
 2026-10-08-qwen2-causal-sft-bf16-amp-cuda
 2026-10-12-qwen2-causal-sft-bf16-autocast-l0l4
 2026-10-14-qwen2-grpo-trl026-cuda
+2026-10-14-qwen2-ppo-gkd-cuda
 2026-10-08-qwen2-causal-sft-l0-audit
 2026-10-08-qwen2-seqcls-sft-cuda
 2026-10-08-qwen2-seqcls-infer-cuda
@@ -81,12 +82,12 @@
 2026-10-09-downstream-p1-allocator-protocol-transpose
 ```
 
-| [Qwen2-0.5B GRPO ms-swift CUDA 公开入口](2026-10-14-qwen2-grpo-trl026-cuda.md) | 原生与严格 shim 的 L0–L2 已验；新进程恢复部分通过，L4 已执行但完整验收待 L3 | 2026-10-14 |
-
 ## 按主题索引
 
 | 结论 | 状态 | 日期 |
 | --- | --- | --- |
+| [Qwen2-0.5B GRPO ms-swift CUDA 公开入口](2026-10-14-qwen2-grpo-trl026-cuda.md) | 原生与严格 shim 的 L0–L2 已验；新进程恢复部分通过，L4 已执行但完整验收待 L3 | 2026-10-14 |
+| [Qwen2-0.5B PPO/GKD ms-swift CUDA 公开入口](2026-10-14-qwen2-ppo-gkd-cuda.md) | 公开训练和更新已完成，GKD 同输入 L0/L1 已验；PPO 原生恢复被上游阻断，GKD 完整恢复证据尚不完整 | 2026-10-14 |
 | [Ascend 910B3：冷缓存启动、ACL 执行与 NPU 门禁](2026-08-28-ascend-910b-validation.md) | NPU 门禁 397 passed / 9 skipped；skip 对应的能力边界仍开放 | 2026-08-28，2026-09-01 复查 |
 | [Qwen3-0.6B 在 Ascend 910B3 上训练](2026-08-30-qwen3-ascend-training.md) | FP32 训练与 BF16 单步对齐接受；BF16 精确路径慢约 6%、训练轨迹未验收 | 2026-08-30，2026-09-02 |
 | [vLLM 在 Ascend 910B3 上经 Jittor 运行](2026-08-31-vllm-ascend-jittor-bootstrap.md) | 单请求 Qwen3-0.6B 正确且快 6.8%；外置 NPU 插件未入仓，多请求未测 | 2026-08-31，2026-09-02 |
