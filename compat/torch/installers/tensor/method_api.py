@@ -1499,8 +1499,8 @@ def _tensor_truediv(self, other):
     if fast is not None:
         out = fast(self, other, 6)
         if out is not None:
-            return out
-    return _true_division(self, other, '__truediv__')
+            return _division_grad_result(out, self, other)
+    return _division_grad_result(_true_division(self, other, '__truediv__'), self, other)
 
 
 def _tensor_rtruediv(self, other):
@@ -1508,8 +1508,19 @@ def _tensor_rtruediv(self, other):
     if fast is not None:
         out = fast(self, other, 7)
         if out is not None:
-            return out
-    return _true_division(self, other, '__rtruediv__')
+            return _division_grad_result(out, self, other)
+    return _division_grad_result(_true_division(self, other, '__rtruediv__'), self, other)
+
+
+def _division_grad_result(result, left, right):
+    # Native scalar division can mark a fresh quotient trainable even though
+    # neither Torch operand needs a gradient. Preserve the graph when either
+    # tensor operand does need one.
+    if isinstance(result, _NativeVar) and (
+            _owner.jt.flags.no_grad or not any(isinstance(value, _NativeVar) and value.requires_grad
+                                               for value in (left, right))):
+        result.requires_grad_(False)
+    return result
 
 
 _BINARY_APIS = {

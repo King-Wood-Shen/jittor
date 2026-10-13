@@ -278,6 +278,20 @@ class TestComparisonWhere(Base):
                     msg=f"where {dev}")
         both_devices(body)
 
+    def test_where_frozen_result_grad_flags(self):
+        def body(dev):
+            condition = torch.tensor([[True, False]], device=dev)
+            frozen = torch.tensor(0.0, device=dev)
+            trainable = torch.ones((1, 2), device=dev, requires_grad=True)
+            self.assertFalse(torch.where(condition, frozen, -3.0).requires_grad)
+            self.assertTrue(torch.where(condition, trainable, frozen).requires_grad)
+            with torch.no_grad():
+                self.assertFalse(torch.where(condition, trainable, frozen).requires_grad)
+            self.assertFalse(frozen.requires_grad)
+            self.assertTrue(trainable.requires_grad)
+
+        both_devices(body)
+
     def test_comparisons(self):
         a = np.random.RandomState(8).randn(3, 3).astype("float32")
         b = np.random.RandomState(9).randn(3, 3).astype("float32")
@@ -310,6 +324,27 @@ class TestComparisonWhere(Base):
             got = (ratio != clipped).numpy()
             self.ae(got, ref_ne, msg=f"ne shared detach {dev}")
             loss.backward()
+
+        both_devices(body)
+
+
+class TestDivisionGradFlags(Base):
+    def test_frozen_and_trainable_division(self):
+        def body(dev):
+            frozen = torch.tensor([1.0, 2.0, 4.0], device=dev)
+            trainable = frozen.clone().detach().requires_grad_(True)
+            for result in (frozen / 2.0, 2.0 / frozen, torch.div(frozen, 2.0),
+                           torch.reciprocal(frozen)):
+                self.assertFalse(result.requires_grad)
+            for result in (trainable / 2.0, 2.0 / trainable,
+                           torch.div(trainable, 2.0), torch.reciprocal(trainable)):
+                self.assertTrue(result.requires_grad)
+            with torch.no_grad():
+                self.assertFalse((2.0 / trainable).requires_grad)
+                self.assertFalse(torch.div(trainable, 2.0).requires_grad)
+            self.ac((2.0 / frozen).numpy(), [2.0, 1.0, 0.5])
+            self.assertFalse(frozen.requires_grad)
+            self.assertTrue(trainable.requires_grad)
 
         both_devices(body)
 

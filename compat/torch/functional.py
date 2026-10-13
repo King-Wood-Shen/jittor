@@ -103,7 +103,13 @@ def _torch_where_select(condition, input, other):
             return x
         return x.broadcast(out_shape)
 
-    return jt.ternary(_bcast(cond).bool(), _bcast(a), _bcast(b))
+    result = jt.ternary(_bcast(cond).bool(), _bcast(a), _bcast(b))
+    # Native ternary can mark a fresh result trainable even when both selected
+    # values are frozen. Python scalar operands are constants, not leaves.
+    if jt.flags.no_grad or not any(isinstance(x, jt.Var) and x.requires_grad
+                                   for x in (input, other)):
+        result.requires_grad_(False)
+    return result
 
 
 def _diff(x, n=1, dim=-1, prepend=None, append=None):

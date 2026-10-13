@@ -230,6 +230,13 @@ def _integer_result(dtype):
     return _jittor_dtype_name(dtype).startswith(("int", "uint"))
 
 
+def _div_grad_result(jt, result, input, other):
+    if isinstance(result, jt.Var) and (jt.flags.no_grad or not any(
+            isinstance(value, jt.Var) and value.requires_grad for value in (input, other))):
+        result.requires_grad_(False)
+    return result
+
+
 def div(input, other, *, rounding_mode=None, out=None):
     """``torch.div``, including its one Torch-only keyword, ``rounding_mode``.
 
@@ -268,19 +275,19 @@ def div(input, other, *, rounding_mode=None, out=None):
             "div expected rounding_mode to be one of None, 'trunc', or 'floor' "
             "but found %r" % (rounding_mode,))
     if rounding_mode is None:
-        return _native_div(input, other)
+        return _div_grad_result(jt, _native_div(input, other), input, other)
     floored = jt.floor_divide(input, other)
     if rounding_mode == "floor":
-        return floored
+        return _div_grad_result(jt, floored, input, other)
     if _integer_result(floored.dtype):
         # `%` follows the floor convention, so a zero remainder is exactly
         # "divisible", and the quotient needs correcting only when the two
         # operands have opposite signs.
         remainder = input % other
         opposite_signs = (input < 0) != (other < 0)
-        return floored + (remainder != 0) * opposite_signs
+        return _div_grad_result(jt, floored + (remainder != 0) * opposite_signs, input, other)
     quotient = _native_div(input, other)
-    return jt.ternary(quotient < 0, jt.ceil(quotient), jt.floor(quotient))
+    return _div_grad_result(jt, jt.ternary(quotient < 0, jt.ceil(quotient), jt.floor(quotient)), input, other)
 
 
 #: ``torch.divide`` is documented as an alias of ``torch.div`` and accepts the

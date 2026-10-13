@@ -777,7 +777,7 @@ def cat(tensors, dim=0, out=None, axis=None):
     if out is None and axis is None and type(dim) is int:
         fast = (_FAST_CAT or _bind_fast_cat())(tensors, dim)
         if fast is not NotImplemented:
-            return fast
+            return _cat_grad_result(fast, tensors)
     g = compatibility_owner(jt)
     if axis is not None: dim = axis      # torch accepts axis= (mmrotate PSC head)
     # Honor the __torch_function__ protocol: tensordict (and other tensor-likes)
@@ -841,7 +841,16 @@ def cat(tensors, dim=0, out=None, axis=None):
         d = in_dtypes.pop()
         if _jittor_dtype_name(out_var.dtype) != d:
             out_var = out_var.cast(d)
-    return _cat_result(out_var, out)
+    return _cat_result(_cat_grad_result(out_var, fixed), out)
+
+
+def _cat_grad_result(value, tensors):
+    # Native concat allocates a trainable destination before copying slices.
+    # Torch propagates requires_grad from the inputs and the current grad mode.
+    if isinstance(value, jt.Var) and (jt.flags.no_grad or not any(
+            isinstance(t, jt.Var) and t.requires_grad for t in tensors)):
+        value.requires_grad_(False)
+    return value
 
 
 def _cat_result(value, out):
