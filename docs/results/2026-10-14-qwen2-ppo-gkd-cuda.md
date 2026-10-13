@@ -1,11 +1,11 @@
 # Qwen2-0.5B PPO and GKD via ms-swift CUDA
 
-- Status: PPO and GKD public CLI training completed with finite CUDA gradients, adapter updates, falling training-window loss, and strict shim fallback zero. GKD same-input L0/L1 passed; formal L2–L5 acceptance remains open where the sequential evidence below is incomplete.
+- Status: PPO and GKD public CLI training completed with finite CUDA gradients, adapter updates, falling training-window loss, and strict shim fallback zero. GKD same-input L0–L2 passed; L3–L5 remain open.
 - Date: 2026-10-14
 - Jittor baseline: `e276de868b7211fdd751e461a75dee44849d707e` (integrated `origin/2.0-refactor` `3495d443d9d52eb0672f91b22735a7eb585f0c46`); compatibility repair committed as `fbc391b7ad495a7f43fa8f7a8d60a5f4ffefff8b`.
 - ms-swift checkout: `88d727951203256baa564c643c651b6f8d90fd7e`; no ms-swift source edits.
 - Owner: ms-swift CUDA/JTorch coverage.
-- Review when: GKD initial-state parity is captured for the convergent training window, full model/optimizer/RNG and dataloader cursor restoration is instrumented, ms-swift fixes native PPO checkpoint routing, or affected code changes.
+- Review when: GKD full model/optimizer/RNG and dataloader cursor restoration is instrumented, ms-swift fixes native PPO checkpoint routing, or affected code changes.
 
 ## Public training evidence
 
@@ -14,15 +14,17 @@ Both profiles used the local Qwen2-0.5B model on RTX 4090, FP32 eager attention 
 | Profile | Worker jobs and raw state | Evidence | Formal level |
 | --- | --- | --- | --- |
 | PPO | Native 23363, shim 23377, verifier 23385; `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261014-qwen2-ppo-gradient-window-v1/` | Eight steps each; 673/673 present finite CUDA gradients at every step; first-two versus last-two mean loss native `0.00240049→-0.10047080`, shim `0.02380311→-0.06003659`; 1,216,512 LoRA B elements nonzero in each saved adapter; fallback zero. | L0/L1 same-input checks remain open; L2 training-window evidence passed; public L4 entry ran and saved checkpoint, formal L4 held by L3. |
-| GKD | Native 23393, shim 23394, verifier 23404; `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261014-qwen2-gkd-stock-cli-v1/` | Eight steps each; 336/336 present finite CUDA gradients every step; mean loss native `0.02270928→0.00413978`, shim `0.02290486→0.00424448`; 1,216,512 LoRA B elements nonzero in each saved adapter; fallback zero. | L0/L1 separately passed on the saved checkpoint as below; L2 training-window evidence passed, but its initial-state parity was not captured; public L4 entry ran and saved checkpoint, formal L4 held by L3. |
+| GKD | Native 23393, shim 23394, verifier 23404; `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261014-qwen2-gkd-stock-cli-v1/` | Eight steps each; 336/336 present finite CUDA gradients every step; mean loss native `0.02270928→0.00413978`, shim `0.02290486→0.00424448`; 1,216,512 LoRA B elements nonzero in each saved adapter; fallback zero. | Controlled same-input/initial-weight L0–L2 separately passed as below; public L4 entry ran and saved checkpoint, formal L4 held by L3. |
 
-These are per-runtime convergence checks, not stepwise numerical parity. PPO same-input and initial-weight parity remain open. GKD same-input L0/L1 is established on a separate, fixed native checkpoint-8 adapter; that does not retrospectively establish initial-state parity for the original eight-step convergence window.
+These are per-runtime convergence checks, not stepwise numerical parity. PPO same-input and initial-weight parity remain open. GKD same-input L0–L2 is established on a separate, controlled window from one fixed native checkpoint-8 adapter; the original eight-step window did not capture initial-state parity.
 
 ## GKD fixed-input construction and forward
 
 Jobs 23541 (short native preflight), 23542 (native public CLI), 23545 (new strict CUDA cache build), 23592 (separate no-build CUDA check), 23593 (shim public CLI), and 23602 (worker comparison) used `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261014-qwen2-gkd-fixed-input-l01-v1/`. The one-step CLI on each side loaded the **same** native GKD checkpoint-8 student adapter and the same frozen SFT checkpoint-8 teacher adapter, Qwen2-0.5B model, two-row dataset, seed 1234, FP32 eager attention and PEFT LoRA. The runtime audit hook captured the first actual `GKDTrainer.compute_loss` forward without editing ms-swift source. Native and shim constructed 336 trainable LoRA parameters with identical names, shapes, dtypes, device labels and byte hashes. The eight student/teacher `input_ids`, labels, attention masks and position IDs tensors were shape/dtype/value identical (`[1,45]`).
 
 Both CUDA forwards produced finite float32 student and teacher logits of shape `[1,8,151936]`. Student maximum/mean absolute error was `3.71933e-5`/`3.88667e-6`; teacher was `3.01003e-5`/`3.51610e-6`. Native/shim losses were `0.0034989626`/`0.0034990066`; strict shim runtime recorded `cuda=1 fallback=0`. This passes GKD L0 construction and L1 same-input forward for this checkpoint. The public one-step CLI also completed on both sides. The cold shim step included new CUDA JIT compilation and took 428 seconds; this is not a steady-state performance result. Job 23543 failed before training because an older cache was rejected by `JITTOR_NO_BUILD=1`; its log is retained and contributes no algorithm result. The separate new-cache no-build check and strict CUDA probe passed before job 23593.
+
+The controlled four-step public CLI window in `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261014-qwen2-gkd-controlled-window-v1/` used the same checkpoint-8 student and frozen teacher adapters on both sides. Worker jobs 23608 (preflight), 23610 (native), 23611 (shim) and 23618 (verification) established identical initial hashes for all 336 trainable tensors and identical student/teacher input tensor hashes for **each** of the four microbatches. All four steps on each side had 336/336 present, finite CUDA gradients; the saved checkpoint-4 changed all 336 adapter keys relative to the common source. Mean loss for the first two versus last two steps fell natively from `0.00406682` to `0.00251177` and under shim from `0.00406684` to `0.00251174`; shim recorded `cuda=1 fallback=0`. This passes GKD L2 gradient, update and fixed-window convergence. The two runtimes' close numerical trajectory is diagnostic; stepwise equality is not an acceptance criterion. The warm shim window took 58 seconds including any incremental JIT and checkpoint save, so it does not establish L5 performance.
 
 ## Restore boundary and compatibility repair
 
