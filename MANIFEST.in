@@ -426,6 +426,7 @@ include docs/results/2026-10-11-tinyllama-public-infer-l01.md
 include docs/results/2026-10-12-qwen2-causal-sft-bf16-autocast-l0l4.md
 include docs/results/2026-10-14-qwen2-grpo-trl026-cuda.md
 include docs/results/2026-10-14-qwen2-ppo-gkd-cuda.md
+include docs/results/2026-10-14-qwen2-rloo-cuda.md
 include docs/results/index.md
 include docs/tutorials/index.md
 include examples/README.md

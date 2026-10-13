@@ -42,6 +42,7 @@
 2026-10-08-qwen2-causal-sft-bf16-amp-cuda
 2026-10-12-qwen2-causal-sft-bf16-autocast-l0l4
 2026-10-14-qwen2-grpo-trl026-cuda
+2026-10-14-qwen2-rloo-cuda
 2026-10-14-qwen2-ppo-gkd-cuda
 2026-10-08-qwen2-causal-sft-l0-audit
 2026-10-08-qwen2-seqcls-sft-cuda
@@ -87,6 +88,7 @@
 | 结论 | 状态 | 日期 |
 | --- | --- | --- |
 | [Qwen2-0.5B GRPO ms-swift CUDA 公开入口](2026-10-14-qwen2-grpo-trl026-cuda.md) | 原生与严格 shim 的 L0–L2 已验；新进程及同进程恢复子路径通过，数据游标待区分，L4 已执行但完整验收待 L3 | 2026-10-14 |
+| [Qwen2-0.5B RLOO 优势估计 ms-swift CUDA 公开入口](2026-10-14-qwen2-rloo-cuda.md) | RLOO 留一优势、同输入前向及八步训练的 L0–L2 已验；公开 CLI 已执行，完整 L3 受 checkpoint 存储余量限制，形式 L4/L5 待验 | 2026-10-14 |
 | [Qwen2-0.5B PPO/GKD ms-swift CUDA 公开入口](2026-10-14-qwen2-ppo-gkd-cuda.md) | GKD 单卡 FP32 PEFT LoRA 的 L0–L5 已验，包含同进程及新进程恢复和十次同步稳态计时；PPO 同输入 L0/L1 已验，原生恢复被上游 checkpoint 路由阻断 | 2026-10-14 |
 | [Ascend 910B3：冷缓存启动、ACL 执行与 NPU 门禁](2026-08-28-ascend-910b-validation.md) | NPU 门禁 397 passed / 9 skipped；skip 对应的能力边界仍开放 | 2026-08-28，2026-09-01 复查 |
 | [Qwen3-0.6B 在 Ascend 910B3 上训练](2026-08-30-qwen3-ascend-training.md) | FP32 训练与 BF16 单步对齐接受；BF16 精确路径慢约 6%、训练轨迹未验收 | 2026-08-30，2026-09-02 |
