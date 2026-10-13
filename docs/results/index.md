@@ -91,6 +91,7 @@
 2026-10-11-qwen2-ia3-public-infer-cuda
 2026-10-05-high-rank-and-downstream-core-gaps
 2026-10-09-downstream-p1-allocator-protocol-transpose
+2026-10-13-cuda-dpo-slice-bounds
 ```
 
 ## 按主题索引
@@ -173,3 +174,4 @@
 | [Qwen2-0.5B 公开双卡全参数 SFT：strict shim 第六步 backward 失败](2026-10-10-qwen2-causal-ddp-sft-cuda.md) | native 12 步完成；strict shim 在 step 6 `grad_optional` 触发 NanoVector slice overflow，前五步逐参数梯度已审计；L2 未完成、无恢复或性能结论 | 2026-10-10 |
 | [张量维度上限 10 → 32 与下游评测的核心缺口](2026-10-05-high-rank-and-downstream-core-gaps.md) | 已修复，CPU 与 RTX 4090 验证 | 2026-10-05 |
 | [下游 P1：分配器并存上限、数值协议与 transpose 的运行时置换](2026-10-09-downstream-p1-allocator-protocol-transpose.md) | 已修复，CPU 验证，transpose/协议另在 RTX 4090 验证 | 2026-10-09 |
+| [CUDA DPO 反向传播中的越界切片归一化](2026-10-13-cuda-dpo-slice-bounds.md) | 共享切片归一化已修复；CUDA DPO 单步及零 fallback 已验证 | 2026-10-13 |
