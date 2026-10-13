@@ -1635,6 +1635,33 @@ def _api_normal(self, mean=0.0, std=1.0, generator=None):
     return _ip(self, _owner.jt.normal(float(mean), float(std), self.shape).cast(_jittor_dtype_name(self.dtype)))
 
 
+def _api_random(self):
+    """Draw integral values on the tensor's device, including CPU under CUDA.
+
+    The native Var.random_ draws uniform *fractions* and uses the ambient
+    device. Torch random_ instead draws integers; DataLoader uses a CPU int64
+    scalar even while model training runs in a CUDA scope.
+    """
+    dtype = _jittor_dtype_name(self.dtype)
+    bits = {"bool": 1, "uint8": 8, "int8": 7, "int16": 15,
+            "int32": 31, "int64": 63, "float16": 11,
+            "bfloat16": 8, "float32": 24, "float64": 53}.get(dtype)
+    if bits is None:
+        raise TypeError("torch.Tensor.random_ requires a real or integral tensor")
+    from jittor._core.var import device_scope_like
+    with device_scope_like(self):
+        # Each 21-bit piece is exactly representable in the float32 random
+        # sampler. Compose int64 without a float cast losing low bits.
+        remaining = bits
+        value = None
+        while remaining:
+            width = min(remaining, 21)
+            piece = _owner.jt.randint(0, 1 << width, self.shape, "int64")
+            value = piece if value is None else value * (1 << width) + piece
+            remaining -= width
+        return _ip(self, value.cast(dtype))
+
+
 def _api_uniform(self, a=0.0, b=1.0, generator=None):
     return _ip(self, (_owner.jt.rand(self.shape) * (b - a) + a).cast(_jittor_dtype_name(self.dtype)))
 

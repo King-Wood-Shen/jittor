@@ -34,3 +34,40 @@ class TestCPURNGSnapshot(unittest.TestCase):
         torch.set_rng_state(cpu_state)
         np.testing.assert_array_equal(
             torch.cuda.get_rng_state().cpu().numpy(), cuda_state)
+
+    def test_cpu_int64_random_under_cuda_scope_preserves_cuda_rng(self):
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA unavailable")
+        torch.manual_seed(123)
+        cpu_before = torch.get_rng_state().numpy().copy()
+        cuda_before = torch.cuda.get_rng_state().cpu().numpy().copy()
+        value = torch.empty((), dtype=torch.int64, device="cpu").random_()
+        self.assertEqual(value.device.type, "cpu")
+        self.assertEqual(value.dtype, torch.int64)
+        self.assertGreaterEqual(int(value.item()), 0)
+        self.assertLess(int(value.item()), 1 << 63)
+        self.assertFalse(np.array_equal(torch.get_rng_state().numpy(), cpu_before))
+        np.testing.assert_array_equal(
+            torch.cuda.get_rng_state().cpu().numpy(), cuda_before)
+        state = torch.get_rng_state()
+        expected = int(torch.empty((), dtype=torch.int64, device="cpu").random_().item())
+        torch.set_rng_state(state)
+        actual = int(torch.empty((), dtype=torch.int64, device="cpu").random_().item())
+        self.assertEqual(actual, expected)
+
+    def test_random_uses_target_device_for_float_and_cuda_integer(self):
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA unavailable")
+        torch.manual_seed(521)
+        cuda_before = torch.cuda.get_rng_state().cpu().numpy().copy()
+        cpu_float = torch.empty(8, dtype=torch.float32, device="cpu").random_()
+        self.assertEqual(cpu_float.device.type, "cpu")
+        np.testing.assert_array_equal(cpu_float.numpy(), np.floor(cpu_float.numpy()))
+        np.testing.assert_array_equal(torch.cuda.get_rng_state().cpu().numpy(), cuda_before)
+        cpu_before = torch.get_rng_state().numpy().copy()
+        cuda_integer = torch.empty(8, dtype=torch.int64, device="cuda").random_()
+        self.assertEqual(cuda_integer.device.type, "cuda")
+        self.assertEqual(cuda_integer.dtype, torch.int64)
+        self.assertTrue(np.any(cuda_integer.cpu().numpy() > 0))
+        np.testing.assert_array_equal(torch.get_rng_state().numpy(), cpu_before)
+        self.assertFalse(np.array_equal(torch.cuda.get_rng_state().cpu().numpy(), cuda_before))
