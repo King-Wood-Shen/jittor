@@ -41,7 +41,7 @@
 2026-10-08-qwen2-causal-sft-gradient-checkpointing-cuda
 2026-10-08-qwen2-causal-sft-bf16-amp-cuda
 2026-10-12-qwen2-causal-sft-bf16-autocast-l0l4
-2026-10-12-ms-swift-cuda-grpo-ppo-handoff
+2026-10-14-qwen2-grpo-trl026-cuda
 2026-10-08-qwen2-causal-sft-l0-audit
 2026-10-08-qwen2-seqcls-sft-cuda
 2026-10-08-qwen2-seqcls-infer-cuda
@@ -81,7 +81,7 @@
 2026-10-09-downstream-p1-allocator-protocol-transpose
 ```
 
-| [ms-swift CUDA 算法覆盖：GRPO 阻塞与 PPO 交接](2026-10-12-ms-swift-cuda-grpo-ppo-handoff.md) | GRPO 因 worker 无法安装 trl>=0.26 在训练前受阻；PPO worker 依赖与公开 CLI help 预检通过，完整 PPO 因共享 NFS 无有效配额而未运行 | 2026-10-12 |
+| [Qwen2-0.5B GRPO ms-swift CUDA 公开入口](2026-10-14-qwen2-grpo-trl026-cuda.md) | 原生与严格 shim 的 L0–L2 已验；新进程恢复部分通过，L4 已执行但完整验收待 L3 | 2026-10-14 |
 
 ## 按主题索引
 
