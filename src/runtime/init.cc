@@ -146,7 +146,8 @@ string make_cpu_rng_state(int seed) {
 
 string get_cpu_rng_state() {
     std::ostringstream state;
-    state << "JTCPU1 " << current_seed << " " << *eng;
+    auto& rng = runtime_rng_state();
+    state << "JTCPU1 " << rng.host_seed << " " << rng.host_engine;
     return state.str();
 }
 
@@ -160,8 +161,9 @@ void set_cpu_rng_state(string state) {
     input >> std::ws;
     USER_CHECK(input.eof()) << "trailing data in Jittor CPU RNG state";
     // CPU restoration must not invoke seed callbacks or reset CUDA streams.
-    *eng = restored;
-    current_seed = seed;
+    auto& rng = runtime_rng_state();
+    rng.host_engine = restored;
+    rng.host_seed = static_cast<uint64>(seed);
 }
 
 void add_set_seed_callback(set_seed_callback callback) {
