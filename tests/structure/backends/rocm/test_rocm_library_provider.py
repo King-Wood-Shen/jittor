@@ -51,7 +51,8 @@ def test_specs_resolve_only_native_source_and_quote_paths(tmp_path):
         assert spec.sources
         assert all(Path(path).is_file() for path in spec.sources)
         assert all(ROCM / "libraries" in Path(path).parents for path in spec.sources)
-        assert all("cuda" not in path for path in spec.sources)
+        assert all("cuda" not in str(Path(path).relative_to(ROCM)).lower()
+                   for path in spec.sources)
     assert any(path.endswith("scan.cu") for path in scan.sources)
     with pytest.raises(AttributeError):
         blas.name = "cublas"
