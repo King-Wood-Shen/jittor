@@ -425,6 +425,7 @@ include docs/results/2026-10-11-qwen2-ia3-public-infer-cuda.md
 include docs/results/2026-10-11-qwen2-seqcls-convergence-cuda.md
 include docs/results/2026-10-11-tinyllama-public-infer-l01.md
 include docs/results/2026-10-12-qwen2-causal-sft-bf16-autocast-l0l4.md
+include docs/results/2026-10-13-cuda-dpo-slice-bounds.md
 include docs/results/2026-10-14-qwen2-chord-cuda.md
 include docs/results/2026-10-14-qwen2-cispo-cuda.md
 include docs/results/2026-10-14-qwen2-dapo-cuda.md
@@ -438,7 +439,6 @@ include docs/results/2026-10-14-qwen2-reinforcepp-cuda.md
 include docs/results/2026-10-14-qwen2-rloo-cuda.md
 include docs/results/2026-10-14-qwen2-sapo-fipo-cuda.md
 include docs/results/2026-10-14-qwen2-sdar-rlsd-cuda.md
-include docs/results/2026-10-13-cuda-dpo-slice-bounds.md
 include docs/results/index.md
 include docs/tutorials/index.md
 include examples/README.md
