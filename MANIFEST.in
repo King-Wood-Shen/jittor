@@ -424,6 +424,7 @@ include docs/results/2026-10-11-qwen2-ia3-public-infer-cuda.md
 include docs/results/2026-10-11-qwen2-seqcls-convergence-cuda.md
 include docs/results/2026-10-11-tinyllama-public-infer-l01.md
 include docs/results/2026-10-12-qwen2-causal-sft-bf16-autocast-l0l4.md
+include docs/results/2026-10-14-qwen2-cispo-cuda.md
 include docs/results/2026-10-14-qwen2-dapo-cuda.md
 include docs/results/2026-10-14-qwen2-grpo-lora-cursor-cuda.md
 include docs/results/2026-10-14-qwen2-grpo-trl026-cuda.md
