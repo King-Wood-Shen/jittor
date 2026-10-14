@@ -55,5 +55,3 @@ def _torch_optimizer_kind(opt):
     """
     return (_optimizer_kinds.kind_of(opt)
             or type(opt).__name__.lower())
-
-
