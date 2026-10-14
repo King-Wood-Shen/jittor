@@ -435,6 +435,7 @@ include docs/results/2026-10-14-qwen2-ppo-gkd-cuda.md
 include docs/results/2026-10-14-qwen2-reinforcepp-cuda.md
 include docs/results/2026-10-14-qwen2-rloo-cuda.md
 include docs/results/2026-10-14-qwen2-sapo-fipo-cuda.md
+include docs/results/2026-10-14-qwen2-sdar-rlsd-cuda.md
 include docs/results/index.md
 include docs/tutorials/index.md
 include examples/README.md
