@@ -28,3 +28,12 @@
 结构门禁首次运行 `1381 passed, 8 skipped, 3 failed`。3 项失败分别是同一 oneDNN 环境问题、新增报告后尚未再生的 `MANIFEST.in`，以及 ROCm 结构测试错误地在绝对源码路径中查找 `cuda`（当前工作树目录名包含 `cuda`）。清单已再生；前两项在 `use_mkl=0` 下定向复验 `2 passed`。ROCm 路径误报不涉及本次切片代码，未修改该测试。
 
 原始日志、Slurm 脚本及运行产物未版本化，保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261013-nanovector-minrepro/`。DPO 的第一次修复后运行耗时约 7 分 37 秒，包含首次 CUDA 算子编译，不作为性能比较。未修改外部 ms-swift checkout；ROCm 与 NPU 未验。
+
+
+## 2026-10-14 最新主线集成
+
+在独立分支 `fix/ms-swift-cuda-dpo-integration` 合入 `origin/2.0-refactor` 的 `bdcbe8de5`，保留 CUDA 分支已有的 `randperm` 兼容实现，再接入本报告的 Slice 修复。主线把 CPU RNG 引擎迁入 `runtime_rng_state()` 后，旧快照接口仍引用已不存在的 `eng/current_seed`；现统一读取和恢复该运行时对象，且不触发 CUDA 重播种。主线撤掉 ACL Dropout 类后，结构清单仍登记该类；已移除失效登记并按生成器重建 `MANIFEST.in`。合并后的 `cat` 快速路径仍经过输入梯度状态传播，ACL 同类型快捷路径同样保留该语义。
+
+验证：Slurm `24433` 在真实 RTX 4090 上通过切片 1 项、Torch 兼容 51 项与 37 个子测试；`24573` 的完整结构门禁为 1405 通过、6 跳过、2 失败，失败分别对应上述过期登记和清单顺序；修复后 `24578` 定向复验 2 项通过，core 门禁合计 323 通过、42 跳过、1 个预期失败。初次混合 native/Torch 测试入口和随后错误的顶层包路径都属于运行脚本问题，已改为分进程、包内路径复验，不计为产品缺陷。
+
+本集成分支尚未重跑公开 DPO 三步及 checkpoint，因此前文 `21695` 的通过结论仍只属于 `9ffe7cbd9` 基线。2026-10-14 预检显示 `/home/xinshen` 挂载仅剩约 2.2 GiB，而既有三步 DPO 输出约 1.6 GiB；按本项目存储余量规则，新的保存作业暂不提交。解决容量后须在本集成分支以相同模型、数据和公开入口复验，并记录逐步样本 ID 以判断旧对照中的采样顺序差异。
