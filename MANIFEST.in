@@ -428,6 +428,7 @@ include docs/results/2026-10-14-qwen2-cispo-cuda.md
 include docs/results/2026-10-14-qwen2-dapo-cuda.md
 include docs/results/2026-10-14-qwen2-grpo-lora-cursor-cuda.md
 include docs/results/2026-10-14-qwen2-grpo-trl026-cuda.md
+include docs/results/2026-10-14-qwen2-gspo-sequence-cuda.md
 include docs/results/2026-10-14-qwen2-ppo-gkd-cuda.md
 include docs/results/2026-10-14-qwen2-reinforcepp-cuda.md
 include docs/results/2026-10-14-qwen2-rloo-cuda.md

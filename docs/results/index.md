@@ -47,6 +47,7 @@
 2026-10-14-qwen2-cispo-cuda
 2026-10-14-qwen2-sapo-fipo-cuda
 2026-10-14-qwen2-reinforcepp-cuda
+2026-10-14-qwen2-gspo-sequence-cuda
 2026-10-14-qwen2-rloo-cuda
 2026-10-14-qwen2-ppo-gkd-cuda
 2026-10-08-qwen2-causal-sft-l0-audit
@@ -98,6 +99,7 @@
 | [Qwen2-0.5B CISPO 损失 ms-swift CUDA 公开入口](2026-10-14-qwen2-cispo-cuda.md) | 单卡 FP32 PEFT LoRA 的 CISPO L0–L2 已验；公开 CLI 已完成，完整恢复受存储余量限制，形式 L4/L5 待验 | 2026-10-14 |
 | [Qwen2-0.5B SAPO/FIPO ms-swift CUDA 公开入口](2026-10-14-qwen2-sapo-fipo-cuda.md) | SAPO 单卡 FP32 PEFT LoRA L0–L2 已验，公开 CLI 完成但恢复受存储限制；FIPO 原生 CLI 在 ms-swift teacher 守卫处失败，shim 训练未运行 | 2026-10-14 |
 | [Qwen2-0.5B REINFORCE++ 优势估计 ms-swift CUDA 公开入口](2026-10-14-qwen2-reinforcepp-cuda.md) | 两个提示组的批量归一化优势分支在原生与严格 shim 上通过 L0–L2；公开 CLI 完成，恢复受存储限制，形式 L4/L5 待验 | 2026-10-14 |
+| [Qwen2-0.5B GSPO 序列重要性采样 ms-swift CUDA 公开入口](2026-10-14-qwen2-gspo-sequence-cuda.md) | 两个提示组的序列级重要性比率分支在原生与严格 shim 上通过 L0–L2；公开 CLI 完成，恢复受存储限制，形式 L4/L5 待验 | 2026-10-14 |
 | [Qwen2-0.5B RLOO 优势估计 ms-swift CUDA 公开入口](2026-10-14-qwen2-rloo-cuda.md) | PEFT LoRA 单卡 FP32 L0–L5 已验，含可区分游标恢复及十次同步稳态计时；全参数 RLOO L0–L2 已验，完整 checkpoint 仍受存储余量限制 | 2026-10-14 |
 | [Qwen2-0.5B PPO/GKD ms-swift CUDA 公开入口](2026-10-14-qwen2-ppo-gkd-cuda.md) | GKD 单卡 FP32 PEFT LoRA 的 L0–L5 已验，包含同进程及新进程恢复和十次同步稳态计时；PPO 同输入 L0/L1 已验，原生恢复被上游 checkpoint 路由阻断 | 2026-10-14 |
 | [Ascend 910B3：冷缓存启动、ACL 执行与 NPU 门禁](2026-08-28-ascend-910b-validation.md) | NPU 门禁 397 passed / 9 skipped；skip 对应的能力边界仍开放 | 2026-08-28，2026-09-01 复查 |
