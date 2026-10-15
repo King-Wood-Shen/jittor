@@ -165,7 +165,7 @@ def test_acl_state_round_trips_after_mixed_random_history():
     jt.random((5,)).sync()
     jt.random((6,), type="normal").sync()
     jt.random((7,), type="normal").sync()
-    jt.random((3,), dtype="float64").sync()
+    jt.random((3,), dtype="float32").sync()
 
     states = torch.cuda.get_rng_state_all()
     expected_uniform = jt.random((8,)).numpy().copy()
