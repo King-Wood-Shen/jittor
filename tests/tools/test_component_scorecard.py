@@ -3,6 +3,7 @@ import ast
 import copy
 import hashlib
 import importlib.util
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,6 +29,22 @@ def collector():
 @pytest.fixture
 def measurement():
     return load('component_measure')
+
+
+def test_comparison_reaudit_preserves_existing_evidence(tmp_path, collector):
+    path = tmp_path / 'complete-comparison.json'
+    value = {'case': 'component', 'status': 'passed', 'rows': []}
+    collector.write_comparison(path, value)
+    original = path.read_bytes()
+    # A fixed timestamp distinguishes reuse from rewriting identical content.
+    os.utime(path, ns=(1_000_000_000, 1_000_000_000))
+    collector.write_comparison(path, value)
+    assert path.read_bytes() == original
+    assert path.stat().st_mtime_ns == 1_000_000_000
+    with pytest.raises(ValueError, match='Existing comparison differs'):
+        collector.write_comparison(path, dict(value, status='changed'))
+    assert path.read_bytes() == original
+    assert path.stat().st_mtime_ns == 1_000_000_000
 
 
 def test_binding_rejects_missing_file_stale_baseline_and_changed_version(collector):
@@ -116,7 +133,8 @@ def test_every_phase_retains_the_actual_baseline_weight_snapshot(tmp_path, colle
 def test_registry_members_are_actually_called_by_maintained_builders(collector):
     tree = ast.parse((ROOT / 'compat/tests/torch/_ecosystem_cases.py').read_text())
     for spec in collector.SPECS.values():
-        builder = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_' + spec['case'])
+        builder = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                       and n.name == spec.get('builder', '_' + spec['case']))
         calls = {n.func.id for n in ast.walk(builder) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
         assert set(spec['members']) <= calls
     assert collector.SPECS['torchmetrics']['level'] == 2
