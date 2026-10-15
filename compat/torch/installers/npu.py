@@ -7,10 +7,11 @@ answered False and ``device_count()`` answered 0 on a machine with eight
 what Transformers, ms-swift and DeepSpeed all do -- was told there was no NPU
 and went to the host.
 
-What is published here is discovery, selection and synchronization, plus the
-three ``torch_npu`` primitives a Torch model reaches for directly. It is not
-the torch_npu extension: streams, RNG state and the memory statistics have
-their own contracts and are left refusing rather than answered with a zero.
+What is published here is discovery, selection, synchronization, ACL-backed
+RNG state, plus the three ``torch_npu`` primitives a Torch model reaches for
+directly. It is not the torch_npu extension: streams and memory statistics
+have their own contracts and are left refusing rather than answered with a
+zero.
 """
 import contextlib
 import types
@@ -19,6 +20,17 @@ import jittor as jt
 
 from ..fidelity import Fidelity, register_api_bindings
 from ..types import device as TorchDevice
+from .cuda.api import (
+    _api_cuda_get_rng_state,
+    _api_cuda_get_rng_state_all,
+    _api_cuda_initial_seed,
+    _api_cuda_manual_seed,
+    _api_cuda_manual_seed_all,
+    _api_cuda_seed,
+    _api_cuda_seed_all,
+    _api_cuda_set_rng_state,
+    _api_cuda_set_rng_state_all,
+)
 
 
 def _acl_build():
@@ -99,6 +111,21 @@ def empty_cache():
     jt.gc()
 
 
+def manual_seed(seed):
+    _require_acl()
+    return _api_cuda_manual_seed(seed)
+
+
+def manual_seed_all(seed):
+    _require_acl()
+    return _api_cuda_manual_seed_all(seed)
+
+
+def initial_seed():
+    _require_acl()
+    return _api_cuda_initial_seed()
+
+
 def is_bf16_supported():
     _require_acl()
     return True
@@ -146,7 +173,8 @@ _REFUSED = (
 )
 
 _SUPPORTED = ("is_available", "device_count", "current_device", "set_device",
-              "device", "synchronize", "empty_cache", "is_bf16_supported",
+              "device", "synchronize", "empty_cache", "manual_seed",
+              "manual_seed_all", "initial_seed", "is_bf16_supported",
               "npu_rms_norm", "npu_rotary_mul", "npu_swiglu")
 
 
@@ -156,10 +184,22 @@ def install(ctx):
     npu.__path__ = []
     for name in _SUPPORTED:
         setattr(npu, name, globals()[name])
+    random = types.ModuleType("torch.npu.random")
+    random.manual_seed = manual_seed
+    random.manual_seed_all = manual_seed_all
+    random.seed = _api_cuda_seed
+    random.seed_all = _api_cuda_seed_all
+    random.initial_seed = initial_seed
+    random.get_rng_state = _api_cuda_get_rng_state
+    random.get_rng_state_all = _api_cuda_get_rng_state_all
+    random.set_rng_state = _api_cuda_set_rng_state
+    random.set_rng_state_all = _api_cuda_set_rng_state_all
+    npu.random = random
     for name in _REFUSED:
         setattr(npu, name, _unsupported)
     registry.publish("torch.npu", npu, replace=True)
     target.npu = npu
+    registry.publish("torch.npu.random", random, replace=True)
 
     register_api_bindings(
         npu, "torch.npu",
@@ -168,6 +208,21 @@ def install(ctx):
         Fidelity.EXACT,
         "Native ACL discovery and selection; the index accepts an int, a "
         "string, a torch.device or None, as torch's does.")
+    register_api_bindings(
+        npu, "torch.npu",
+        ("manual_seed", "manual_seed_all", "initial_seed"),
+        Fidelity.EXACT,
+        "Uses Jittor's native ACL RNG counters for the selected or all "
+        "visible NPU devices.")
+    register_api_bindings(
+        random, "torch.npu.random",
+        ("manual_seed", "manual_seed_all", "seed", "seed_all",
+         "initial_seed", "get_rng_state", "get_rng_state_all",
+         "set_rng_state", "set_rng_state_all"),
+        Fidelity.EXACT,
+        "Reads and restores Jittor's native ACL seed/offset counter state; "
+        "the state tensor uses the same opaque CPU byte encoding as the "
+        "torch.cuda ACL facade.")
     register_api_bindings(
         npu, "torch.npu", ("synchronize", "empty_cache"), Fidelity.APPROXIMATE,
         "Submits Jittor's pending work and waits for every device it "

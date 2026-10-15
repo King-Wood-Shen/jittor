@@ -12,6 +12,7 @@ the device that was selected.
 
 import os
 
+import numpy as np
 import pytest
 import torch
 
@@ -79,6 +80,25 @@ def test_npu_device_scope_restores_the_previous_device():
     with torch.npu.device(other):
         assert torch.npu.current_device() == other
     assert torch.npu.current_device() == original
+
+
+@pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
+                    reason="requires a selected ACL device")
+def test_npu_rng_seed_and_state_round_trip():
+    torch.npu.manual_seed_all(6789)
+    assert torch.npu.initial_seed() == 6789
+    assert torch.npu.device_count() == len(torch.npu.random.get_rng_state_all())
+
+    jt.random((5,)).sync()
+    jt.random((6,), type="normal").sync()
+    states = torch.npu.random.get_rng_state_all()
+    expected_uniform = jt.random((8,)).numpy().copy()
+    expected_normal = jt.random((4,), type="normal").numpy().copy()
+
+    torch.npu.random.set_rng_state_all(states)
+    np.testing.assert_array_equal(jt.random((8,)).numpy(), expected_uniform)
+    np.testing.assert_array_equal(
+        jt.random((4,), type="normal").numpy(), expected_normal)
 
 
 @pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
