@@ -11,6 +11,9 @@
 ```{toctree}
 :maxdepth: 1
 
+2026-10-15-peft-installed-source-training
+2026-10-15-nn-init-generator
+2026-10-15-release-installed-source-proof
 2026-08-28-ascend-910b-validation
 2026-08-30-qwen3-ascend-training
 2026-08-31-vllm-ascend-jittor-bootstrap
@@ -63,6 +66,9 @@
 2026-10-15-transformers-model-family-matrix
 2026-10-15-native-sharded-checkpoint
 2026-10-15-native-multinode-control-plane
+2026-10-15-native-multihost-runner
+2026-10-15-accelerate-fresh-process
+2026-10-15-cuda-seed-without-devices
 2026-10-15-h3-autograd-boundary
 2026-10-15-longformer-32768-context-oracles
 2026-10-15-deepspeed-engine-prerequisites
@@ -150,3 +156,6 @@
 | [jtrun 固定节点控制面](2026-10-15-native-multinode-control-plane.md) | 单机双 agent 的真实 CUDA 通信、FSDP 新进程续训与故障退出通过；真实多 host 待验 | 2026-10-15 |
 | [H3 上游 CUDA 梯度边界](2026-10-15-h3-autograd-boundary.md) | 真 Torch 与候选端 eval/train 均缺完整梯度；定位上游推理内核，无完整模型 L2/L3 授级 | 2026-10-15 |
 | [默认生成器状态与设备隔离](2026-10-15-default-generator-state-contract.md) | CPU 状态互换、私有副本与实际 CUDA 流隔离通过；保留原生 frame 和旧快照读取 | 2026-10-15 |
+| [每主机 jtrun 验证入口](2026-10-15-native-multihost-runner.md) | 显式源码、解释器、设备和共享产物协议；单机双 agent 完整执行，真实多机仍待验 | 2026-10-15 |
+| [无可见 CUDA 设备的播种](2026-10-15-cuda-seed-without-devices.md) | CPU 训练可调用 CUDA 播种接口；保留参数转换与实际 CUDA 流回放 | 2026-10-15 |
+| [Accelerate 新进程续训](2026-10-15-accelerate-fresh-process.md) | CPU/CUDA 新进程恢复、全状态与实际 CUDA FSDP2 通过；CPU 双 rank 上游路径实际为 DDP，配对不授通过 | 2026-10-15 |

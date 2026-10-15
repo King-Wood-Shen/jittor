@@ -38,6 +38,13 @@ def cpu_description():
     return platform.processor() or platform.machine()
 
 
+def selected_nvidia_wheels():
+    """Report the resolved distribution, including when sites shadow versions."""
+    names = {dist.metadata['Name'] for dist in importlib.metadata.distributions()
+             if dist.metadata.get('Name', '').lower().startswith('nvidia-')}
+    return {name: importlib.metadata.version(name) for name in sorted(names)}
+
+
 def source_descriptor(checkout):
     """Bind all tracked package sources, with no invented registry denominator."""
     checkout = Path(checkout).resolve()
@@ -179,6 +186,8 @@ class Capture:
                         'compat/tests/torch/test_accelerate_distributed_integration.py',
                         'compat/tests/torch/test_optimizer_checkpoint_state.py',
                         'tools/run_accelerate_gate.py')
+        if os.environ.get('JITTOR_ACCELERATE_CHECKPOINT_PHASE'):
+            source_files += ('compat/tests/torch/_accelerate_fresh_process.py',)
         metadata = {'schema_version': 1, 'case': self.case, 'runtime': 'jittor' if shim else 'torch',
                     'jittor_commit': command('git', '-C', str(ROOT), 'rev-parse', 'HEAD'),
                     'upstream': self.source['upstream'], 'source_descriptor': self.source,
@@ -207,8 +216,7 @@ class Capture:
                         'cann': 'not-applicable',
                         'nvcc': command(os.environ['JT_BUILD_NVCC_PATH'], '--version') if self.device == 'cuda' else 'not-applicable',
                         'gcc': command(shutil.which('g++') or 'g++', '--version'),
-                        'nvidia_wheels': {dist.metadata['Name']: dist.version for dist in importlib.metadata.distributions()
-                            if dist.metadata.get('Name', '').lower().startswith('nvidia-')},
+                        'nvidia_wheels': selected_nvidia_wheels(),
                         'jittor_flags': {'use_cuda': native_flags.get('use_cuda', int(self.device == 'cuda')),
                             'use_acl': 0, 'graph_replay': 'default' if native_flags.get('auto_graph_replay') else 'eager',
                             'tf32': precision['matmul'], 'hf32': False},

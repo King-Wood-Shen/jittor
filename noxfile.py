@@ -2256,15 +2256,20 @@ def _ecosystem_deepspeed_session(session, multirank=False):
 
 @nox.session(python=False)
 def ecosystem_accelerate(session):
-    """Independent checkpoint correctness; separate from ASV performance."""
+    """Independent checkpoint correctness with terminated producers and new consumers."""
     _root, env = _session_env(session, "ecosystem-accelerate")
+    # Keep explicit provider choices when crossing the isolated nox boundary.
+    for name in ("JITTOR_CUDA_WHEEL_STRICT", "JT_BUILD_NVCC_PATH", "nvcc_path",
+                 "JT_BUILD_NCCL_INCLUDE_PATH", "JT_BUILD_NCCL_LIB_PATH"):
+        if name in os.environ:
+            env[name] = os.environ[name]
     python = _hardware_python()
     oracle = os.environ.get("REAL_TORCH_PYTHON", "").strip()
     checkout = os.environ.get("JITTOR_ACCELERATE_CHECKOUT", "").strip()
     device = os.environ.get("JITTOR_TEST_DEVICES", "cpu").strip()
     if not oracle or not checkout or device not in ("cpu", "cuda"):
         session.error("Accelerate needs REAL_TORCH_PYTHON, JITTOR_ACCELERATE_CHECKOUT and exactly cpu or cuda")
-    arguments = ["--device", device, "--jittor-python", python, "--oracle-python", oracle,
+    arguments = ["--fresh-process", "--device", device, "--jittor-python", python, "--oracle-python", oracle,
                  "--upstream", checkout, "--output", str(NOX_STATE_ROOT / "ecosystem-accelerate" / device)]
     if device == "cuda":
         arguments += ["--devices", os.environ.get("CUDA_VISIBLE_DEVICES", "")]
@@ -2761,3 +2766,53 @@ def ecosystem_vllm(session):
                 "assert hasattr(torch, '_torch_compat_install_context'); " + versions,
                 external=True, env=env)
     _run_pytest_once(session, ["compat/tests/torch/test_ecosystem_vllm.py"], env, python, timeout=3600)
+
+
+@nox.session(python=False)
+def native_multinode(session):
+    """Run one explicitly configured host of the maintained native world-two protocol."""
+    if not session.posargs:
+        session.error("native_multinode requires explicit runner arguments; use -- --help")
+    session.run(
+        _hardware_python(),
+        str(REPO_ROOT / "agent/skills/jittor-distributed-verification/run_native_multinode.py"),
+        *session.posargs, external=True,
+    )
+
+
+@nox.session(python=False)
+def ecosystem_peft(session):
+    """Run the full original PEFT LoRA L3 scope with independent installed-source proof."""
+    root, env = _session_env(session, "ecosystem-peft")
+    python = _hardware_python()
+    _set_hardware_python_config(session, python, env)
+    oracle = os.environ.get("REAL_TORCH_PYTHON", "").strip()
+    if not oracle or not Path(oracle).is_file():
+        session.error("REAL_TORCH_PYTHON must name an independent binary PyTorch interpreter")
+    device = os.environ.get("JITTOR_TEST_DEVICES", "cpu")
+    if device not in ("cpu", "cuda"):
+        session.error("ecosystem_peft requires exactly cpu or cuda")
+    if (len(session.posargs) % 2
+            or any(session.posargs[i] not in ("--output", "--cache-root")
+                   for i in range(0, len(session.posargs), 2))):
+        session.error("ecosystem_peft allows only output/cache paths; all original L3 phases are required")
+    args = []
+    for repo in ("peft", "transformers"):
+        for kind in ("checkout", "wheel"):
+            key = "JITTOR_" + repo.upper() + "_" + kind.upper()
+            value = os.environ.get(key, "").strip()
+            if not value or not Path(value).exists():
+                session.error(key + " must name the real pinned upstream " + kind)
+            args.extend(("--" + repo + "-" + kind, value))
+    for name in ("CUDA_VISIBLE_DEVICES", "CUDA_HOME", "nvcc_path", "JT_BUILD_NVCC_PATH",
+                 "LD_PRELOAD", "LD_LIBRARY_PATH", "JITTOR_CUDA_WHEEL_STRICT", "JITTOR_CUDA_WHEEL_DISABLE"):
+        if name in os.environ:
+            env[name] = os.environ[name]
+    env.update({"REAL_TORCH_PYTHON": oracle, "JITTOR_REQUIRE_REAL_TORCH": "1",
+                "JITTOR_REQUIRE_PEFT": "1", "JITTOR_REQUIRE_TRANSFORMERS": "1",
+                "JITTOR_TEST_REQUIRE_EXECUTION": "1", "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"})
+    session.run(python, str(REPO_ROOT / "tools/run_peft_gate.py"),
+                "--candidate-python", python, "--oracle-python", oracle,
+                "--device", device, *args,
+                "--output", str(root / "measurements"), "--cache-root", str(root / "benchmark-cache"),
+                *session.posargs, external=True, env=env)
