@@ -84,25 +84,47 @@ class CoverageAuditTests(unittest.TestCase):
         gate = self.root / "compat/tests/torch/test_ecosystem_deepspeed.py"
         trellis_gate = self.root / "compat/tests/torch/test_ecosystem_trellis.py"
         flash_gate = self.root / "compat/tests/torch/test_ecosystem_flash_attention.py"
+        swift_gate = self.root / "compat/tests/torch/test_ecosystem_swift.py"
         gate.parent.mkdir(parents=True)
         test_source = "def test_real_deepspeed_engine_training_and_resume(): pass\n"
         trellis_source = "def test_real_trellis_models_training(): pass\n"
         flash_source = "def test_real_flash_attention_training(): pass\n"
+        swift_source = "class EcosystemSwift:\n    def test_ms_swift_trainer_full_llama(self): pass\n"
         session_source = ("def ecosystem_deepspeed(session): pass\ndef ecosystem_trellis(session): pass\n"
-                          "def ecosystem_flash_attention(session): pass\n")
+                          "def ecosystem_flash_attention(session): pass\ndef ecosystem_swift(session): pass\n")
         gate.write_text(test_source)
         trellis_gate.write_text(trellis_source)
         flash_gate.write_text(flash_source)
+        swift_gate.write_text(swift_source)
         nox = self.root / "noxfile.py"
         nox.write_text(session_source)
         self.assertEqual(len(audit.dedicated_gates(self.root)["deepspeed"]), 1)
-        for target, source in ((gate, test_source), (trellis_gate, trellis_source),
+        for target, source in ((gate, test_source), (trellis_gate, trellis_source), (swift_gate, swift_source),
                                (flash_gate, flash_source), (nox, session_source)):
             with self.subTest(path=target.name):
                 target.write_text("def unrelated(): pass\n")
                 with self.assertRaisesRegex(ValueError, "dedicated gate"):
                     audit.dedicated_gates(self.root)
                 target.write_text(source)
+
+        for invalid in ("def test_ms_swift_trainer_full_llama(): pass\n",
+                        "class WrongOwner:\n    def test_ms_swift_trainer_full_llama(self): pass\n",
+                        "class EcosystemSwift:\n    pass\n"
+                        "def unrelated():\n    def test_ms_swift_trainer_full_llama(): pass\n"):
+            swift_gate.write_text(invalid)
+            with self.subTest(source=invalid), self.assertRaisesRegex(ValueError, "dedicated gate"):
+                audit.dedicated_gates(self.root)
+
+    def test_swift_trainer_class_method_is_a_dedicated_gate_without_fake_case(self):
+        row = next(item for item in audit.audit(ROOT)["repos"] if item["repo"] == "ms-swift")
+        case = "ms_swift_trainer_full_llama"
+        self.assertNotIn(case, row["registered_cases"])
+        self.assertNotIn(case, [item["case"] for item in row["gate_cases"]])
+        self.assertEqual(row["dedicated_gates"], [{
+            "protocol": "swift-trainer", "session": "ecosystem_swift",
+            "tests": ["compat/tests/torch/test_ecosystem_swift.py::EcosystemSwift::test_ms_swift_trainer_full_llama"],
+        }])
+        self.assertIsNone(row["verified_level"])
 
     def artifact_json(self, row, role, value):
         self.serial += 1
@@ -315,6 +337,61 @@ class CoverageAuditTests(unittest.TestCase):
                 self.artifact_json(row, role, document)
                 with self.assertRaisesRegex(ValueError, "precision"):
                     self.validate(row)
+
+    def test_declared_second_perturbation_requires_its_actual_comparison(self):
+        row = copy.deepcopy(self.row)
+        row["inputs"]["perturb_seed2"] = 19
+        with self.assertRaisesRegex(ValueError, "Missing measurement artifact: perturb2-comparison"):
+            self.validate(row)
+
+    def test_second_perturbation_checks_both_runtime_sources_precision_and_devices(self):
+        for role in ("perturb2-comparison", "perturb19-comparison"):
+            self._check_second_perturbation_runtime_bindings(role)
+
+    def _check_second_perturbation_runtime_bindings(self, role):
+        for declared in (False, True):
+            for runtime in ("reference_result", "candidate_result"):
+                for change in ("precision", "source", "device"):
+                    with self.subTest(declared=declared, runtime=runtime, change=change):
+                        row = copy.deepcopy(self.row)
+                        if declared:
+                            row["inputs"]["perturb_seed2"] = 19
+                        document = self.document(row, "perturb-comparison")
+                        value = document[runtime]
+                        if change == "precision":
+                            value["tf32"]["matmul_precision"] = "medium"
+                        elif change == "source":
+                            value["downstream_distribution"]["version"] = "stale"
+                        else:
+                            value["device"] = "cuda"
+                        self.artifact_json(row, role, document)
+                        with self.assertRaises(ValueError):
+                            self.validate(row)
+
+    def test_second_perturbation_requires_a_passed_execution_and_zero_fallback(self):
+        for change in ("status", "observed", "fallback"):
+            with self.subTest(change=change):
+                row = copy.deepcopy(self.row)
+                document = self.document(row, "perturb-comparison")
+                if change == "status":
+                    document["status"] = "failed"
+                elif change == "observed":
+                    document["input_perturbation_verified"] = False
+                else:
+                    document["candidate_result"]["fallback_count"] = 1
+                self.artifact_json(row, "perturb2-comparison", document)
+                with self.assertRaises(ValueError):
+                    self.validate(row)
+
+    def test_second_perturbation_is_optional_and_accepts_valid_bound_evidence(self):
+        self.validate(self.row)
+        for role in ("perturb2-comparison", "perturb19-comparison"):
+            for declared in (False, True):
+                row = copy.deepcopy(self.row)
+                if declared:
+                    row["inputs"]["perturb_seed2"] = 19
+                self.artifact_json(row, role, self.document(row, "perturb-comparison"))
+                self.validate(row)
 
     def test_missing_ambiguous_or_stale_measurement_json_is_rejected(self):
         for changed in ("missing", "duplicate", "platform", "case", "baseline", "device", "backend", "runtime"):
