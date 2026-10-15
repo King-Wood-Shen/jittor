@@ -102,6 +102,7 @@
 2026-10-15-bf16-fsdp2-checkpoint-continuation
 2026-10-15-bfloat16-linear-bias-accumulation
 2026-10-15-checkpoint-state-options
+2026-10-15-cpu-bfloat16-accumulators
 2026-10-15-cuda-extension-philox
 2026-10-15-cuda13-toolchain-packaging
 2026-10-15-deepspeed-bfloat16-multirank
@@ -117,6 +118,7 @@
 2026-10-15-longformer-32768-context-oracles
 2026-10-15-metric-state-and-tensordict-oracles
 2026-10-15-metrics-tensordict-scorecards
+2026-10-15-mpi-bfloat16-process-groups
 2026-10-15-ms-swift-autograd-gradient-mode
 2026-10-15-native-fsdp
 2026-10-15-native-sharded-checkpoint
@@ -166,7 +168,6 @@
 | [bf16 autocast 与 GradScaler 边界](2026-10-14-amp-bfloat16-gradscaler.md) | CPU/CUDA 实际 dtype 与边界对拍通过；fidelity 保持 APPROXIMATE | 2026-10-14 |
 | [分布约束命名空间发布](2026-10-15-distribution-constraint-publication.md) | 原生属性与工厂发布已修；CPU/CUDA 边界检查对拍通过 | 2026-10-15 |
 | [训练注册表分母补齐](2026-10-15-training-registry-denominators.md) | 补 ms-swift/verl 训练轴与 vLLM/Omni 分母、SCM wheel 源码身份校验；枚举不授予数值覆盖 | 2026-10-15 |
-| [ms-swift CUDA autograd 恢复回归](2026-10-15-ms-swift-autograd-gradient-mode.md) | 补回 create_graph 上下文并向前传递 public backward 参数；CUDA 定向回归通过，CPU 与仓库门禁待执行 | 2026-10-15 |
 | [CUDA SDPA 掩码覆盖](2026-10-14-cuda-sdpa-mask-coverage.md) | 180 个真实 CUDA 场景对拍；融合路径扩展，边界保持显式 | 2026-10-14 |
 | [图重放保留预算](2026-10-14-graph-replay-retain-budget.md) | 动态预算约束已缓存的 replay；默认预算保留，CPU/CUDA 实测 | 2026-10-14 |
 | [下游独立 oracle 与训练 scorecard](2026-10-14-downstream-oracle-scorecards.md) | 四库 CPU/CUDA 代表场景已验；LoRA/component 范围限定，未授予 L4/L5 | 2026-10-14 |
