@@ -946,7 +946,28 @@ def _api_sharded_tensor_empty(*a, **k):
     return jt.empty(*a, **{kk: vv for kk, vv in k.items() if kk == 'dtype'})
 
 
-from ...stub_policy import unimplemented as _stub_unimplemented, record_unimplemented as _record_unimplemented
+from ...stub_policy import (
+    unimplemented as _stub_unimplemented,
+    unimplemented_callable as _unimplemented_callable,
+    record_unimplemented as _record_unimplemented,
+)
+
+_DDP_COMM_HOOK_EFFECT = (
+    "register a compression/PowerSGD hook that Jittor DDP cannot execute")
+_DDP_COMM_HOOK_HINT = (
+    "Use the native Jittor DDP gradient all-reduce without a Torch comm hook")
+
+
+def _ddp_comm_hook_refused(api):
+    return _unimplemented_callable(api, _DDP_COMM_HOOK_EFFECT,
+                                   _DDP_COMM_HOOK_HINT)
+
+
+class _PowerSGDState:
+    def __init__(self, *args, **kwargs):
+        _stub_unimplemented(
+            "torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook.PowerSGDState",
+            _DDP_COMM_HOOK_EFFECT, _DDP_COMM_HOOK_HINT)
 
 class SerializationFormat:
     TORCH_SAVE = "torch_save"
@@ -1079,6 +1100,38 @@ def _install_distributed(g, registry=None):
         setattr(dist, sub, mod)
 
     dist.algorithms.__path__ = getattr(dist.algorithms, "__path__", [])
+    ddp_comm_hooks = _modules.get(
+        "torch.distributed.algorithms.ddp_comm_hooks")
+    if ddp_comm_hooks is None:
+        ddp_comm_hooks = _types.ModuleType(
+            "torch.distributed.algorithms.ddp_comm_hooks")
+        _modules[ddp_comm_hooks.__name__] = ddp_comm_hooks
+    ddp_comm_hooks.__path__ = getattr(ddp_comm_hooks, "__path__", [])
+    default_hooks = _modules.get(
+        "torch.distributed.algorithms.ddp_comm_hooks.default_hooks")
+    if default_hooks is None:
+        default_hooks = _types.ModuleType(
+            "torch.distributed.algorithms.ddp_comm_hooks.default_hooks")
+        _modules[default_hooks.__name__] = default_hooks
+    for name in ("fp16_compress_hook", "bf16_compress_hook",
+                 "fp16_compress_wrapper", "bf16_compress_wrapper"):
+        setattr(default_hooks, name, _ddp_comm_hook_refused(
+            default_hooks.__name__ + "." + name))
+    power_sgd_hook = _modules.get(
+        "torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook")
+    if power_sgd_hook is None:
+        power_sgd_hook = _types.ModuleType(
+            "torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook")
+        _modules[power_sgd_hook.__name__] = power_sgd_hook
+    power_sgd_hook.PowerSGDState = _PowerSGDState
+    power_sgd_hook.powerSGD_hook = _ddp_comm_hook_refused(
+        power_sgd_hook.__name__ + ".powerSGD_hook")
+    power_sgd_hook.batched_powerSGD_hook = _ddp_comm_hook_refused(
+        power_sgd_hook.__name__ + ".batched_powerSGD_hook")
+    ddp_comm_hooks.default_hooks = default_hooks
+    ddp_comm_hooks.powerSGD_hook = power_sgd_hook
+    dist.algorithms.ddp_comm_hooks = ddp_comm_hooks
+
     const_mod = _modules.get("torch.distributed.constants")
     if const_mod is None:
         const_mod = _types.ModuleType("torch.distributed.constants")
@@ -1300,6 +1353,15 @@ def _install_distributed(g, registry=None):
     register_api_bindings(join_mod, "torch.distributed.algorithms.join",
         ("Join", "Joinable", "JoinHook"), Fidelity.UNIMPLEMENTED,
         "Import-compatible context and hooks do not implement uneven-input communication")
+    register_api_bindings(default_hooks, default_hooks.__name__,
+        ("fp16_compress_hook", "bf16_compress_hook",
+         "fp16_compress_wrapper", "bf16_compress_wrapper"),
+        Fidelity.UNIMPLEMENTED,
+        "Import surface required by Accelerate's default DDP setup; explicitly refuses invocation")
+    register_api_bindings(power_sgd_hook, power_sgd_hook.__name__,
+        ("PowerSGDState", "powerSGD_hook", "batched_powerSGD_hook"),
+        Fidelity.UNIMPLEMENTED,
+        "Import surface required by Accelerate's default DDP setup; explicitly refuses PowerSGD use")
     register_api_bindings(checkpoint, "torch.distributed.checkpoint",
         ("load_state_dict", "save_state_dict", "load", "save", "FileSystemReader", "FileSystemWriter"),
         Fidelity.UNIMPLEMENTED, "Checkpoint I/O follows the existing explicit unsupported policy")
