@@ -14,6 +14,8 @@ from jittor.optim.algorithms.sgd import (
 )
 from .. import optimizer_kinds as _optimizer_kinds
 from .tensor_state import get_tensor_state
+from .optimizer_state import _ParamState, _refresh_state_views
+from .optimizer_step_state import _increment_torch_step, _torch_optimizer_kind
 from .installers.tensor.autograd_api import _optimizer_maybe_has_fsdp_params
 from jittor.optim.algorithms.adam import adam_update
 
@@ -80,37 +82,6 @@ def _sync_adam_group_params(pg, *, replacements=()):
                 result.append(0 if key == "_torch_steps" else _state_buffer(parameter))
         pg[key] = result
     pg["_torch_adam_params"] = current
-
-
-def _torch_optimizer_kind(opt):
-    """Which optimizer's state layout `opt` has.
-
-    Identity through the MRO, not a substring of the class name -- `SGDW`
-    and `MyAdamWrapper` used to match rules they do not implement. This
-    answer only describes *state layout* (which keys `state` and
-    `state_dict()` expose), so unlike the FSDP2 one it does not refuse a
-    subclass that overrides step(): such a subclass still keeps the base
-    class's state arrays. It falls back to the lowercased class name so an
-    unrecognised optimizer keeps its previous, harmless behaviour here.
-
-    See jittor/compat/optimizer_kinds.py.
-    """
-    return (_optimizer_kinds.kind_of(opt)
-            or type(opt).__name__.lower())
-
-
-class _ParamState(dict):
-    def __init__(self, owner, param, values):
-        dict.__init__(self, values)
-        self._owner = owner
-        self._param = param
-    def __setitem__(self, key, value):
-        self._owner._set_field(self._param, key, value)
-        dict.__setitem__(self, key, value)
-    def update(self, *args, **kwargs):
-        values = dict(*args, **kwargs)
-        for key, value in values.items():
-            self[key] = value
 
 
 class _OptState:
