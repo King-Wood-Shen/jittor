@@ -12,7 +12,6 @@ from jittor.optim.algorithms.sgd import (
     MOMENTUM_INITIALIZED as _MOMENTUM_INITIALIZED,
     momentum_initialized_flags as _momentum_initialized_flags,
 )
-from .. import optimizer_kinds as _optimizer_kinds
 from .tensor_state import get_tensor_state
 from .optimizer_state import _ParamState, _refresh_state_views
 from .optimizer_step_state import _increment_torch_step, _torch_optimizer_kind
