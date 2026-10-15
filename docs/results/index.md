@@ -40,6 +40,9 @@
 2026-10-15-distribution-constraint-publication
 2026-10-15-training-registry-denominators
 2026-10-14-cuda-sdpa-mask-coverage
+2026-10-15-sdpa-opmath
+2026-10-15-like-factory-leaves
+2026-10-15-diffusers-component-scorecards
 2026-10-14-graph-replay-retain-budget
 2026-10-14-downstream-oracle-scorecards
 2026-10-15-cuda13-toolchain-packaging
