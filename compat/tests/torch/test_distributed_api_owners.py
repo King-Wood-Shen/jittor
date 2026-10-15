@@ -162,6 +162,21 @@ def test_flat_gather_consumes_the_explicit_native_group(distributed_state, monke
     assert calls == [((2,), group)]
 
 
+def test_flat_gather_routes_default_world_through_native_process_group(
+        distributed_state, monkeypatch):
+    source = Tensor([[3., 4.]])
+    calls = []
+
+    def gather(value, group=None):
+        calls.append((value.shape, group))
+        return value
+
+    monkeypatch.setattr(owner._process_group, "all_gather", gather)
+    result = owner._native_all_gather_flat(source)
+    np.testing.assert_array_equal(result.values, [3., 4.])
+    assert calls == [((2,), None)]
+
+
 def test_init_destroy_store_and_backend_validation(distributed_state, monkeypatch):
     state, _, _ = distributed_state
     class Store:

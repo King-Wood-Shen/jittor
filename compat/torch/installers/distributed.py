@@ -311,9 +311,7 @@ def _reduce_name(op, reduce_op):
 
 def _native_all_gather_flat(tensor, group=None):
     flat = tensor.reshape((-1,))
-    if group is not None:
-        return _process_group.all_gather(flat, group=group)
-    return _collectives._all_gather_shards(flat)
+    return _process_group.all_gather(flat, group=group)
 
 
 def _native_all_gather_object(object_list, obj, group=None):
