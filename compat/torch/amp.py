@@ -28,10 +28,10 @@ from .grad_scaler import (          # noqa: F401
 # amp_reg drives dtype inference for every op created while it is set.
 _AMP_PREFER32 = 1
 _AMP_PREFER16 = 2
-_AMP_PREFER_BF16 = 64
 _AMP_KEEP_REDUCE = 4
 _AMP_KEEP_WHITE = 8
 _AMP_ARRAY_PREFER = 16
+_AMP_PREFER_BFLOAT16 = 64
 
 # ---------------------------------------------------------------------------
 # torch.amp state.
@@ -174,7 +174,7 @@ def _amp_register_for(dtype_name):
     if dtype_name in ("float32", "float", "double", "float64"):
         return _AMP_PREFER32
     if dtype_name == "bfloat16":
-        return _AMP_PREFER16 | _AMP_PREFER_BF16
+        return _AMP_PREFER_BFLOAT16
     return _AMP_PREFER16
 
 
@@ -311,8 +311,6 @@ class autocast:
 
     Known differences from torch, each on the record in the fidelity registry:
 
-    * bfloat16 regions set a distinct preference bit so all-float32 operands
-      compute in bfloat16 rather than silently using float16.
     * torch's autocast lists are per operator; jittor's register is a global
       dtype-inference bias, so the fall-through category (``add`` on two float32
       operands, which torch leaves in float32) also lowers here.
@@ -553,14 +551,15 @@ _AMP_FIDELITY = (
      "float32 as torch does, but the fall-through category torch leaves alone "
      "(float32 add) lowers here too. One register serves every device type, so "
      "a CPU region and a CUDA region are not independent the way torch's "
-     "dispatch keys are. bfloat16 regions select bfloat16 for float32 inputs. "
+     "dispatch keys are. Explicit bfloat16 regions select bfloat16 even "
+     "when every operand is float32. "
      "cache_enabled is recorded; there is no weight cast cache to enable"),
     (("torch.cuda.amp.autocast",), _CudaAutocast, Fidelity.APPROXIMATE,
      "Legacy cuda-pinned subclass of torch.autocast with the same register "
      "behaviour and limitations"),
     (("torch.cpu.amp.autocast",), _CpuAutocast, Fidelity.APPROXIMATE,
-     "Legacy cpu-pinned subclass of torch.autocast with the same register "
-     "behaviour and limitations"),
+     "Legacy cpu-pinned subclass of torch.autocast with a bfloat16 default "
+     "and the same register behaviour and limitations"),
     (("torch.amp.custom_fwd", "torch.amp.autocast_mode.custom_fwd"),
      custom_fwd, Fidelity.APPROXIMATE,
      "Records the region dtype on the context and, with cast_inputs inside an "

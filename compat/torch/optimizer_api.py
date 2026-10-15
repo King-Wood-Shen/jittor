@@ -1,5 +1,5 @@
 """Stable optimizer state and update adapters, sharing native mathematics."""
-from jittor._core.dtypes import dtype_name as _jittor_dtype_name
+from jittor._core.dtypes import dtype_name as _jittor_dtype_name, var_dtype_name
 from collections.abc import Mapping
 import weakref as _weakref
 import jittor as jt
@@ -12,13 +12,10 @@ from jittor.optim.algorithms.sgd import (
     MOMENTUM_INITIALIZED as _MOMENTUM_INITIALIZED,
     momentum_initialized_flags as _momentum_initialized_flags,
 )
+from .. import optimizer_kinds as _optimizer_kinds
 from .tensor_state import get_tensor_state
 from .installers.tensor.autograd_api import _optimizer_maybe_has_fsdp_params
-from .optimizer_state import _OptState, _ParamState, _refresh_state_views
-from .optimizer_step_state import (
-    _torch_param_steps, _torch_step_tensor, _increment_torch_step,
-    _torch_optimizer_kind,
-)
+from jittor.optim.algorithms.adam import adam_update
 
 def _init(self, *a, **k):
     _context = get_install_context(jt)
@@ -36,6 +33,221 @@ def _init(self, *a, **k):
             pg.setdefault("lr", self.lr)
     except EXPECTED as exc:
         swallowed("torch/optimizers.py _init: for pg in self.param_groups:", exc)
+
+
+def _torch_param_steps(pg):
+    _sync_adam_group_params(pg)
+    params = list(pg.get("params", []))
+    steps = pg.get("_torch_steps")
+    if not isinstance(steps, list):
+        steps = pg["_torch_steps"] = [0] * len(params)
+    while len(steps) < len(params):
+        steps.append(0)
+    if len(steps) > len(params):
+        del steps[len(params):]
+    return steps
+
+
+def _sync_adam_group_params(pg, *, replacements=()):
+    """Realign state by identity, including explicit same-parameter view changes.
+
+    FSDP supplies old/new views of the same logical parameter. Ordinary user
+    additions and reordering still pass through the identity-based mapping;
+    only those explicit substitutions inherit the preceding view's state.
+    """
+    previous = pg.get("_torch_adam_params")
+    if previous is None:
+        return
+    current = tuple(pg.get("params", ()))
+    if len(current) == len(previous) and all(a is b for a, b in zip(current, previous)):
+        return
+    from jittor.optim.algorithms.adam import _state_buffer
+    rebound = {id(old): (old, new) for old, new in replacements}
+    identities = []
+    for parameter in previous:
+        replacement = rebound.get(id(parameter))
+        identities.append(replacement[1] if replacement is not None
+                          and replacement[0] is parameter else parameter)
+    positions = {id(parameter): index for index, parameter in enumerate(identities)}
+    for key in ("m", "values", "_torch_steps"):
+        old_values = pg.get(key, ())
+        result = []
+        for parameter in current:
+            old_index = positions.get(id(parameter))
+            if old_index is not None and identities[old_index] is parameter and old_index < len(old_values):
+                result.append(old_values[old_index])
+            else:
+                result.append(0 if key == "_torch_steps" else _state_buffer(parameter))
+        pg[key] = result
+    pg["_torch_adam_params"] = current
+
+
+def _torch_optimizer_kind(opt):
+    """Which optimizer's state layout `opt` has.
+
+    Identity through the MRO, not a substring of the class name -- `SGDW`
+    and `MyAdamWrapper` used to match rules they do not implement. This
+    answer only describes *state layout* (which keys `state` and
+    `state_dict()` expose), so unlike the FSDP2 one it does not refuse a
+    subclass that overrides step(): such a subclass still keeps the base
+    class's state arrays. It falls back to the lowercased class name so an
+    unrecognised optimizer keeps its previous, harmless behaviour here.
+
+    See jittor/compat/optimizer_kinds.py.
+    """
+    return (_optimizer_kinds.kind_of(opt)
+            or type(opt).__name__.lower())
+
+
+class _ParamState(dict):
+    def __init__(self, owner, param, values):
+        dict.__init__(self, values)
+        self._owner = owner
+        self._param = param
+    def __setitem__(self, key, value):
+        self._owner._set_field(self._param, key, value)
+        dict.__setitem__(self, key, value)
+    def update(self, *args, **kwargs):
+        values = dict(*args, **kwargs)
+        for key, value in values.items():
+            self[key] = value
+
+
+class _OptState:
+    def __init__(self, opt):
+        self._opt = opt
+    def _find(self, param):
+        for pg in self._opt.param_groups:
+            for i, p in enumerate(pg.get("params", [])):
+                if p is param:
+                    return pg, i
+        return None, None
+    def _params(self):
+        for pg in self._opt.param_groups:
+            for p in pg.get("params", []):
+                marker = object()
+                if self.get(p, marker) is not marker:
+                    yield p
+    def _reset_slot(self, pg, i):
+        _torch_param_steps(pg)[i] = 0
+        if _torch_optimizer_kind(self._opt) == "sgd":
+            _momentum_initialized_flags(pg)[i] = False
+        for key in ("m", "values", "v", "d", "pre_grad"):
+            buffers = pg.get(key)
+            if not isinstance(buffers, list) or i >= len(buffers):
+                continue
+            buffer = buffers[i]
+            buffers[i] = (jt.zeros_like(buffer).stop_grad()
+                          if isinstance(buffer, jt.Var) else None)
+    def _sync_n_step(self):
+        self._opt.n_step = max(
+            (int(step) for pg in self._opt.param_groups
+             for step in _torch_param_steps(pg)), default=0)
+    def _set_field(self, param, key, value):
+        pg, i = self._find(param)
+        if pg is None:
+            raise KeyError(param)
+        kind = _torch_optimizer_kind(self._opt)
+        if key == "step":
+            if isinstance(value, jt.Var):
+                value = value.item()
+            _torch_param_steps(pg)[i] = int(value)
+            self._sync_n_step()
+            return
+        mappings = {
+            "adam": {"exp_avg": "m", "exp_avg_sq": "values"},
+            "adamw": {"exp_avg": "m", "exp_avg_sq": "values"},
+            "sgd": {"momentum_buffer": "values"},
+            "rmsprop": {"square_avg": "values"},
+            "adan": {"exp_avg": "m", "exp_avg_sq": "v",
+                     "exp_avg_diff": "d", "pre_grad": "pre_grad"},
+        }
+        target = mappings.get(kind, {}).get(key)
+        buffers = pg.get(target) if target is not None else None
+        if kind == "sgd" and key == "momentum_buffer" and value is None:
+            # torch's "no buffer yet": the next momentum update seeds it.
+            if isinstance(buffers, list) and i < len(buffers) \
+                    and isinstance(buffers[i], jt.Var):
+                buffers[i] = jt.zeros_like(buffers[i]).stop_grad()
+            _momentum_initialized_flags(pg)[i] = False
+            return
+        if isinstance(buffers, list) and i < len(buffers):
+            buffers[i] = value
+            if kind == "sgd" and key == "momentum_buffer":
+                _momentum_initialized_flags(pg)[i] = True
+    def get(self, param, default=None):
+        pg, i = self._find(param)
+        if pg is None:
+            return default
+        steps = _torch_param_steps(pg)
+        if int(steps[i]) <= 0:
+            return default
+        kind = _torch_optimizer_kind(self._opt)
+        if kind in ("adam", "adamw") and "m" in pg and "values" in pg:
+            return _ParamState(self, param, {
+                "exp_avg": pg["m"][i],
+                "exp_avg_sq": pg["values"][i],
+                "step": float(steps[i])})
+        if kind == "sgd":
+            # Present exactly while a buffer exists, like torch: independent
+            # of the *current* momentum, so pausing momentum keeps it.
+            if "values" in pg and _momentum_initialized_flags(pg)[i]:
+                return _ParamState(self, param, {
+                    "momentum_buffer": pg["values"][i]})
+            return default
+        if kind == "rmsprop" and "values" in pg:
+            return _ParamState(self, param, {
+                "square_avg": pg["values"][i],
+                "step": float(steps[i])})
+        if kind == "adan":
+            out = {"step": float(steps[i])}
+            for source, target in (
+                    ("m", "exp_avg"), ("v", "exp_avg_sq"),
+                    ("d", "exp_avg_diff"),
+                    ("pre_grad", "pre_grad")):
+                if source in pg and i < len(pg[source]):
+                    out[target] = pg[source][i]
+            return _ParamState(self, param, out)
+        return default
+    def __getitem__(self, param):
+        r = self.get(param, None)
+        if r is None:
+            raise KeyError(param)
+        return r
+    def __setitem__(self, param, d):
+        pg, i = self._find(param)
+        if pg is None:
+            raise KeyError(param)
+        if not isinstance(d, Mapping):
+            raise TypeError("optimizer state must be a mapping")
+        values = dict(d)
+        self._reset_slot(pg, i)
+        for key, value in values.items():
+            if key != "step":
+                self._set_field(param, key, value)
+        self._set_field(param, "step", values.get("step", 1 if values else 0))
+    def __delitem__(self, param):
+        pg, i = self._find(param)
+        marker = object()
+        if pg is None or self.get(param, marker) is marker:
+            raise KeyError(param)
+        self._reset_slot(pg, i)
+        self._sync_n_step()
+    def __contains__(self, param):
+        marker = object()
+        return self.get(param, marker) is not marker
+    def __iter__(self):
+        return self._params()
+    def __len__(self):
+        return sum(1 for _ in self._params())
+    def keys(self):
+        return list(self._params())
+    def values(self):
+        return [self.get(p, {}) for p in self._params()]
+    def items(self):
+        return [(p, self.get(p, {})) for p in self._params()]
+    def get_state_dict_key(self, param):
+        return self._find(param)
 
 
 def _state_dict_torch(self):
@@ -57,7 +269,7 @@ def _state_dict_torch(self):
             params.append(pid)
         for k, v in pg.items():
             if k in ("params", "grads", "m", "values", "v", "d",
-                     "pre_grad", "_torch_steps", _MOMENTUM_INITIALIZED):
+                     "pre_grad", "_torch_steps", "_torch_adam_params", _MOMENTUM_INITIALIZED):
                 continue
             group[k] = v
         group.setdefault("lr", pg.get("lr", getattr(self, "lr", 0.0)))
@@ -70,7 +282,7 @@ def _state_dict_torch(self):
                 "weight_decay", getattr(self, "weight_decay", 0)))
             group.setdefault("amsgrad", False)
             group.setdefault("maximize", False)
-            group.setdefault("foreach", getattr(self, "foreach", None))
+            group.setdefault("foreach", None)
             group.setdefault("capturable", False)
             group.setdefault("differentiable", False)
             group.setdefault("fused", getattr(self, "fused", None))
@@ -103,14 +315,9 @@ def _state_dict_torch(self):
         steps = _torch_param_steps(pg)
         for i, p in enumerate(pg.get("params", [])):
             pid = param_ids.get(id(p))
-            if pid is None:
+            if pid is None or int(steps[i]) <= 0:
                 continue
-            view = self.__dict__.get("_torch_state_views", {}).get(id(p))
-            if int(steps[i]) <= 0:
-                if view is not None:
-                    state[pid] = dict(view[1])
-                continue
-            entry = {} if view is None else dict(view[1])
+            entry = {}
             if kind in ("adam", "adamw"):
                 if "m" in pg and i < len(pg["m"]):
                     entry["exp_avg"] = pg["m"][i]
@@ -131,11 +338,9 @@ def _state_dict_torch(self):
                     values = pg.get(source)
                     if values is not None and i < len(values):
                         entry[target] = values[i]
-            if entry or view is not None:
+            if entry:
                 if kind != "sgd":
-                    entry["step"] = (_torch_step_tensor(self, pg, i)
-                                     if kind in ("adam", "adamw") else
-                                     g.tensor(float(steps[i]), dtype=g.float32))
+                    entry["step"] = g.tensor(float(steps[i]), dtype=g.float32)
                 state[pid] = entry
     return {"state": state, "param_groups": param_groups}
 
@@ -173,10 +378,7 @@ def _load_state_dict_torch(self, state_dict):
             try:
                 st = saved_state.get(pid, missing)
                 if st is missing:
-                    st = saved_state.get(str(pid), missing)
-                present = st is not missing
-                if not present:
-                    st = {}
+                    st = saved_state.get(str(pid), {})
             except (TypeError, ValueError) as error:
                 raise TypeError("loaded optimizer state key is invalid") from error
             if not isinstance(st, Mapping):
@@ -196,11 +398,10 @@ def _load_state_dict_torch(self, state_dict):
                         "loaded optimizer step must be a non-negative integer")
                 step = int(numeric)
             max_step = max(max_step, step)
-            slots.append((st, step, present))
+            slots.append((st, step))
         load_plan.append((dict(saved_pg), slots))
     # Apply only after the complete input has been validated. This keeps
     # malformed loads atomic instead of leaving half-reset moments.
-    self.__dict__.pop("_torch_state_views", None)
     for pg in self.param_groups:
         steps = _torch_param_steps(pg)
         for i in range(len(steps)):
@@ -223,7 +424,7 @@ def _load_state_dict_torch(self, state_dict):
             if k in ("params", _MOMENTUM_INITIALIZED):
                 continue
             pg[k] = v
-        for i, (st, step, present) in enumerate(slots):
+        for i, (st, step) in enumerate(slots):
             if kind in ("adam", "adamw"):
                 if "m" in pg and i < len(pg["m"]) and "exp_avg" in st:
                     pg["m"][i] = st["exp_avg"]
@@ -242,9 +443,7 @@ def _load_state_dict_torch(self, state_dict):
                         ("pre_grad", "pre_grad")):
                     if target in st and source in pg and i < len(pg[source]):
                         pg[source][i] = st[target]
-            steps[i] = st["step"] if isinstance(st.get("step"), jt.Var) else step
-            if present:
-                _OptState(self)._view(pg["params"][i], st)
+            steps[i] = step
     self.n_step = max_step
     return None
 
@@ -420,7 +619,6 @@ def _step_with_closure(self, loss, retain_graph, closure, kwargs, native_kind):
                 jt.flags.node_order = 0
                 object.__setattr__(
                     self, "_torch_backward_advanced_n_step", False)
-            _refresh_state_views(self)
             return loss if called_closure else None
         _fsdp2_step.clear_fsdp_optimizer_grads(self)
     torch_style = native_fsdp_loss is None and (loss is None or called_closure)
@@ -428,7 +626,6 @@ def _step_with_closure(self, loss, retain_graph, closure, kwargs, native_kind):
         jt.flags.node_order = 0
         object.__setattr__(
             self, "_torch_backward_advanced_n_step", False)
-        _refresh_state_views(self)
         return loss if called_closure else None
     if not torch_style:
         if loss is None and not getattr(
@@ -440,7 +637,6 @@ def _step_with_closure(self, loss, retain_graph, closure, kwargs, native_kind):
             _advance_trainable_param_steps(self)
         out = _orig_step(self, loss, retain_graph=retain_graph)
         object.__setattr__(self, "_torch_backward_advanced_n_step", False)
-        _refresh_state_views(self)
         return out
     # Native SGD/RMSprop/Adan always post_step()->zero_grad(). Torch
     # keeps parameter.grad until the caller explicitly clears it.
@@ -461,7 +657,6 @@ def _step_with_closure(self, loss, retain_graph, closure, kwargs, native_kind):
             self.post_step = previous_post
         else:
             self.__dict__.pop("post_step", None)
-    _refresh_state_views(self)
     return loss if called_closure and out is None else out
 
 
@@ -469,13 +664,16 @@ def _torch_post_step():
     jt.flags.node_order = 0
 
 
+# The Adam/AdamW update lives in its own module (it is most of the file's
+# implementation); bound here under the names the rest of the package uses.
+from .optimizer_adam import _adam_step, _update_in_target_dtype  # noqa: E402
+
+
 def adam_step(self, loss=None, retain_graph=False, closure=None, **kwargs):
-    from .optimizer_adam import _adam_step
     return _adam_step(self, loss, retain_graph, closure, kwargs, False)
 
 
 def adamw_step(self, loss=None, retain_graph=False, closure=None, **kwargs):
-    from .optimizer_adam import _adam_step
     return _adam_step(self, loss, retain_graph, closure, kwargs, True)
 
 
@@ -498,19 +696,23 @@ def adan_step(self, loss=None, retain_graph=False, closure=None, **kwargs):
 _STEP_APIS = {"sgd": sgd_step, "rmsprop": rmsprop_step, "adan": adan_step}
 
 def adam_init(self, params, lr=1e-3, *args, **kwargs):
-    return _initialize_default(self, params, lr, args, kwargs, 'Adam')
+    return _initialize_adam(self, params, lr, args, kwargs, 'Adam')
 
 
-def adamw_init(self, params, lr=1e-3, *args, foreach=None, **kwargs):
-    if foreach and kwargs.get("fused"):
-        raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
-    if len(args) < 3:
-        kwargs.setdefault("weight_decay", 0.01)
-    result = _initialize_default(self, params, lr, args, kwargs, 'AdamW')
-    self.foreach = foreach
+def _initialize_adam(self, params, lr, args, kwargs, name):
+    # The update selector already consumes this execution option; the native
+    # initializer does not take Torch's spelling. Preserve group overrides.
+    foreach = kwargs.pop('foreach', None)
+    result = _initialize_default(self, params, lr, args, kwargs, name)
     for group in self.param_groups:
-        group.setdefault("foreach", foreach)
+        group.setdefault('foreach', foreach)
+        group['_torch_adam_params'] = tuple(group['params'])
     return result
+
+
+def adamw_init(self, params, lr=1e-3, *args, **kwargs):
+    if len(args) < 3: kwargs.setdefault('weight_decay', 0.01)  # torch's; native (eps, betas, wd): 0
+    return _initialize_adam(self, params, lr, args, kwargs, 'AdamW')
 
 
 def rmsprop_init(self, params, lr=1e-3, *args, **kwargs):

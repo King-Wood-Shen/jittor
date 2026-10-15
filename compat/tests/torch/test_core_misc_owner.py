@@ -34,12 +34,10 @@ class TestCoreMiscOwner(unittest.TestCase):
                                  _FOREIGN_OWNERS.get(name, core.__name__))
                 restored = pickle.loads(pickle.dumps(implementation))
                 if name == "default_generator":
-                    # Pickling creates an independent generator with identical state.
+                    # Real PyTorch pickles generator state into a new object.
                     self.assertIsNot(restored, implementation)
                     self.assertEqual(restored.initial_seed(),
                                      implementation.initial_seed())
-                    np.testing.assert_array_equal(
-                        restored.get_state().numpy(), implementation.get_state().numpy())
                 else:
                     self.assertIs(restored, implementation)
         for storage in core._STORAGE_TYPES:
@@ -95,12 +93,13 @@ class TestCoreMiscOwner(unittest.TestCase):
         try:
             torch.set_default_dtype(torch.float64)
             self.assertIs(torch.get_default_dtype(), torch.float64)
-            self.assertIs(torch.manual_seed(1729), torch)
+            self.assertIs(torch.manual_seed(1729), torch.default_generator)
             self.assertEqual(torch.initial_seed(), 1729)
-            state = torch.get_rng_state()
-            self.assertEqual(state.dtype, torch.uint8)
+            saved = torch.get_rng_state()
+            self.assertEqual(saved.dtype, torch.uint8)
+            self.assertEqual(saved.device.type, "cpu")
             torch.manual_seed(42)
-            torch.set_rng_state(state)
+            torch.set_rng_state(saved)
             self.assertEqual(torch.random.initial_seed(), 1729)
             # The default device follows the runtime policy, which is what
             # the factories follow too: under use_cuda the tensors really do

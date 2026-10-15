@@ -7,17 +7,6 @@ from .parameter_containers import make_parameter_containers
 from .nn_adoption import adopt_owned_children
 
 
-def module_init(module, *args, **kwargs):
-    # Torch Module stops cooperative initialization unless explicitly enabled.
-    # super(torch.nn.Module, instance) still reaches the native cooperative
-    # bridge and then the user's mixin.
-    if getattr(module, "call_super_init", False):
-        owner = type(module)._nn_frontend_owner
-        owner.native_module.__init__(module, *args, **kwargs)
-    elif args or kwargs:
-        raise TypeError("Module.__init__() does not accept arguments")
-
-
 def module_setattr(module, name, value):
     owner = type(module)._nn_frontend_owner
     attributes = vars(module)
@@ -45,12 +34,9 @@ def module_setattr(module, name, value):
     if name in attributes and isinstance(value, (owner.native_module, owner.Parameter)) \
             and not isinstance(attributes[name], (owner.native_module, owner.backend.Var)):
         del attributes[name]
-    native = getattr(type(module), "_torch_native_layer", owner.native_module)
-    setter = native.__setattr__
-    if setter is not owner.native_module.__setattr__:
-        setter(module, name, value)
-    else:
-        object.__setattr__(module, name, value)
+    if isinstance(value, owner.native_module) or value is None:
+        return owner.native_module.__setattr__(module, name, value)
+    object.__setattr__(module, name, value)
 
 
 #: The native module call (`src/bindings/pyjt/py_module_call.h`), once the
@@ -121,6 +107,13 @@ class LayerInitializer:
                     # torch layers expose what they were built with.
                     object.__setattr__(module, "padding_mode", padding_mode)
                 adopt_owned_children(owner, module, external, frozen)
+                if issubclass(self.native, getattr(owner.backend.nn, "BatchNorm", ())):
+                    # Native Jittor keeps a non-persistent int32 vector for its
+                    # checkpoint format. Torch owns a persistent scalar int64
+                    # counter instead; change only this frontend instance.
+                    counter = (owner.backend.array(0, dtype="int64").stop_grad()
+                               if module.track_running_stats else None)
+                    module.register_buffer("num_batches_tracked", counter)
             finally:
                 if previous is None:
                     vars(module).pop("_native_parameter_construction", None)
@@ -157,7 +150,6 @@ class NNFrontendOwner:
         self.Module = type("Module", (self.native_module,), {
             "__module__": "torch.nn", "__slots__": (),
             "_frontend_tensor_type": tensor_type, "_nn_frontend_owner": self,
-            "__init__": module_init,
             "__setattr__": module_setattr, "__call__": module_call,
         })
         self.adapters = {self.native_module: self.Module}
@@ -183,25 +175,12 @@ class NNFrontendOwner:
         known = self.adapters.get(native)
         if known is not None:
             return known
-        # Preserve the implementation hierarchy's method precedence while
-        # placing the public Module first in the cooperative initialization MRO.
-        namespace = {}
-        excluded = {"__dict__", "__weakref__", "__module__", "__slots__",
-                    "__init__", "__setattr__", "__classcell__"}
-        for base in reversed(native.__mro__):
-            if base is self.native_module or base is object:
-                continue
-            namespace.update((key, value) for key, value in vars(base).items()
-                             if key not in excluded)
-        namespace.update({
+        namespace = {
             "__module__": "torch.nn", "__slots__": (),
             "__init__": LayerInitializer(self, native),
             "_torch_native_layer": native,
-        })
-        # Public layer super() must reach the frontend Module before the
-        # implementation class. Keep the native base for its methods and
-        # isinstance identity; LayerInitializer invokes its constructor directly.
-        adapted = type(native.__name__, (self.Module, native), namespace)
+        }
+        adapted = type(native.__name__, (native, self.Module), namespace)
         self.adapters[native] = adapted
         return adapted
 

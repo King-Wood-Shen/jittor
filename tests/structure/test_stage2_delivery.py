@@ -51,7 +51,7 @@ class TestStage2Delivery(unittest.TestCase):
         )
 
     def test_workflows_consume_the_reusable_baseline(self):
-        for name in ("containers", "cpu", "cuda", "docs", "npu", "release", "structure"):
+        for name in ("containers", "cpu", "cuda", "docs", "npu", "release", "structure", "windows"):
             with self.subTest(workflow=name):
                 source = (self.workflows / (name + ".yml")).read_text(encoding="utf-8")
                 self.assertIn("uses: ./.github/workflows/_ci-baseline.yml", source)
@@ -238,13 +238,15 @@ class TestStage2Delivery(unittest.TestCase):
         self.assertIn("python -m nox -s py313", structure_workflow)
 
     def test_asv_teardown_tolerates_skipped_parameter_setup(self):
-        from benchmarks.operators import OperatorBenchmarks
-        from benchmarks.optimizer_step import OptimizerStepBenchmarks
-        from benchmarks.tiny_llama import TinyLlamaBenchmarks
+        from benchmarks.asv.accelerate_training import AccelerateTrainingBenchmarks
+        from benchmarks.asv.operators import OperatorBenchmarks
+        from benchmarks.asv.optimizer_step import OptimizerStepBenchmarks
+        from benchmarks.asv.tiny_llama import TinyLlamaBenchmarks
 
         OperatorBenchmarks().teardown("torch", "cpu", "matmul")
         OptimizerStepBenchmarks().teardown("sgd", 32, "cuda")
         TinyLlamaBenchmarks().teardown("torch", "forward")
+        AccelerateTrainingBenchmarks().teardown("direct", "sgd", "cuda")
 
     def test_cudnn_math_policy_is_guarded_for_rocm_and_old_cudnn(self):
         """The two guards must survive; 8.03 moved where they live.

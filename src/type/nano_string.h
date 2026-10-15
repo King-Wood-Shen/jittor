@@ -273,14 +273,16 @@ constexpr int amp_prefer16 = 2;
 constexpr int amp_keep_reduce = 4;
 constexpr int amp_keep_white = 8;
 constexpr int amp_array_prefer = 16;
-constexpr int amp_prefer_bf16 = 64;
+constexpr int amp_prefer_bfloat16 = 64;
 
 inline NanoString float_dtype(int dsize_, bool has_scalar=false, bool has_bf16=false) {
     if (!has_scalar) {
         if (amp_reg & amp_prefer32)
             return ns_float32;
+        if (amp_reg & amp_prefer_bfloat16)
+            return ns_bfloat16;
         if (amp_reg & amp_prefer16)
-            return (has_bf16 || (amp_reg & amp_prefer_bf16)) ? ns_bfloat16 : ns_float16;
+            return has_bf16 ? ns_bfloat16 : ns_float16;
     } 
     return (dsize_ == 3) ? ns_float64 : 
         (dsize_ == 2 ) ? ns_float32 : 

@@ -4,7 +4,8 @@ Installation publishes these objects. Native delegates belong to InstallContext;
 Function input/output bookkeeping belongs to each native one-shot call context.
 """
 import contextlib
-from contextvars import ContextVar
+import threading
+from collections import deque
 import jittor as jt
 import numpy as np
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
@@ -12,19 +13,6 @@ from .context import get_install_context
 from ._placeholder_context import _PlaceholderContext
 from . import profiler as _profiler
 from ..diagnostics import EXPECTED, swallowed
-
-
-# None preserves native jt.grad behavior outside a Torch differentiation call.
-_backward_create_graph = ContextVar("torch_backward_create_graph", default=None)
-
-
-@contextlib.contextmanager
-def _create_graph_scope(create_graph):
-    token = _backward_create_graph.set(bool(create_graph))
-    try:
-        yield
-    finally:
-        _backward_create_graph.reset(token)
 
 
 def _state():
@@ -219,11 +207,7 @@ def function_grad(self, *grad_outputs):
                     if not any(t in dt for t in ("int", "bool", "uint")):
                         go[i] = jt.zeros(shp, dtype=dt)
             grad_outputs = tuple(go)
-    requested = _backward_create_graph.get()
-    grad_scope = (contextlib.nullcontext() if requested is None else
-                  (jt.enable_grad() if requested else jt.no_grad()))
-    with grad_scope:
-        ret = bw(self, *grad_outputs)
+    ret = bw(self, *grad_outputs)
     shapes = getattr(self, "_fwd_input_shapes", None)
     if shapes is None:
         return ret
@@ -277,7 +261,7 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None,
             "materialize_grads=True, but got: allow_unused=False.")
     allow_unused = bool(materialize_grads) if allow_unused is None \
         else bool(allow_unused)
-    with _create_graph_scope(create_graph):
+    with _backward_callbacks():
         gs = list(jt.core.grad_optional(loss, ins, rg))
     missing = [i for i, value in enumerate(gs) if value is None]
     if missing and materialize_grads:
@@ -315,7 +299,7 @@ def backward(tensors, grad_tensors=None, retain_graph=None,
     gts = None if grad_tensors is None else _as_list(grad_tensors)
     for i, t in enumerate(ts):
         gt = None if gts is None else gts[i]
-        t.backward(gradient=gt, retain_graph=retain_graph, create_graph=create_graph)
+        t.backward(gradient=gt, retain_graph=retain_graph)
     return None
 
 
@@ -432,10 +416,35 @@ def kineto_available():
     return False
 
 
+_callback_tasks = threading.local()
+
+
+@contextlib.contextmanager
+def _backward_callbacks():
+    """Drain successful graph-task callbacks after gradients are published."""
+    stack = getattr(_callback_tasks, "stack", None)
+    if stack is None:
+        stack = _callback_tasks.stack = []
+    callbacks = deque()
+    stack.append(callbacks)
+    try:
+        yield
+        while callbacks:
+            callbacks.popleft()()
+    finally:
+        stack.pop()
+        callbacks.clear()
+
+
 class _Engine:
     @staticmethod
-    def queue_callback(*args, **kwargs):
-        return None
+    def queue_callback(callback):
+        stack = getattr(_callback_tasks, "stack", ())
+        if not stack:
+            raise RuntimeError("Final callbacks can only be installed during backward pass.")
+        if not callable(callback):
+            raise TypeError("backward callback must be callable")
+        stack[-1].append(callback)
 
 
 class Variable:

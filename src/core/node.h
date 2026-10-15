@@ -141,16 +141,15 @@ struct OpFlags {
         // their control edges. TapeOp uses this while Tapes is assembled.
         _must_stay_pending,
         // Seven consecutive bits mirroring amp_reg; op.cc writes them and
-        // grad.cc reads them back as one field. The placeholders preserve
-        // the older bits. The final bit selects bfloat16 and prevents the
-        // next flag from landing inside the AMP field.
+        // grad.cc reads them back as one field. Reserved bits still belong
+        // to amp, so the next private flag must follow the complete field.
         _prefer_32,
         _prefer_16,
         _reduce_keep,
         _amp_reserved_3,
         _amp_reserved_4,
         _amp_reserved_5,
-        _amp_prefer_bf16,
+        _prefer_bfloat16,
         _custom_flag,
         // Op meaning of the shared *name*: the op owns frozen edge snapshots
         // of its requires-grad-disabled inputs. Nothing to do with the Var bit
@@ -240,7 +239,7 @@ static_assert((int)VarFlags::_force_fuse == (int)NodeFlags::_n
     && (int)OpFlags::_cpu == (int)NodeFlags::_n,
     "the private layouts must both start where the shared range ends");
 static_assert((int)OpFlags::_custom_flag == (int)OpFlags::_prefer_32 + OpFlags::_amp_nbits,
-    "the amp bits op.cc and grad.cc move as one field are no longer contiguous");
+    "the seven amp bits op.cc and grad.cc move as one field are no longer contiguous");
 static_assert((int)OpFlags::_op_type_high == (int)OpFlags::_op_type + 1,
     "OpType is read as two bits and they are no longer adjacent");
 static_assert((int)NodeFlags::_node_order_high == (int)NodeFlags::_node_order_low + 1,
