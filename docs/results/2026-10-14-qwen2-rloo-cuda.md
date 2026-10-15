@@ -1,11 +1,11 @@
 # Qwen2-0.5B RLOO advantage via ms-swift CUDA
 
-- Status: Single-card FP32 PEFT LoRA RLOO L0–L5 passed on native and strict Jittor shim CUDA. The separate full-tuning profile passed L0–L2; its checkpoint restoration remains storage-blocked, so its formal L4/L5 remain open.
-- Date: 2026-10-14
-- Jittor baseline: full-tuning evidence `aed5418df5f02b5328107f7ff0475cdfbc432570`; LoRA evidence `b557b9977674f0b7a332ebe1238737a1bda81bd2`. Both integrated `origin/2.0-refactor` `3495d443d9d52eb0672f91b22735a7eb585f0c46` with the same relevant implementation.
+- Status: Single-card FP32 PEFT LoRA and full-tuning RLOO L0–L5 passed on native and strict Jittor shim CUDA for the measured Qwen2-0.5B profile. Stochastic rollout token IDs differ across runtimes, so their sampled training losses are separate trajectories rather than stepwise numerical parity.
+- Date: 2026-10-14; full-tuning continuation and L4/L5 added 2026-10-15.
+- Jittor baseline: original full-tuning evidence `aed5418df5f02b5328107f7ff0475cdfbc432570`; LoRA evidence `b557b9977674f0b7a332ebe1238737a1bda81bd2`. The continuation was measured at `528d55718039cc8bbeb022b50c1d95a3eede1ebd`, integrating `origin/2.0-refactor` `8bb59861de5bbf98954728a331a4efe42ea8a389`.
 - ms-swift checkout: `88d727951203256baa564c643c651b6f8d90fd7e`; no ms-swift source edits.
 - Owner: ms-swift CUDA/JTorch coverage.
-- Review when: storage permits a full-tuning checkpoint, or relevant implementation and hardware changes.
+- Review when: checkpoint serialization, RLOO rollout behavior, relevant implementation or hardware changes.
 
 ## Public training and controlled forward
 
@@ -17,7 +17,21 @@ Both public runs constructed the real model, tokenizer, dataset, trainer and opt
 
 The two public runs sampled different completion token IDs despite identical initial weights, seed and prompt; their per-step loss and gradient values are therefore separate convergence evidence, not same-input numerical parity. To close L1, worker job 23796 loaded the model through ms-swift's `get_model_processor` API and forwarded the **same captured native RLOO token IDs and mask** on both CUDA runtimes. Logits shape was `[2,50,151936]`; mean absolute difference `6.85e-6`, RMSE `1.14e-5`, and losses `1.14406240` native versus `1.14406216` shim. In the same worker job, ms-swift's `compute_advantages` API returned `[-5,5]` on CUDA for fixed rewards `[25,30]`, two generations, RLOO and no reward scaling on both runtimes; strict fallback was zero. These observations establish controlled L1 and independent fixed-window L2 without imposing stepwise equality on sampled training trajectories.
 
-The public CLI completed but deliberately wrote no checkpoint; L3 model, optimizer, scheduler, RNG and dataloader-cursor restoration were not exercised. The existing full-model GRPO checkpoint profile needs at least 8 GiB free for its measured save peak and reserve, while this run's NFS `/home` had about 7.2 GiB free. L3 is resource-blocked for this full-tuning profile until a fresh storage preflight succeeds. Formal L4 and L5 remain open under the ordered L0–L5 contract. Job 23796's forward reuses the known Qwen2 causal-LM mechanism but uses this RLOO run's captured tokens and verifies the distinct RLOO advantage function; it is not another GRPO training experiment.
+The public CLI completed but deliberately wrote no checkpoint; L3 model, optimizer, scheduler, RNG and dataloader-cursor restoration were not exercised in that run. The full-tuning continuation and L4/L5 added 2026-10-15 below close that gap.
+
+## Full-tuning checkpoint continuation and L4/L5
+
+The RLOO full-tuning continuation used local Qwen2-0.5B, FP32 eager attention, SGD at `1e-5`, the public ms-swift RLHF CLI, a local completion-length reward and strict CUDA shim fallback policy. The measurement worktree was `528d55718039cc8bbeb022b50c1d95a3eede1ebd`, after integrating upstream `2.0-refactor` SHA `8bb59861de5bbf98954728a331a4efe42ea8a389`. The external ms-swift checkout remained at `88d727951203256baa564c643c651b6f8d90fd7e` and was not modified.
+
+L3 evidence uses run keys `20261015-qwen2-rloo-full-l3-cursor-v6` and `20261015-qwen2-rloo-full-l3-cursor-v7`. Native and shim each resumed checkpoint step 6 in the same Trainer object and reached step 8; fresh processes also resumed step 6 and reached step 8. The native same-process leg (job 26891) predates the latest sync and uses the real PyTorch oracle; both new-process legs and shim same-process revalidation ran against worktree `528d557`. The new-process legs ran in job 26902, shim same-process revalidation in job 26907, and combined verification in job 26909. The verifier checked the expected dataloader cursor, ten finite CUDA-gradient updates per runtime, exact saved CPU/CUDA/Python/NumPy RNG restoration, optimizer groups and scheduler epoch, and changed full-tuning model tensors. Native changed 255 checkpoint tensors and shim changed 252; shim reported `cuda=1 fallback=0`.
+
+The first shim same-process attempt (26891) reached checkpoint 6 but stopped at a harness assertion that incorrectly required the shim CPU RNG probe to change. The corrected probe requires changes for active CUDA, Python and NumPy, while checking that all saved states—including unchanged CPU state—restore exactly. The first combined verifier (26903) also failed while passing a bfloat16 safetensors tensor through NumPy; verifier job 26909 compared tensors with native Torch instead and passed. These were harness failures, not core, CUDA, compat/Torch or ms-swift defects.
+
+L4/L5 run key `20261015-qwen2-rloo-full-l4l5-v1` resumed each runtime's checkpoint-6 and completed the public CLI through step 20 on CUDA (job 26916). Prompts were bounded to a measured maximum of 496 tokens. Four warm-up updates were excluded; ten CUDA-synchronized timings were measured per side. The native and shim mean step times were `0.2957 s` and `0.4686 s`; median/p95 were `0.2954/0.4499 s` and `0.4646/0.7434 s`. The symmetric mean-latency ratio was `1.585×` (limit `3×`). Sampled process peaks were 7,782 MiB native and 18,278 MiB shim; these are NVML process samples, not allocator-equivalent measurements. Shim reported `cuda=1 fallback=0`.
+
+The inherited GRPO performance verifier initially rejected the RLOO run because its step-20 loss delta was `0.02538609`, above the GRPO-specific `0.005` threshold. The raw prompt sequence was the same, but sampled completion `input_ids` differed between runtimes, matching the RLOO L0–L2 behavior described above. The RLOO verifier therefore keeps both sampled loss trajectories as evidence and does not assert cross-runtime stepwise loss equality. The corrected L5 verifier (26943) accepted the measured timing ratio, step counts, sequence length and strict fallback.
+
+Artifacts, checkpoints, logs and the isolated cold JIT cache remain under `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261015-qwen2-rloo-full-l3-cursor-v6/`, `...-v7/` and `20261015-qwen2-rloo-full-l4l5-v1/`. The run-key inventory found no standalone raw-gradient/update tensor that could be removed without discarding required evidence; no files were cleaned. After synchronization, `tools/check_repo_layout.sh` passed. `tests/structure` reported 1,505 passed, 8 skipped and 1 failed (1,057 subtests passed): the worker environment lacks `asv`, required by `test_source_config_is_executable_without_nox_path_rewriting`; the configured package proxy had refused installation previously. This external tooling failure did not block the ms-swift CUDA results.
 
 ## PEFT LoRA restoration and steady performance
 
