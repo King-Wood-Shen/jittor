@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -20,6 +21,39 @@ PINS = {
     "vllm": "98dff2a81d747d1dba01a47f939f48c3526d4206",
     "vllm-omni": "446c2b5474dabffccf9a0034836eeab77c62b4b8",
 }
+
+
+def observed_platform(torch, args, controls, native=None):
+    """Use the shared header with this worker's verified allocation and flags."""
+    from _runtime_platform import capture_platform
+
+    precision = {"matmul": bool(torch.backends.cuda.matmul.allow_tf32),
+                 "cudnn": bool(torch.backends.cudnn.allow_tf32),
+                 "cudnn_benchmark": bool(torch.backends.cudnn.benchmark),
+                 "matmul_precision": torch.get_float32_matmul_precision()}
+    selected = []
+    allocation = []
+    if args.device == "cuda":
+        actual = controls["cuda_device"]
+        rows = [line.split(", ") for line in subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=index,uuid,name,driver_version", "--format=csv,noheader"],
+            text=True).splitlines()]
+        selected = [row for row in rows if len(row) == 4 and row[1] == actual["uuid"]
+                    and row[0] == str(actual["physical_index"])]
+        if len(selected) != 1:
+            raise RuntimeError("H3 platform inventory disagrees with actual CUDA driver UUID")
+        allocation = [controls["cuda_visible_devices"]]
+    cxx = native.compiler.cc_path if native is not None else shutil.which("g++")
+    nvcc = (native.compiler.nvcc_path if native is not None
+            else os.environ.get("JT_BUILD_NVCC_PATH") or shutil.which("nvcc"))
+    if not cxx or (args.device == "cuda" and not nvcc):
+        raise RuntimeError("H3 platform capture requires explicit available compiler executables")
+    flags = {"use_cuda": int(native.flags.use_cuda) if native is not None else int(args.device == "cuda"),
+             "use_acl": 0,
+             "graph_replay": "default" if native is not None and native.flags.auto_graph_replay else "eager",
+             "tf32": precision["matmul"], "hf32": False}
+    return capture_platform(torch, args.device, physical_devices=selected, card_indices=allocation,
+                            precision=precision, jittor_flags=flags, nvcc=nvcc, cxx=cxx)
 
 
 def operation_routes(model):
@@ -59,22 +93,11 @@ def require_complete_gradients(records):
 
 
 def source_identity(root):
-    def git(*args):
-        return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
+    sys.path.insert(0, str(root / "agent/skills/torch-compat-repo-runbook/scripts"))
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _omni_installation import framework_identity
 
-    paths = (
-        "python/jittor/nn/functional/activation.py",
-        "python/jittor/nn/functional/attention.py",
-        "backends/cuda/kernels/nn/swiglu_cuda.py",
-        "adapters/jittor_adapters/vllm/layers.py",
-    )
-    return {
-        "commit": git("rev-parse", "HEAD"),
-        "clean": not git("status", "--porcelain"),
-        "source_sha256": {
-            path: hashlib.sha256((root / path).read_bytes()).hexdigest() for path in paths
-        },
-    }
+    return framework_identity(root)
 
 
 def checkout_identity(path, expected):
@@ -102,11 +125,16 @@ def main(argv=None):
     parser.add_argument("--source-root", type=Path, default=Path(__file__).resolve().parents[4])
     parser.add_argument("--vllm-checkout", type=Path, required=True)
     parser.add_argument("--omni-checkout", type=Path, required=True)
+    parser.add_argument("--vllm-wheel", type=Path, required=True)
+    parser.add_argument("--omni-wheel", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     if args.torch_math and args.runtime != "torch":
         parser.error("--torch-math selects only the genuine-Torch calibration")
     args.source_root = args.source_root.resolve()
+    expected_probe = args.source_root / "agent/skills/vllm-omni-torch-compat/scripts/probe_h3.py"
+    if Path(__file__).resolve() != expected_probe:
+        parser.error("The executed probe must belong to the declared source root")
     args.output = args.output.resolve()
     if args.output.suffix != ".npz":
         parser.error("--output must end in .npz")
@@ -116,13 +144,20 @@ def main(argv=None):
         pass
     else:
         parser.error("Keep raw artifacts outside the source tree")
+    for ancestor in (args.output.parent, *args.output.parents):
+        if (ancestor / ".git").exists() or (ancestor / ".git").is_symlink():
+            parser.error("Keep raw artifacts outside every Git checkout")
     for path in (
         args.output,
         args.output.with_suffix(".json"),
         args.output.with_suffix(".weights.npz"),
+        args.output.with_suffix(".installation.json"),
     ):
         if path.exists():
             raise FileExistsError("Choose a fresh output path; preserving existing evidence")
+    for path in (args.vllm_wheel, args.omni_wheel):
+        if not path.is_file():
+            parser.error("Provide the real original source-matched wheel: " + str(path))
     identities = {
         "vllm": checkout_identity(args.vllm_checkout, PINS["vllm"]),
         "vllm-omni": checkout_identity(args.omni_checkout, PINS["vllm-omni"]),
@@ -137,13 +172,18 @@ def main(argv=None):
 
 def run(args, np, stack, identities):
     os.environ.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
+    # The shared distribution capture binds vLLM through this wheel input.
+    # Use the explicit CLI artifact even if the parent carries another recipe.
+    os.environ["JITTOR_VLLM_WHEEL"] = str(args.vllm_wheel)
     before = None
     source_before = source_identity(args.source_root)
+    observations = []
     if args.runtime == "jittor":
         os.environ["JT_USE_CUDA"] = str(int(args.device == "cuda"))
         import jittor as jt
 
-        if Path(jt.__file__).resolve() != args.source_root / "python/jittor/__init__.py":
+        origin = getattr(jt, "__file__", None)
+        if not origin or Path(origin).resolve() != args.source_root / "python/jittor/__init__.py":
             raise RuntimeError("Candidate imported a different Jittor source tree")
         import jittor_adapters.vllm.layers as adapter_layers
 
@@ -167,13 +207,31 @@ def run(args, np, stack, identities):
     if args.runtime == "torch" and torch.__version__.split("+")[0] != "2.13.0":
         raise RuntimeError("The genuine oracle recipe is pinned to Torch 2.13.0")
 
-    def snapshot(value):
+    def snapshot(value, name):
         if args.runtime == "jittor":
             value.sync()
             if value.location() != ("device" if args.device == "cuda" else "cpu"):
                 raise RuntimeError("A measured tensor is on the wrong physical device")
         elif value.device.type != args.device:
             raise RuntimeError("The genuine oracle tensor is on the wrong device")
+        row = {"name": name, "device": value.device.type,
+               "dtype": str(value.dtype), "shape": list(value.shape)}
+        if str(value.dtype).split(".")[-1] not in ("float32", "bfloat16"):
+            raise RuntimeError("An observed H3 tensor is outside its original BF16/FP32 recipe")
+        if args.runtime == "jittor":
+            row.update(location=value.location(), dispatch=jt.core.dispatch_context([value])[0])
+            if row["dispatch"] != args.device:
+                raise RuntimeError("The H3 tensor dispatched on the wrong device")
+        if args.device == "cuda":
+            import ctypes
+
+            ordinal = ctypes.c_int(-1)
+            status = ctypes.CDLL("libcuda.so.1").cuPointerGetAttribute(
+                ctypes.byref(ordinal), 9, ctypes.c_void_p(value.data_ptr()))
+            if status != 0 or ordinal.value != value.device.index:
+                raise RuntimeError("The actual H3 CUDA pointer belongs to another device")
+            row["pointer_device"] = ordinal.value
+        observations.append(row)
         array = value.detach().float().cpu().numpy().copy()
         if not np.isfinite(array).all():
             raise RuntimeError("Non-finite measured tensor")
@@ -182,11 +240,56 @@ def run(args, np, stack, identities):
     torch.set_num_threads(1)
     if args.device == "cuda":
         assert torch.cuda.is_available()
-        torch.backends.cuda.matmul.allow_tf32 = False
-        torch.backends.cudnn.allow_tf32 = False
-        torch.set_float32_matmul_precision("highest")
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    torch.backends.cudnn.benchmark = False
+    torch.set_float32_matmul_precision("highest")
     import vllm
     import vllm_omni
+    from _omni_installation import capture as capture_omni, validate as validate_omni
+    from _vllm_installation import adapter_installation, device_controls
+    from component_measure import installed_distribution
+    from registry_inventory import inventory
+
+    sources = {repo: inventory(repo, path) for repo, path in (
+        ("vllm", args.vllm_checkout), ("vllm-omni", args.omni_checkout))}
+    bindings = {
+        "vllm": installed_distribution(sources["vllm"], vllm),
+        "vllm-omni": capture_omni(sources["vllm-omni"], vllm_omni, args.omni_wheel),
+    }
+    controls = device_controls(torch, args.device)
+    platform_before = observed_platform(torch, args, controls, jt if args.runtime == "jittor" else None)
+    carrier = adapter_installation(args.source_root) if args.runtime == "jittor" else None
+    conditions = {"threads": torch.get_num_threads(),
+                  "environment": {key: os.environ.get(key) for key in (
+                      "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                      "HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")}}
+    if conditions["threads"] != 1 or any(conditions["environment"][key] != "1"
+                                         for key in ("OMP_NUM_THREADS", "MKL_NUM_THREADS",
+                                                     "OPENBLAS_NUM_THREADS")):
+        raise RuntimeError("The H3 diagnostic requires matching single-thread runtime conditions")
+    installed = {"phase": "installed-source-verified-before-model-import", "runtime": args.runtime,
+                 "device": args.device, "source": source_before,
+                 "upstream": {repo: value["upstream"] for repo, value in sources.items()},
+                 "downstream_distributions": bindings, "device_controls": controls,
+                 "platform": platform_before,
+                 "runtime_conditions": conditions, "adapter_distribution": carrier,
+                 "precision": {"matmul_tf32": bool(torch.backends.cuda.matmul.allow_tf32),
+                               "cudnn_tf32": bool(torch.backends.cudnn.allow_tf32),
+                               "cudnn_benchmark": bool(torch.backends.cudnn.benchmark),
+                               "matmul_precision": torch.get_float32_matmul_precision()},
+                 "interpreter": {"executable": sys.executable,
+                                 "is_shim": hasattr(torch, "_torch_compat_install_context"),
+                                 "torch_version": str(torch.__version__),
+                                 "binary_extension": str(torch._C.__file__)
+                                 if args.runtime == "torch" else None,
+                                 "binary_sha256": hashlib.sha256(Path(torch._C.__file__).read_bytes()).hexdigest()
+                                 if args.runtime == "torch" else None},
+                 "numerical_admission": "not_evaluated_by_this_diagnostic"}
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    with args.output.with_suffix(".installation.json").open("x") as stream:
+        json.dump(installed, stream, indent=2)
+        stream.write("\n")
     from vllm.config import VllmConfig, CompilationConfig, DeviceConfig, set_current_vllm_config
     from vllm.distributed.parallel_state import (
         init_distributed_environment,
@@ -291,7 +394,7 @@ def run(args, np, stack, identities):
                 if name == "rope.inv_freq":
                     array[:] = 1
                 tensor.copy_(torch.tensor(array, device=args.device, dtype=tensor.dtype))
-                initial[name] = snapshot(tensor)
+                initial[name] = snapshot(tensor, "initial/" + name)
         model.train(args.model_mode == "train")
         for parameter in model.parameters():
             parameter.requires_grad_(args.mode == "grad-audit")
@@ -349,7 +452,7 @@ def run(args, np, stack, identities):
                 audio_out * tensor(rng.uniform(0.2, 1.1, tuple(audio_out.shape)).astype("float32"))
             ).sum()
             for name, value in [("video", video), ("audio", audio_out), ("loss", loss)]:
-                arrays[f"seed{seed}/{name}"] = snapshot(value)
+                arrays[f"seed{seed}/{name}"] = snapshot(value, f"seed{seed}/{name}")
             if args.mode == "grad-audit":
                 loss.backward()
                 parameter_map = dict(model.named_parameters())
@@ -362,7 +465,7 @@ def run(args, np, stack, identities):
                     for name, value in mapping.items():
                         if value.grad is not None:
                             key = f"seed{seed}/{category}::{name}"
-                            arrays[key] = snapshot(value.grad)
+                            arrays[key] = snapshot(value.grad, key)
                             gradient_names.append(key)
                 gradient_audit.append(
                     dict(
@@ -426,6 +529,7 @@ def run(args, np, stack, identities):
         precision={
             "matmul_tf32": bool(torch.backends.cuda.matmul.allow_tf32),
             "cudnn_tf32": bool(torch.backends.cudnn.allow_tf32),
+            "cudnn_benchmark": bool(torch.backends.cudnn.benchmark),
             "matmul_precision": torch.get_float32_matmul_precision(),
             "candidate_cuda_kernel_math": str(jt.flags.cuda_kernel_math)
             if args.runtime == "jittor"
@@ -433,7 +537,13 @@ def run(args, np, stack, identities):
         },
         upstream_checkouts=identities,
         executed_module_sources=executed_sources,
-        identity_scope="Listed executed modules; complete installed-tree/wheel identity requires the shared scorecard auditor",
+        identity_scope="Complete source/wheel, actual installed payload/METADATA/RECORD and framework source binding",
+        downstream_distributions=bindings,
+        platform=observed_platform(torch, args, controls, jt if args.runtime == "jittor" else None),
+        device_controls=controls,
+        runtime_conditions=conditions,
+        adapter_distribution=carrier,
+        tensor_observations=observations,
         interpreter={
             "executable": sys.executable,
             "is_shim": args.runtime == "jittor",
@@ -442,11 +552,16 @@ def run(args, np, stack, identities):
             if args.runtime == "torch" else None,
         },
     )
+    refreshed = installed_distribution(sources["vllm"], vllm)
+    if refreshed != bindings["vllm"]:
+        raise RuntimeError("Actual vLLM installation changed during the H3 diagnostic")
+    validate_omni(bindings["vllm-omni"], sources["vllm-omni"], args.omni_wheel)
     if source_identity(args.source_root) != source_before:
         raise RuntimeError("Source changed during measurement")
     if before is not None:
         assert jt.core.backend_fallback_count() == before
         metadata["fallback_count"] = 0
+        metadata["fallback_policy"] = "error"
     args.output.with_suffix(".json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(
         "OMNI_H3_DIAGNOSTIC",

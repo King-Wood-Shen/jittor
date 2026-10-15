@@ -81,6 +81,7 @@
 2026-10-15-accelerate-fresh-process
 2026-10-15-cuda-seed-without-devices
 2026-10-15-h3-autograd-boundary
+2026-10-16-omni-installed-source-diagnostics
 2026-10-15-longformer-32768-context-oracles
 2026-10-15-deepspeed-engine-prerequisites
 2026-10-15-deepspeed-zero-engine
@@ -94,6 +95,8 @@
 2026-10-15-tensor-detach-and-factory-leaf
 2026-10-15-cuda-extension-philox
 2026-10-15-flash-attention-training-oracles
+2026-10-16-flash-attention-installed-source-training
+2026-10-16-accelerate-installed-source-protocols
 2026-10-15-deepspeed-bfloat16-multirank
 2026-10-15-deepspeed-maintained-gate
 2026-10-15-tanh-fsdp-bfloat16
@@ -166,10 +169,13 @@
 | [FSDP 兼容层优化器生命周期](2026-10-15-fsdp-compat-lifecycle.md) | 优化器参数替换与原生模块 checkpoint 分派修复，CPU/CUDA 与双 rank 定向复验 | 2026-10-15 |
 | [jtrun 固定节点控制面](2026-10-15-native-multinode-control-plane.md) | 单机双 agent 的真实 CUDA 通信、FSDP 新进程续训与故障退出通过；真实多 host 待验 | 2026-10-15 |
 | [H3 上游 CUDA 梯度边界](2026-10-15-h3-autograd-boundary.md) | 真 Torch 与候选端 eval/train 均缺完整梯度；定位上游推理内核，无完整模型 L2/L3 授级 | 2026-10-15 |
+| [Omni 完整安装来源诊断](2026-10-16-omni-installed-source-diagnostics.md) | 真实 SCM wheel/完整安装绑定与生成文件替代拒绝；原前向四项超预算、两端完整梯度仍失败 | 2026-10-16 |
 | [默认生成器状态与设备隔离](2026-10-15-default-generator-state-contract.md) | CPU 状态互换、私有副本与实际 CUDA 流隔离通过；保留原生 frame 和旧快照读取 | 2026-10-15 |
 | [每主机 jtrun 验证入口](2026-10-15-native-multihost-runner.md) | 显式源码、解释器、设备和共享产物协议；单机双 agent 完整执行，真实多机仍待验 | 2026-10-15 |
 | [无可见 CUDA 设备的播种](2026-10-15-cuda-seed-without-devices.md) | CPU 训练可调用 CUDA 播种接口；保留参数转换与实际 CUDA 流回放 | 2026-10-15 |
 | [Accelerate 新进程续训](2026-10-15-accelerate-fresh-process.md) | CPU/CUDA 新进程恢复、全状态与实际 CUDA FSDP2 通过；CPU 双 rank 上游路径实际为 DDP，配对不授通过 | 2026-10-15 |
+| [Accelerate 完整安装来源与续训](2026-10-16-accelerate-installed-source-protocols.md) | 新 CPU/CUDA 2,516 对数组与完整新进程恢复通过；共同 2 接纳、2 配对阻塞，真实 METADATA/RECORD 与原 wheel 绑定 | 2026-10-16 |
+| [FlashAttention 完整安装来源训练](2026-10-16-flash-attention-installed-source-training.md) | 原 12 CUDA 场景、48 worker 与 936 数值检查通过；共同 12 条因缺 CPU 对应实现阻塞，固定本地构建 artifact 拒绝同步载荷篡改 | 2026-10-16 |
 
 | [PEFT / Swift 独立 CPU nightly](2026-10-15-maintained-ecosystem-nightly.md) | 完整依赖与来源校验、两维护门禁本地执行通过；未观测 GitHub scheduled run | 2026-10-15 |
 | [OpenMMLab 安装来源训练](2026-10-15-openmmlab-installed-source-training.md) | MMEngine/MMCV 四条限定 L3；462 数组、三种输入与三步真实 train_step，完整安装来源绑定 | 2026-10-15 |
