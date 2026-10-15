@@ -478,6 +478,7 @@ include docs/results/2026-10-15-metric-state-and-tensordict-oracles.md
 include docs/results/2026-10-15-metrics-tensordict-scorecards.md
 include docs/results/2026-10-15-mpi-bfloat16-process-groups.md
 include docs/results/2026-10-15-ms-swift-autograd-gradient-mode.md
+include docs/results/2026-10-15-ms-swift-cuda-l3-l5-continuation.md
 include docs/results/2026-10-15-native-fsdp.md
 include docs/results/2026-10-15-native-multinode-control-plane.md
 include docs/results/2026-10-15-native-sharded-checkpoint.md
