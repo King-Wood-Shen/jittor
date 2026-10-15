@@ -210,6 +210,15 @@ class Module:
     def __init__(self, *args, **kw):
         # Some consumers access __dict__ directly after super().__init__.
         self._modules
+        # Preserve cooperative initialization for mixins that follow a Torch
+        # Module facade in the MRO. The facade itself delegates to this native
+        # Module, so a later ``super(FacadeModule, self).__init__(...)`` lands
+        # here before it can reach the consumer mixin.
+        if args or kw:
+            mro = type(self).__mro__
+            next_init = mro[mro.index(Module) + 1].__dict__.get("__init__")
+            if next_init is not None and next_init is not object.__init__:
+                super().__init__(*args, **kw)
 
     def __getstate__(self):
         state = vars(self).copy()

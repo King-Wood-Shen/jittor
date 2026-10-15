@@ -15,12 +15,29 @@ import os
 import numpy as np
 import pytest
 import torch
+from torch import nn
 
 import jittor as jt
 
 
 def _on_acl():
     return bool(getattr(jt.compiler, "has_acl", 0)) and bool(jt.flags.use_cuda)
+
+
+def test_torch_module_facade_forwards_mixin_initialization():
+    class ActivationMixin:
+        def __init__(self, module_key):
+            self.module_key = module_key
+            self._unique_thread = True
+
+    class AdapterModule(nn.Module, ActivationMixin):
+        def __init__(self, module_key):
+            super(AdapterModule, self).__init__()
+            super(nn.Module, self).__init__(module_key)
+
+    module = AdapterModule("model.layers.0.mlp.adapter_default")
+    assert module.module_key == "model.layers.0.mlp.adapter_default"
+    assert module._unique_thread is True
 
 
 def test_npu_namespace_refuses_rather_than_inventing_a_device():
