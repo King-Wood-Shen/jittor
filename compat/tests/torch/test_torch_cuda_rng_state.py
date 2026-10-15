@@ -63,6 +63,17 @@ def _cuda_rng_seed_only(func):
     return inner
 
 
+def _acl_rng(func):
+    """Run CUDA-facade RNG checks against the active ACL counter stream."""
+    @wraps(func)
+    def inner(*args, **kwargs):
+        if not getattr(jt.compiler, "has_acl", 0):
+            pytest.skip("no ACL backend")
+        with jt.flag_scope(use_acl=1):
+            return func(*args, **kwargs)
+    return inner
+
+
 @_cuda_rng
 def test_state_round_trips_for_uniform():
     torch.cuda.manual_seed(1234)
@@ -146,3 +157,29 @@ def test_seed_actually_reseeds():
     torch.cuda.manual_seed(11)
     torch.cuda.seed()
     assert torch.cuda.initial_seed() != 11
+
+
+@_acl_rng
+def test_acl_state_round_trips_after_mixed_random_history():
+    torch.cuda.manual_seed_all(99)
+    jt.random((5,)).sync()
+    jt.random((6,), type="normal").sync()
+    jt.random((7,), type="normal").sync()
+    jt.random((3,), dtype="float64").sync()
+
+    states = torch.cuda.get_rng_state_all()
+    expected_uniform = jt.random((8,)).numpy().copy()
+    expected_normal = jt.random((4,), type="normal").numpy().copy()
+
+    torch.cuda.set_rng_state_all(states)
+    np.testing.assert_array_equal(jt.random((8,)).numpy(), expected_uniform)
+    np.testing.assert_array_equal(jt.random((4,), type="normal").numpy(), expected_normal)
+
+
+@_acl_rng
+def test_acl_manual_seed_and_initial_seed():
+    torch.cuda.manual_seed_all(4321)
+    assert torch.cuda.initial_seed() == 4321
+    states = torch.cuda.get_rng_state_all()
+    assert len(states) == int(jt.get_device_count())
+    torch.cuda.set_rng_state_all(states)
