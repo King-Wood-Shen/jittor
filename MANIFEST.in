@@ -458,12 +458,14 @@ include docs/results/2026-10-15-bfloat16-linear-bias-accumulation.md
 include docs/results/2026-10-15-checkpoint-state-options.md
 include docs/results/2026-10-15-cpu-bfloat16-accumulators.md
 include docs/results/2026-10-15-cuda-extension-philox.md
+include docs/results/2026-10-15-cuda-seed-without-devices.md
 include docs/results/2026-10-15-cuda13-toolchain-packaging.md
 include docs/results/2026-10-15-deepspeed-bfloat16-multirank.md
 include docs/results/2026-10-15-deepspeed-engine-prerequisites.md
 include docs/results/2026-10-15-deepspeed-maintained-gate.md
 include docs/results/2026-10-15-deepspeed-paired-protocol.md
 include docs/results/2026-10-15-deepspeed-zero-engine.md
+include docs/results/2026-10-15-default-generator-state-contract.md
 include docs/results/2026-10-15-diffusers-component-scorecards.md
 include docs/results/2026-10-15-diffusers-installed-source.md
 include docs/results/2026-10-15-distribution-constraint-publication.md
@@ -480,6 +482,7 @@ include docs/results/2026-10-15-mpi-bfloat16-process-groups.md
 include docs/results/2026-10-15-ms-swift-autograd-gradient-mode.md
 include docs/results/2026-10-15-ms-swift-cuda-l3-l5-continuation.md
 include docs/results/2026-10-15-native-fsdp.md
+include docs/results/2026-10-15-native-multihost-runner.md
 include docs/results/2026-10-15-native-multinode-control-plane.md
 include docs/results/2026-10-15-native-sharded-checkpoint.md
 include docs/results/2026-10-15-native-tensor-parallel-adamw-bf16.md
