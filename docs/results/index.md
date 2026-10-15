@@ -11,6 +11,11 @@
 ```{toctree}
 :maxdepth: 1
 
+2026-10-16-verl-maintained-cpu-nightly
+2026-10-16-recorded-grad-fn-freeze
+2026-10-16-transformers-main-source-training
+2026-10-15-maintained-ecosystem-nightly
+2026-10-15-openmmlab-installed-source-training
 2026-10-15-transformers-installed-source-training
 2026-10-15-verl-installed-source-training
 2026-10-15-size-factory-leaves
@@ -165,3 +170,8 @@
 | [每主机 jtrun 验证入口](2026-10-15-native-multihost-runner.md) | 显式源码、解释器、设备和共享产物协议；单机双 agent 完整执行，真实多机仍待验 | 2026-10-15 |
 | [无可见 CUDA 设备的播种](2026-10-15-cuda-seed-without-devices.md) | CPU 训练可调用 CUDA 播种接口；保留参数转换与实际 CUDA 流回放 | 2026-10-15 |
 | [Accelerate 新进程续训](2026-10-15-accelerate-fresh-process.md) | CPU/CUDA 新进程恢复、全状态与实际 CUDA FSDP2 通过；CPU 双 rank 上游路径实际为 DDP，配对不授通过 | 2026-10-15 |
+
+| [PEFT / Swift 独立 CPU nightly](2026-10-15-maintained-ecosystem-nightly.md) | 完整依赖与来源校验、两维护门禁本地执行通过；未观测 GitHub scheduled run | 2026-10-15 |
+| [OpenMMLab 安装来源训练](2026-10-15-openmmlab-installed-source-training.md) | MMEngine/MMCV 四条限定 L3；462 数组、三种输入与三步真实 train_step，完整安装来源绑定 | 2026-10-15 |
+
+| [Transformers 主线来源复验](2026-10-16-transformers-main-source-training.md) | 独立09e9源码 CPU/CUDA 共160 worker、7854数组对，20条限定L3；原B4测量不重标 | 2026-10-16 |
