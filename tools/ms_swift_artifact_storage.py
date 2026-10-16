@@ -18,7 +18,7 @@ import subprocess
 import tempfile
 import time
 
-VERSION = "msw-storage-v1"
+VERSION = "msw-storage-v2"
 GIB = 1024 ** 3
 LOCAL_FS = {"ext4", "xfs", "btrfs", "tmpfs", "rootfs", "ramfs", "zfs"}
 KINDS = {"gradient", "update", "logits", "hidden", "temporary_model"}
@@ -103,8 +103,11 @@ def probe(path, peak, files, ram_reserve=None):
     if peak < 0 or files < 0:
         raise ValueError("negative storage estimate")
     stat = os.statvfs(str(path))
-    # Unknown quota: conservative observed mount limit, not a quota guarantee.
-    required = 2 * peak + 2 * GIB
+    # peak is the maximum *additional* footprint, including simultaneous
+    # staging and all retained outputs declared by the caller.  The source of
+    # publish() lives on worker-local scratch, so durable storage needs one
+    # staged copy, not a second copy of the declared peak.
+    required = peak + 2 * GIB
     required_inodes = files + max(1000, (files + 4) // 5)
     available = stat.f_bavail * stat.f_frsize
     filesystem = mount(path)
@@ -280,16 +283,36 @@ class Storage:
                 raise ValueError("empty checkpoint")
             size = sum((source / p).stat().st_size for p in before)
             probe(self.evidence, size, len(before))
+            reusable = {}
+            for checkpoint_name in self.data["retention_plan"]:
+                checkpoint_path = self.evidence / "checkpoints" / checkpoint_name
+                if not checkpoint_path.exists():
+                    continue
+                verified = self.verify_checkpoint(checkpoint_name)
+                receipt = json.loads((verified / "storage-receipt.json").read_text())
+                for relative, digest in receipt["files"].items():
+                    existing = verified / relative
+                    reusable.setdefault(digest, existing)
             staging = Path(tempfile.mkdtemp(prefix=".publish-", dir=str(target.parent)))
             # A failed staging tree is retained as failure evidence, never exposed as complete.
+            linked = []
             for relative, digest in sorted(before.items()):
                 destination = staging / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(str(source / relative), str(destination))
-                with destination.open("rb") as stream:
-                    os.fsync(stream.fileno())
+                existing = reusable.get(digest)
+                if existing is not None and existing.stat().st_size == (source / relative).stat().st_size:
+                    if sha256(existing) != digest:
+                        raise ValueError("published checkpoint content hash mismatch")
+                    os.chmod(existing, 0o444)
+                    os.link(str(existing), str(destination), follow_symlinks=False)
+                    linked.append(relative)
+                else:
+                    shutil.copyfile(str(source / relative), str(destination))
+                    with destination.open("rb") as stream:
+                        os.fsync(stream.fileno())
                 if sha256(destination) != digest:
                     raise ValueError("checkpoint copy hash mismatch")
+                os.chmod(destination, 0o444)
             after = {str(p.relative_to(source)): sha256(p)
                      for p in source.rglob("*") if p.is_file()}
             if before != after:
@@ -300,10 +323,19 @@ class Storage:
             sync_dir(staging)
             # Receipt travels with the directory: recoverable even if killed before index update.
             receipt = {"role": spec["role"], "reason": spec["reason"], "files": before,
-                       "bytes": size, "published_at": time.time()}
+                       "bytes": size, "hardlinked_files": linked,
+                       "new_bytes": sum((source / p).stat().st_size for p in before
+                                        if p not in linked),
+                       "published_at": time.time()}
             if (staging / "storage-receipt.json").exists():
                 raise ValueError("reserved checkpoint receipt filename")
             atomic_json(staging / "storage-receipt.json", receipt)
+            os.chmod(staging / "storage-receipt.json", 0o444)
+            for directory in sorted((p for p in staging.rglob("*") if p.is_dir()),
+                                    key=lambda p: len(p.parts), reverse=True):
+                os.chmod(directory, 0o555)
+            os.chmod(staging, 0o555)
+            sync_dir(staging)
             os.rename(str(staging), str(target))
             sync_dir(target.parent)
             self.data["checkpoints"][name] = dict(receipt, path=str(target))

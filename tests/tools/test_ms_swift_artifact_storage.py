@@ -25,7 +25,9 @@ class TestArtifactStorage(unittest.TestCase):
         (work / "raw").mkdir()
         (self.root / "checkpoints").mkdir()
         self.plan = {"restore": {"role": "recovery", "reason": "new-process restore",
-                                "required": ["model.bin", "optimizer.json", "rng_state_0.json", "rng_state_1.json"]}}
+                                "required": ["model.bin", "optimizer.json", "rng_state_0.json", "rng_state_1.json"]},
+                     "restore-copy": {"role": "validation", "reason": "same immutable state",
+                                      "required": ["model.bin", "optimizer.json", "rng_state_0.json", "rng_state_1.json"]}}
         storage.atomic_json(self.root / "storage-manifest.json", {
             "work_root": str(work), "state": "ready", "node": socket.gethostname(),
             "job": "123", "retention_plan": self.plan, "artifacts": {}, "checkpoints": {}})
@@ -41,8 +43,26 @@ class TestArtifactStorage(unittest.TestCase):
         cp = self.s.work / "trainer" / "checkpoint-2"
         cp.mkdir(parents=True)
         for name in self.plan["restore"]["required"]:
-            (cp / name).write_bytes(b"state-fixture")
+            (cp / name).write_bytes(("state-fixture:" + name).encode("utf-8"))
         return cp
+
+    def test_identical_published_files_share_durable_storage(self):
+        first = self.checkpoint()
+        with patch.object(storage, "probe", return_value={}):
+            first_target = self.s.publish("restore", first)
+            second = self.s.work / "trainer" / "checkpoint-3"
+            second.mkdir(parents=True)
+            for name in self.plan["restore-copy"]["required"]:
+                (second / name).write_bytes(("state-fixture:" + name).encode("utf-8"))
+            second_target = self.s.publish("restore-copy", second)
+        receipt = json.loads((second_target / "storage-receipt.json").read_text())
+        self.assertEqual((first_target / "model.bin").stat().st_ino,
+                         (second_target / "model.bin").stat().st_ino,
+                         "hardlink receipt: {!r}".format(receipt))
+        self.assertEqual(sorted(receipt["hardlinked_files"]), sorted(self.plan["restore-copy"]["required"]))
+        self.assertEqual(receipt["new_bytes"], 0)
+        self.assertEqual((second_target / "model.bin").stat().st_mode & 0o222, 0)
+        self.assertEqual(self.s.verify_checkpoint("restore-copy"), second_target)
 
     def test_hash_mismatch_is_rejected(self):
         path = self.s.raw_path("rank0/step1.npy")
@@ -86,6 +106,7 @@ class TestArtifactStorage(unittest.TestCase):
         self.assertEqual(self.s.verify_checkpoint("restore"), target)
         with self.assertRaises(FileExistsError):
             self.s.publish("restore", cp)
+        (target / "model.bin").chmod(0o644)
         (target / "model.bin").write_bytes(b"changed")
         with self.assertRaisesRegex(ValueError, "hash mismatch"):
             self.s.verify_checkpoint("restore")
@@ -107,6 +128,20 @@ class TestArtifactStorage(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "multi-node"):
                 storage.Storage.create(self.root / "future", self.plan, 0, 0)
         self.assertFalse((self.root / "future").exists())
+
+    def test_capacity_budget_counts_one_durable_staging_copy_plus_reserve(self):
+        from types import SimpleNamespace
+        peak = 4 * storage.GIB
+        free = peak + 2 * storage.GIB
+        stat = SimpleNamespace(f_bavail=free, f_frsize=1, f_favail=10000)
+        with patch.object(storage.os, "statvfs", return_value=stat), \
+                patch.object(storage, "mount", return_value={"fstype": "ext4"}):
+            result = storage.probe(self.root, peak, 1)
+            self.assertEqual(result["required_bytes"], free)
+            too_little = SimpleNamespace(f_bavail=free - 1, f_frsize=1, f_favail=10000)
+            with patch.object(storage.os, "statvfs", return_value=too_little):
+                with self.assertRaisesRegex(OSError, "insufficient"):
+                    storage.probe(self.root, peak, 1)
 
     def test_plan_needs_reason_and_component_contract(self):
         with self.assertRaises(ValueError):

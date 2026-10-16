@@ -1,8 +1,10 @@
 # ms-swift 新实验存储合同
 
-状态：单节点 Slurm 存储链路；完整 CUDA 训练仍按 profile 单独验收。存储策略版本为 `msw-storage-v1`。多节点在 rank 汇集实现并验证前拒绝初始化。
+状态：单节点 Slurm 存储链路；完整 CUDA 训练仍按 profile 单独验收。存储策略版本为 `msw-storage-v2`。多节点在 rank 汇集实现并验证前拒绝初始化。
 
-新运行在 worker 调用 `tools/ms_swift_storage_worker.sh driver.py`。调用前设置绝对路径 `MSW_PYTHON`、全新 `MSW_EVIDENCE_ROOT`、`MSW_RETENTION_PLAN`，以及 `MSW_SCRATCH_PEAK_BYTES`、`MSW_DURABLE_PEAK_BYTES`、`MSW_ESTIMATED_FILES`、`MSW_RAM_RESERVE_BYTES`（训练驻留内存峰值，不含 scratch）。运行键不得复用。HOME 配额须按 skill 核实；工具的容量检查使用保守挂载余量，不能代替配额检查。
+新运行在 worker 调用 `tools/ms_swift_storage_worker.sh driver.py`。调用前设置绝对路径 `MSW_PYTHON`、全新 `MSW_EVIDENCE_ROOT`、`MSW_RETENTION_PLAN`，以及 `MSW_SCRATCH_PEAK_BYTES`、`MSW_DURABLE_PEAK_BYTES`、`MSW_ESTIMATED_FILES`、`MSW_RAM_RESERVE_BYTES`（训练驻留内存峰值，不含 scratch）。运行键不得复用。HOME 配额须按 skill 核实；工具检查的需求为声明峰值字节加 2 GiB 保留量及 inode 余量，不代替实际配额检查。
+
+峰值是实验期间**新增占用的最大并发总量**，必须计入会同时存在的临时梯度、模型、保留 checkpoint 与正在发布的 staging。`publish()` 的源在节点本地 scratch，持久卷只新增一个 staging 副本；容量探针不再把同一个峰值再乘二。`df` 和用户配额都要在初始化与阶段边界检查。
 
 | 写入 | 路径 | 保留合同 |
 | --- | --- | --- |
@@ -32,7 +34,9 @@ Python driver 使用 `importlib.util.spec_from_file_location` 加载 `MSW_STORAG
 
 该列表是示例，实际合同按全模型/adapter、保存格式及拓扑展开。分片权重必须逐个列出，不能只检查 index；双卡逐个列出 `rng_state_0.pth`、`rng_state_1.pth`。需要恢复的 optimizer/scheduler/RNG、buffer、训练游标和 tokenizer 必须完整。预先列出独立 oracle、恢复起点、被复用中间点和各场景验证终点；Trainer rotation 不得删除待恢复或待发布来源。没有列入计划的 checkpoint 留在临时目录。
 
-所有 rank 完成保存、writer 关闭并经过 barrier 后，由 rank 0 调用 `publish(name, source)`。工具拒绝缺项、链接、特殊文件和源目录变化，复制到持久 staging，核验每个文件 SHA-256、fsync，再原子发布。发布目录携带 receipt，因此进程在发布后、更新总索引前被杀，也可通过 `verify_checkpoint(name)` 核验。发布过程中被杀的 `.publish-*` 仅是未完成证据，不能当作 checkpoint。工具不删除任何模型来源。
+所有 rank 完成保存、writer 关闭并经过 barrier 后，由 rank 0 调用 `publish(name, source)`。工具拒绝缺项、链接、特殊文件和源目录变化，复制到持久 staging，核验每个文件 SHA-256、fsync，再原子发布。与已发布 checkpoint 字节完全相同的文件以同卷硬链接复用，receipt 记录复用路径和本次实际新增字节；发布文件只读，各 checkpoint 仍有独立目录与完整 SHA-256 校验。发布目录携带 receipt，因此进程在发布后、更新总索引前被杀，也可通过 `verify_checkpoint(name)` 核验。发布过程中被杀的 `.publish-*` 仅是未完成证据，不能当作 checkpoint。工具不删除任何模型来源。
+
+保持每个运行计划最小：仅将独立 oracle、恢复起点以及实际复用的中间点声明为持久 checkpoint；重复的最终 checkpoint 通过内容哈希复用。未入计划的日志、逐步梯度和模型快照继续留在 worker 临时区。严禁用清理旧运行的方式回收空间，除非已有报告指出其为冗余且保存了逐文件 inventory、SHA-256 和可用持久来源。
 
 恢复阶段通过 `verify_checkpoint(name)` 获得持久目录，再执行实际的同进程及新进程训练恢复验收。哈希链路通过仅证明文件完整，不能证明优化器或数据游标语义正确。原生阶段完成就发布其必要终点，后续 shim 失败不影响已经持久保存的 oracle。
 

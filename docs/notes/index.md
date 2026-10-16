@@ -20,6 +20,7 @@ complex-dtype
 pipelined-execution
 profiling
 native-sharded-checkpoint
+ms-swift-artifact-storage
 native-zero-optimizer
 native-tensor-parallel
 native-fsdp
