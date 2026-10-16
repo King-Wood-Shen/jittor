@@ -12,10 +12,12 @@ the device that was selected.
 
 import os
 
+import numpy as np
 import pytest
 import torch
 
 import jittor as jt
+from jittor._runtime.fallback import forbid_backend_fallbacks
 
 
 def _on_acl():
@@ -79,6 +81,28 @@ def test_npu_device_scope_restores_the_previous_device():
     with torch.npu.device(other):
         assert torch.npu.current_device() == other
     assert torch.npu.current_device() == original
+
+
+@pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
+                    reason="requires a selected ACL device")
+def test_npu_seed_apis_seed_acl_streams_and_cuda_seed_is_inactive():
+    assert _on_acl(), "JITTOR_TEST_DEVICES=npu but ACL is not active"
+    seed = 1729
+    cpu_state = torch.get_rng_state().numpy().copy()
+    with forbid_backend_fallbacks():
+        torch.npu.manual_seed_all(seed)
+        first = torch.rand((19,), dtype=torch.float32, device="npu").cpu().numpy()
+        torch.npu.manual_seed_all(seed)
+        # Transformers set_seed calls this before torch.npu.manual_seed_all.
+        assert torch.cuda.manual_seed_all(seed + 1) is None
+        second = torch.rand((19,), dtype=torch.float32, device="npu").cpu().numpy()
+        torch.npu.manual_seed(seed)
+        third = torch.rand((19,), dtype=torch.float32, device="npu").cpu().numpy()
+        torch.npu.manual_seed(seed)
+        fourth = torch.rand((19,), dtype=torch.float32, device="npu").cpu().numpy()
+    np.testing.assert_array_equal(first, second)
+    np.testing.assert_array_equal(third, fourth)
+    assert np.array_equal(torch.get_rng_state().numpy(), cpu_state)
 
 
 @pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
