@@ -172,20 +172,24 @@ class TestAutocast(StubPolicyBase):
             self.assertEqual(str((a + a).dtype), "float32")
 
     def test_autocast_linear_keeps_the_compute_dtype_through_a_float32_bias(self):
-        """`linear` is `matmul + bias`; a float32 bias must not undo the dtype.
+        """Autocast uses low-precision copies without changing FP32 leaves.
 
-        torch's autocast casts the bias along with the rest of the linear
-        operator, so the result stays in the autocast dtype.  The shim's
-        torch-parity promotion on the bias add would lift the float16 product
-        back to float32 (`f16 + f32 -> f32`), leaving a model whose attentions
-        mixed float16 queries with a float32 value.
+        Torch autocast casts input, weight and bias for linear, but gradients
+        still accumulate into the original FP32 input/parameter leaves.
         """
-        x = jt.random((4, 8), dtype="float16")
+        x = jt.random((4, 8), dtype="float32")
         weight = jt.random((16, 8), dtype="float32")
         bias = jt.random((16,), dtype="float32")
-        with torch.autocast("cuda", dtype=torch.float16):
+        with torch.autocast("cuda", dtype=torch.bfloat16):
             out = torch.nn.functional.linear(x, weight, bias)
-        self.assertEqual(str(out.dtype), "float16")
+        self.assertEqual(str(out.dtype), "bfloat16")
+        self.assertEqual(str(x.dtype), "float32")
+        self.assertEqual(str(weight.dtype), "float32")
+        self.assertEqual(str(bias.dtype), "float32")
+        out.float().sum().backward()
+        for value in (x.grad, weight.grad, bias.grad):
+            self.assertIsNotNone(value)
+            self.assertEqual(str(value.dtype), "float32")
 
     def test_autocast_conv3d_keeps_the_compute_dtype_through_a_float32_bias(self):
         """A convolution adds its own bias; a float32 bias must not undo it.
