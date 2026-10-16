@@ -171,7 +171,7 @@ class TestAutocast(StubPolicyBase):
         with torch.autocast("cuda", dtype=torch.float32):
             self.assertEqual(str((a + a).dtype), "float32")
 
-    def test_autocast_linear_keeps_the_compute_dtype_through_a_float32_bias(self):
+    def test_autocast_linear_preserves_fp32_leaves_and_uses_bf16_compute(self):
         """Autocast uses low-precision copies without changing FP32 leaves.
 
         Torch autocast casts input, weight and bias for linear, but gradients
@@ -188,14 +188,23 @@ class TestAutocast(StubPolicyBase):
                 weight, bias = layer.weight, layer.bias
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 out = layer(x) if use_module else torch.nn.functional.linear(x, weight, bias)
-            self.assertEqual(str(out.dtype), "bfloat16")
-            self.assertEqual(str(x.dtype), "float32")
-            self.assertEqual(str(weight.dtype), "float32")
-            self.assertEqual(str(bias.dtype), "float32")
+            self.assertEqual(str(out.dtype).replace("torch.", ""), "bfloat16")
+            self.assertEqual(str(x.dtype).replace("torch.", ""), "float32")
+            self.assertEqual(str(weight.dtype).replace("torch.", ""), "float32")
+            self.assertEqual(str(bias.dtype).replace("torch.", ""), "float32")
             grads = torch.autograd.grad(out.float().sum(), (x, weight, bias))
             for value in grads:
                 self.assertIsNotNone(value)
-                self.assertEqual(str(value.dtype), "float32")
+                self.assertEqual(str(value.dtype).replace("torch.", ""), "float32")
+
+    def test_autocast_linear_keeps_compute_dtype_through_float32_bias(self):
+        """Latest mainline contract: bias follows autocast's linear operands."""
+        x = jt.random((4, 8), dtype="float16")
+        weight = jt.random((16, 8), dtype="float32")
+        bias = jt.random((16,), dtype="float32")
+        with torch.autocast("cuda", dtype=torch.float16):
+            out = torch.nn.functional.linear(x, weight, bias)
+        self.assertEqual(str(out.dtype).replace("torch.", ""), "float16")
 
     def test_autocast_conv3d_keeps_the_compute_dtype_through_a_float32_bias(self):
         """A convolution adds its own bias; a float32 bias must not undo it.
