@@ -107,6 +107,38 @@ def test_npu_seed_apis_seed_acl_streams_and_cuda_seed_is_inactive():
 
 @pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
                     reason="requires a selected ACL device")
+def test_npu_rng_state_apis_round_trip_and_cuda_state_aliases_acl():
+    assert _on_acl(), "JITTOR_TEST_DEVICES=npu but ACL is not active"
+    cpu_state = torch.get_rng_state().numpy().copy()
+    with forbid_backend_fallbacks():
+        torch.npu.manual_seed_all(7301)
+        _ = torch.rand((11,), dtype=torch.float32, device="npu")
+        acl_state = torch.npu.random.get_rng_state()
+        cuda_state = torch.cuda.get_rng_state()
+        np.testing.assert_array_equal(acl_state.numpy(), cuda_state.numpy())
+
+        expected = torch.rand((23,), dtype=torch.float32, device="npu").cpu().numpy()
+        torch.npu.random.set_rng_state(acl_state)
+        actual = torch.rand((23,), dtype=torch.float32, device="npu").cpu().numpy()
+        np.testing.assert_array_equal(expected, actual)
+
+        cuda_states = torch.cuda.random.get_rng_state_all()
+        expected_all = torch.rand((17,), dtype=torch.float32, device="npu").cpu().numpy()
+        torch.cuda.random.set_rng_state_all(cuda_states)
+        actual_all = torch.rand((17,), dtype=torch.float32, device="npu").cpu().numpy()
+        np.testing.assert_array_equal(expected_all, actual_all)
+
+        torch.npu.manual_seed_all(9182)
+        state_all = torch.npu.random.get_rng_state_all()
+        expected_device_all = torch.rand((13,), dtype=torch.float32, device="npu").cpu().numpy()
+        torch.npu.random.set_rng_state_all(state_all)
+        actual_device_all = torch.rand((13,), dtype=torch.float32, device="npu").cpu().numpy()
+        np.testing.assert_array_equal(expected_device_all, actual_device_all)
+    assert np.array_equal(torch.get_rng_state().numpy(), cpu_state)
+
+
+@pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
+                    reason="requires a selected ACL device")
 def test_torch_npu_primitives_match_their_definitions():
     import torch_npu
 

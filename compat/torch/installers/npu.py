@@ -7,10 +7,9 @@ answered False and ``device_count()`` answered 0 on a machine with eight
 what Transformers, ms-swift and DeepSpeed all do -- was told there was no NPU
 and went to the host.
 
-What is published here is discovery, selection and synchronization, plus the
-three ``torch_npu`` primitives a Torch model reaches for directly. It is not
-the torch_npu extension: streams, RNG state and the memory statistics have
-their own contracts and are left refusing rather than answered with a zero.
+What is published here is discovery, selection, synchronization, native ACL
+RNG state, plus the three ``torch_npu`` primitives a Torch model reaches for
+directly. Streams and memory statistics retain their explicit refusals.
 """
 import contextlib
 import types
@@ -18,6 +17,7 @@ import types
 import jittor as jt
 
 from ..fidelity import Fidelity, register_api_bindings
+from ..context import get_install_context
 from ..types import device as TorchDevice
 
 
@@ -120,6 +120,52 @@ def manual_seed_all(seed):
     jt.core.rng_manual_seed_all("acl", value)
 
 
+def _rng_state_tensor(payload):
+    g = get_install_context(jt).target_namespace
+    return g.tensor(list(payload.encode("ascii")), dtype=g.uint8, device="cpu")
+
+
+def _rng_state_payload(state):
+    if not isinstance(state, jt.Var):
+        raise TypeError("NPU RNG state must be a CPU ByteTensor")
+    if str(state.dtype) != "uint8" or len(state.shape) != 1:
+        raise TypeError("NPU RNG state must be a one-dimensional ByteTensor")
+    if state.device.type != "cpu":
+        raise TypeError("NPU RNG state must be a CPU ByteTensor")
+    try:
+        return state.numpy().tobytes().decode("ascii")
+    except UnicodeDecodeError as error:
+        raise ValueError("NPU RNG state is not a native ACL generator snapshot") from error
+
+
+def get_rng_state(device=None):
+    """Return an exact CPU ByteTensor snapshot of one native ACL stream."""
+    return _rng_state_tensor(jt.core.rng_state("acl", _index(device)))
+
+
+def get_rng_state_all():
+    """Return exact snapshots of every visible native ACL stream."""
+    _require_acl()
+    return [_rng_state_tensor(payload) for payload in jt.core.rng_states("acl")]
+
+
+def set_rng_state(state, device=None):
+    """Restore one native ACL stream from its CPU ByteTensor snapshot."""
+    jt.core.set_rng_state("acl", _rng_state_payload(state), _index(device))
+
+
+def set_rng_state_all(states):
+    """Restore every visible ACL stream after validating the whole snapshot list."""
+    _require_acl()
+    payloads = [_rng_state_payload(state) for state in states]
+    jt.core.set_rng_states("acl", payloads)
+
+
+def initial_seed():
+    """Return the seed attached to the current ACL generator."""
+    return int(jt.core.rng_initial_seed("acl", current_device()))
+
+
 def npu_rms_norm(input, weight, epsilon=1e-6):
     """``torch_npu.npu_rms_norm``, as an ACL tensor graph.
 
@@ -163,7 +209,8 @@ _REFUSED = (
 
 _SUPPORTED = ("is_available", "device_count", "current_device", "set_device",
               "device", "synchronize", "empty_cache", "is_bf16_supported",
-              "manual_seed", "manual_seed_all",
+              "manual_seed", "manual_seed_all", "get_rng_state", "get_rng_state_all",
+              "set_rng_state", "set_rng_state_all", "initial_seed",
               "npu_rms_norm", "npu_rotary_mul", "npu_swiglu")
 
 
@@ -173,6 +220,12 @@ def install(ctx):
     npu.__path__ = []
     for name in _SUPPORTED:
         setattr(npu, name, globals()[name])
+    random = types.ModuleType("torch.npu.random")
+    for name in ("manual_seed", "manual_seed_all", "get_rng_state", "get_rng_state_all",
+                 "set_rng_state", "set_rng_state_all", "initial_seed"):
+        setattr(random, name, globals()[name])
+    npu.random = random
+    registry.publish("torch.npu.random", random, replace=True)
     for name in _REFUSED:
         setattr(npu, name, _unsupported)
     registry.publish("torch.npu", npu, replace=True)
@@ -186,9 +239,16 @@ def install(ctx):
         "Native ACL discovery and selection; the index accepts an int, a "
         "string, a torch.device or None, as torch's does.")
     register_api_bindings(
-        npu, "torch.npu", ("manual_seed", "manual_seed_all"), Fidelity.EXACT,
-        "Seeds the native ACL random streams, current device or all visible "
-        "devices respectively.")
+        npu, "torch.npu", ("manual_seed", "manual_seed_all", "get_rng_state",
+                            "get_rng_state_all", "set_rng_state", "set_rng_state_all",
+                            "initial_seed"), Fidelity.EXACT,
+        "Seeds and saves/restores the native ACL RNG streams, with byte-tensor "
+        "snapshots carrying the exact backend stream position.")
+    register_api_bindings(
+        random, "torch.npu.random", ("manual_seed", "manual_seed_all", "get_rng_state",
+                                     "get_rng_state_all", "set_rng_state", "set_rng_state_all",
+                                     "initial_seed"), Fidelity.EXACT,
+        "Native ACL RNG seed and full stream-state APIs.")
     register_api_bindings(
         npu, "torch.npu", ("synchronize", "empty_cache"), Fidelity.APPROXIMATE,
         "Submits Jittor's pending work and waits for every device it "

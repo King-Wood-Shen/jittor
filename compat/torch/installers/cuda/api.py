@@ -1328,8 +1328,24 @@ def _curand(required=True):
 
 
 def cuda_rng_state_is_supported():
-    """Whether this build can save and restore the CUDA RNG position."""
+    """Whether this build can save and restore its active accelerator RNG."""
+    if _acl_rng_active():
+        return True
     return _curand(required=False) is not None
+
+
+def _acl_rng_active():
+    return bool(
+        getattr(jt.compiler, "has_acl", 0)
+        and getattr(getattr(jt.compiler, "build_config", None), "backend", None) == "acl"
+        and jt.flags.use_cuda
+    )
+
+
+def _acl_rng_api(name):
+    """Resolve the NPU stream API used when generic CUDA probes target ACL."""
+    npu = get_install_context(jt).target_namespace.npu
+    return getattr(npu.random, name)
 
 
 def _rng_device_index(device):
@@ -1363,6 +1379,8 @@ def _rng_device_index(device):
 
 
 def _api_cuda_get_rng_state(device=None, *a, **k):
+    if _acl_rng_active():
+        return _acl_rng_api("get_rng_state")(_rng_device_index(device))
     # Everything queued has to have happened, or the offset describes a
     # position the device has not reached: the saved state would then be ahead
     # of the data the checkpoint was taken with.
@@ -1374,6 +1392,8 @@ def _api_cuda_get_rng_state(device=None, *a, **k):
 
 
 def _api_cuda_get_rng_state_all(*a, **k):
+    if _acl_rng_active():
+        return _acl_rng_api("get_rng_state_all")()
     count = device_count()
     if not count:
         return []
@@ -1384,6 +1404,8 @@ def _api_cuda_get_rng_state_all(*a, **k):
 
 
 def _api_cuda_set_rng_state(state, device=None, *a, **k):
+    if _acl_rng_active():
+        return _acl_rng_api("set_rng_state")(state, _rng_device_index(device))
     seed, offset = _rng_state_unpack(state)
     # Parsed before anything is touched, so a malformed state leaves the
     # generator where it was rather than half-restored.
@@ -1392,6 +1414,8 @@ def _api_cuda_set_rng_state(state, device=None, *a, **k):
 
 
 def _api_cuda_set_rng_state_all(states, *a, **k):
+    if _acl_rng_active():
+        return _acl_rng_api("set_rng_state_all")(states)
     parsed = [_rng_state_unpack(state) for state in states]
     if not parsed:
         return
@@ -1402,6 +1426,8 @@ def _api_cuda_set_rng_state_all(states, *a, **k):
 
 
 def _api_cuda_initial_seed(*a, **k):
+    if _acl_rng_active():
+        return _acl_rng_api("initial_seed")()
     return int(_curand().curand_generator_seed(_rng_device_index(None)))
 
 

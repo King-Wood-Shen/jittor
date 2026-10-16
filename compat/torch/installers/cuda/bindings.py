@@ -246,8 +246,8 @@ def _install_cuda(g, registry=None):
     cuda.memory.memory_summary = cuda.memory_summary
     cuda.memory.CUDAPluggableAllocator = CUDAPluggableAllocator
     cuda.CUDAPluggableAllocator = CUDAPluggableAllocator
-    # rng state (trainer checkpoints save/restore it). jittor has no portable
-    # CUDA rng-state handle, so use a small placeholder Var round-trip.
+    # CUDA builds use the native cuRAND position; on ACL these state entry
+    # points alias the exact native NPU stream used by Transformers checkpoints.
     cuda.get_rng_state = _api_cuda_get_rng_state
     cuda.get_rng_state_all = _api_cuda_get_rng_state_all
     cuda.set_rng_state = _api_cuda_set_rng_state

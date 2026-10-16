@@ -58,6 +58,8 @@ def _cuda_rng_seed_only(func):
     def inner(*args, **kwargs):
         if not jt.has_cuda:
             pytest.skip("no CUDA device")
+        if getattr(getattr(jt.compiler, "build_config", None), "backend", None) == "acl":
+            pytest.skip("CUDA seed APIs are inactive on ACL; use torch.npu.manual_seed")
         with jt.flag_scope(use_cuda=1):
             return func(*args, **kwargs)
     return inner
