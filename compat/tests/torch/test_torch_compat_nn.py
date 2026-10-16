@@ -46,6 +46,14 @@ def both_devices(fn):
             fn(name)
 
 
+def _acl_active():
+    return bool(
+        getattr(jt.compiler, "has_acl", 0)
+        and getattr(getattr(jt.compiler, "build_config", None), "backend", None) == "acl"
+        and jt.flags.use_cuda
+    )
+
+
 def t(a):
     return torch.tensor(a)
 
@@ -110,22 +118,52 @@ class TestActivations(Base):
                     msg=f"silu {dev}")
         both_devices(body)
 
-    def test_gelu_exact_erf(self):
-        # torch's default gelu is the exact (erf) form -- verify jittor matches that,
-        # NOT the tanh approximation.
+    def test_gelu_default_matches_active_backend(self):
+        # CPU/CUDA Torch uses exact erf; torch_npu's default ACL kernel is tanh.
         x = self.x
-        ref = 0.5 * x * (1.0 + _verf(x / np.sqrt(2.0)))
         def body(dev):
+            if _acl_active():
+                ref = 0.5 * x * (1.0 + np.tanh(np.sqrt(2.0 / np.pi) *
+                                                (x + 0.044715 * x ** 3)))
+            else:
+                ref = 0.5 * x * (1.0 + _verf(x / np.sqrt(2.0)))
             self.ac(F.gelu(t(x)).numpy(), ref, atol=1e-5, msg=f"gelu erf {dev}")
         both_devices(body)
 
+    def test_gelu_acl_default_forward_gradient_matches_torch_npu(self):
+        if not getattr(jt.compiler, "has_acl", 0):
+            self.skipTest("requires an ACL build")
+        x_values = np.array([-3.0, -1.0, -0.2, 0.0, 0.5, 2.0, 4.0], dtype="float32")
+        with jt.flag_scope(use_cuda=1, backend_fallback="error"):
+            self.assertTrue(_acl_active())
+            before = jt.core.backend_fallback_count()
+            x = t(x_values).start_grad()
+            y = F.gelu(x)
+            grad = jt.grad(y.sum(), x)
+            u = np.sqrt(2.0 / np.pi) * (x_values + 0.044715 * x_values ** 3)
+            tanh_u = np.tanh(u)
+            expected = 0.5 * x_values * (1.0 + tanh_u)
+            du = np.sqrt(2.0 / np.pi) * (1.0 + 3.0 * 0.044715 * x_values ** 2)
+            expected_grad = 0.5 * (1.0 + tanh_u) + 0.5 * x_values * (1.0 - tanh_u ** 2) * du
+            self.ac(y.numpy(), expected, atol=2e-6, rtol=2e-6, msg="ACL Torch GELU")
+            self.ac(grad.numpy(), expected_grad, atol=3e-6, rtol=3e-6,
+                    msg="ACL Torch GELU gradient")
+            self.assertEqual(jt.core.backend_fallback_count(), before)
+
     def test_gelu_exact_preserves_float_dtype(self):
         values = np.array([-3.0, -1.0, 0.0, 0.5, 2.0], dtype="float32")
-        ref = 0.5 * values * (1.0 + _verf(values / np.sqrt(2.0)))
 
         def body(dev):
-            for dtype, atol in (("float16", 2e-3), ("float32", 1e-6),
-                                ("float64", 1e-7), ("bfloat16", 2e-2)):
+            if _acl_active():
+                ref = 0.5 * values * (1.0 + np.tanh(
+                    np.sqrt(2.0 / np.pi) * (values + 0.044715 * values ** 3)))
+            else:
+                ref = 0.5 * values * (1.0 + _verf(values / np.sqrt(2.0)))
+            dtypes = (("float16", 2e-3), ("float32", 1e-6),
+                      ("bfloat16", 2e-2)) if _acl_active() else (
+                          ("float16", 2e-3), ("float32", 1e-6),
+                          ("float64", 1e-7), ("bfloat16", 2e-2))
+            for dtype, atol in dtypes:
                 x = jt.array(values, dtype="float32").cast(dtype)
                 out = F.gelu(x)
                 self.assertEqual(str(out.dtype), dtype, f"gelu dtype {dtype} {dev}")

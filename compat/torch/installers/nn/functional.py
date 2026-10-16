@@ -235,6 +235,28 @@ def _api_F_logsigmoid(input):
     return -jt.nn.softplus(-input)
 
 
+def _api_F_gelu(input, approximate="none"):
+    """Match torch_npu's default GELU kernel on ACL while keeping explicit modes."""
+    _context = get_install_context(jt)
+    native_gelu = _context.state["nn_functional_native"]["_jt_gelu"]
+    acl_active = bool(
+        getattr(jt.compiler, "has_acl", 0)
+        and getattr(getattr(jt.compiler, "build_config", None), "backend", None) == "acl"
+        and jt.flags.use_cuda
+    )
+    if (
+        approximate == "none"
+        and acl_active
+    ):
+        # torch_npu's default aten::gelu uses its tanh implementation on ACL.
+        # Keep jt.nn.gelu's exact-erf default intact; this is Torch backend parity.
+        approximate = "tanh"
+    result = native_gelu(input, approximate=approximate)
+    if acl_active and str(result.dtype) != str(input.dtype):
+        result = result.cast(input.dtype)
+    return result
+
+
 def _api_F_softmin(input, dim=-1, _stacklevel=3, dtype=None):
     nn = get_install_context(jt).target_namespace.nn
     return nn.softmax(-input, dim=dim)
@@ -263,8 +285,9 @@ def _install_functional(ctx):
                 setattr(F, fname, fobj)
     else:
         F = nn.functional
+    _jt_gelu = getattr(nn, "gelu", None)
     if hasattr(nn, "relu"): F.relu = nn.relu
-    if hasattr(nn, "gelu"): F.gelu = nn.gelu
+    if _jt_gelu is not None: F.gelu = _api_F_gelu
     if hasattr(nn, "softmax"):
         # torch: F.softmax(input, dim=None, _stacklevel=3, dtype=None).
         # When dtype is given, input is cast to it before softmax (used by
@@ -375,6 +398,7 @@ def _install_functional(ctx):
 
     ctx.state["nn_functional_native"] = MappingProxyType({
         "loss_functions": MappingProxyType(_loss_functions),
+        "_jt_gelu": _jt_gelu,
         "_jt_softmax": locals().get("_jt_softmax"),
         "_jt_log_softmax": locals().get("_jt_log_softmax"),
         "_jt_interpolate": locals().get("_jt_interpolate"),
