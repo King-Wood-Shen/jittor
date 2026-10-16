@@ -8,6 +8,7 @@ import copy as _copy
 import copy as _copy2
 import types as _types_nn_private
 from ...context import get_install_context
+from ...amp import autocast_dtype as _autocast_dtype
 from ...types import _dtype_to_str
 from ...tensor_state import latest_optimizer
 from ...grad import _clip_grad_norm_device
@@ -740,6 +741,15 @@ def _adaptive_max_pool2d(input, output_size, return_indices=False):
 def _linear(input, weight, bias=None):
     _context = get_install_context(jt)
     _jt_linear = _context.state["nn_extra_native"]['_jt_linear']
+    compute_dtype = _autocast_dtype()
+    if compute_dtype is not None:
+        # Autocast changes the operands used by linear, not the model leaves.
+        # Keep FP32 parameters/checkpoints intact while casts in the graph route
+        # their gradients back to the original FP32 tensors.
+        input = input.cast(compute_dtype)
+        weight = weight.cast(compute_dtype)
+        if bias is not None:
+            bias = bias.cast(compute_dtype)
     if hasattr(weight, "ndim") and weight.ndim == 1:
         out = (input * weight).sum(-1)
         return out if bias is None else out + bias
