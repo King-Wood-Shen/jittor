@@ -61,6 +61,7 @@
 2026-09-25-profiling-tools
 2026-10-05-high-rank-and-downstream-core-gaps
 2026-10-09-downstream-p1-allocator-protocol-transpose
+2026-10-13-cuda-dpo-slice-bounds
 2026-10-14-benchmark-coverage
 2026-10-14-downstream-coverage-audit
 2026-10-14-optimizer-checkpoint-continuation
@@ -145,6 +146,7 @@
 | [性能/显存分析工具：审计与重写](2026-09-25-profiling-tools.md) | 已实现，RTX 4090 上验证；未合入 | 2026-09-25 |
 | [张量维度上限 10 → 32 与下游评测的核心缺口](2026-10-05-high-rank-and-downstream-core-gaps.md) | 已修复，CPU 与 RTX 4090 验证 | 2026-10-05 |
 | [下游 P1：分配器并存上限、数值协议与 transpose 的运行时置换](2026-10-09-downstream-p1-allocator-protocol-transpose.md) | 已修复，CPU 验证，transpose/协议另在 RTX 4090 验证 | 2026-10-09 |
+| [CUDA DPO 反向传播中的越界切片归一化](2026-10-13-cuda-dpo-slice-bounds.md) | 旧基线的 CUDA DPO 单步证据；新基线定向复验见报告 | 2026-10-13 |
 | [Benchmark 覆盖与比较协议补齐](2026-10-14-benchmark-coverage.md) | 卷积 CPU/CUDA、Accelerate CPU、模型 CPU harness 已验；其余设备与场景缺口保留 | 2026-10-14 |
 | [下游注册表、门禁与覆盖审计](2026-10-14-downstream-coverage-audit.md) | 已审计 13 个 runbook 与五个上游注册表；未授予新的设备验证级别 | 2026-10-14 |
 | [优化器 FQN checkpoint 与确定性续训](2026-10-14-optimizer-checkpoint-continuation.md) | 单进程确定性数值续训已验；RNG/双卡验收见后续报告，ACL 待验 | 2026-10-14 |
