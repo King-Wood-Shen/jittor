@@ -5,6 +5,9 @@ description: 在 Jittor torch shim 与独立原生 Torch 两侧验证 ms-swift�
 
 # ms-swift × Jittor torch shim
 
+Ascend 等长作业若空间预检不足，先按 [`lab-capacity-recovery`](../lab-capacity-recovery/SKILL.md)
+核验可删白名单、记录删除和释放量并复检，再继续验收。
+
 ## 当前验收入口（2026-10-15）
 
 [注册 FULL SFT 与完整安装来源报告](../../../docs/results/2026-10-15-swift-trainer-installed-source.md)

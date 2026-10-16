@@ -29,6 +29,7 @@ GitHub issue 与 PR 中。原始日志、缓存和大体积产物放在 `$JITTOR
 
 - [jittor-dev-context](../skills/jittor-dev-context/SKILL.md)：开工时的上下文路由入口。
 - [github-collaboration-commit](../skills/github-collaboration-commit/SKILL.md)：同步、提交、快进推送与 PR 流程。
+- [lab-capacity-recovery](../skills/lab-capacity-recovery/SKILL.md)：空间不足时核验白名单、保留证据并复检容量。
 - [git-worktree-shared-state](../skills/git-worktree-shared-state/SKILL.md)：多个 worktree 之间共用与不共用的 git 状态。
 - [jittor-worktree-verification](../skills/jittor-worktree-verification/SKILL.md)：确认跑的是本 worktree 的代码。
 - [verifying-a-gate-actually-ran](../skills/verifying-a-gate-actually-ran/SKILL.md)：相信一次红或绿之前先证明门禁真的跑了。
