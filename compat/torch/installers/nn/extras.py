@@ -5,6 +5,7 @@ from ..nn_init import _install_init_aliases
 from ...grad import _clip_grad_norm_device
 from ...nn_modules import install_module_namespace
 from ...types import _dtype_to_str
+from ...amp import autocast_dtype as _autocast_dtype
 from ...tensor_state import latest_optimizer
 from ....diagnostics import EXPECTED, swallowed
 from .... import fsdp_hooks as _fsdp_hooks
@@ -421,6 +422,18 @@ def _install_nn_extras(nn, registry=None):
         _jt_linear = F.linear
         F.linear = _linear
         F._torch_linear_wrapped = True
+    Linear = getattr(nn, "Linear", None)
+    if (Linear is not None and hasattr(Linear, "execute")
+            and not getattr(Linear, "_torch_linear_autocast_wrapped", False)):
+        _native_linear_execute = Linear.execute
+
+        def _linear_execute(self, input):
+            if _autocast_dtype() is None:
+                return _native_linear_execute(self, input)
+            return _linear(input, self.weight, self.bias)
+
+        Linear.execute = _linear_execute
+        Linear._torch_linear_autocast_wrapped = True
     if not hasattr(F, "relu_"):
         F.relu_ = _api_F_relu_   # in-place relu (graph-equivalent)
     if not hasattr(F, "upsample_bilinear"):
