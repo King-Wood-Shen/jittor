@@ -256,3 +256,15 @@ transformers,peft,swift；仓库名里的 `-` 由工具归一化）；`_ecosyste
 ms-swift/peft 版本组合问题，与 jittor 无关；换成报告用的 **ms-swift 4.5.2 + peft 0.17.1 +
 transformers 4.56.2** 即跑通。原始报告见
 `$JITTOR_LAB_ROOT/_state/verify-ml/{ms-swift.unpinned-peft0.20.log,ms-swift.pinned.log}`。
+
+## 完整 CLI 恢复与新实验存储
+
+本 Skill 的 Swift LoRA tuner 组件对拍不等于 stock Trainer 的 L3。CUDA 公开 CLI 的恢复验收与
+checkpoint 峰值按各自已核验结果的固定 profile 解释；
+不得把旧运行的步骤、模型或设备范围合并扩大。
+
+新运行的持久化和 worker 临时目录必须遵循
+[`ms-swift-artifact-storage`](../../../docs/notes/ms-swift-artifact-storage.md)：从 Slurm worker
+调用 `tools/ms_swift_storage_worker.sh`，预声明保留 checkpoint 完整文件契约与最大并发容量，
+用 SHA-256 校验后发布；发布后的相同文件由策略复用内容，不要再手动复制 checkpoint 或驱动日志。
+策略版本为 `msw-storage-v2`。历史运行保持原运行键和证据，不迁移、不覆盖。
