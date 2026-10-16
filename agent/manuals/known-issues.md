@@ -2006,26 +2006,6 @@ workaround.
   including absence of unintended accumulator activation. Preserve the existing
   old/new graph snapshots and storage/gradient contracts when adding this support.
 
-## KI-COMPAT-006: `load_state_dict` shares the source's Vars, and an in-place optimizer then moves both models
-
-- Severity: High on CUDA (silent: a second model -- an EMA copy, a reference
-  model -- trains along with the first)
-- Status: Open; found 2026-09-25
-- Owner: torch compatibility / optimizers
-- Symptom: after `b.load_state_dict(a.state_dict())` on CUDA, one
-  `torch.optim.AdamW(a.parameters()).step()` changes `b`'s weights too; on CPU it
-  does not. PyTorch copies in `load_state_dict`.
-- Cause: loading binds `b`'s parameters to the Vars `a` holds, which is harmless
-  while every update produces a new Var. The fused CUDA AdamW
-  (`src/ops/composite/fused_adamw_op.cc`) writes into the parameters' own storage
-  (`share_with`), so every holder sees the write.
-- Workaround: copy through the host, e.g.
-  `p.copy_(torch.tensor(src.cpu().numpy(), device=src.device))`.
-- Evidence: two `nn.Linear(2, 2, device="cuda")`, `b.load_state_dict(a.state_dict())`,
-  a backward and an AdamW step on `a`: `(a.weight == b.weight).all()` is True.
-- Exit condition: `load_state_dict` copies (or the fused optimizer stops writing
-  shared storage), with a CUDA regression test for the repro.
-
 ## KI-COMPAT-007: `w.copy_(x)` under `no_grad` loses `w`'s gradient when `x` requires grad
 
 - Severity: Medium (silent: `w.grad` stays None after a backward)
@@ -2038,21 +2018,6 @@ workaround.
 - Workaround: `w = x.detach().clone().requires_grad_(True)`.
 - Evidence: the repro above.
 - Exit condition: `w.grad` is populated in both cases, with a regression test.
-
-## KI-COMPAT-008: `torch.optim.SGD` rejects `foreach=` and `fused=`
-
-- Severity: Low (an immediate `TypeError`, not a silent divergence)
-- Status: Open; found 2026-09-25
-- Owner: torch compatibility / optimizers
-- Symptom: `torch.optim.SGD(params, lr=..., foreach=False)` raises
-  `TypeError: initialize_sgd() got an unexpected keyword argument 'foreach'`, and
-  the same for `fused=`. Both are ordinary PyTorch arguments.
-- Cause: `initialize_sgd` in `compat/torch/optim_frontend.py` does not accept
-  them; the native SGD has a `fused` switch they could map onto.
-- Workaround: drop the two arguments.
-- Evidence: the call above.
-- Exit condition: both keywords are accepted (mapped or explicitly ignored with a
-  documented reason).
 
 ## KI-COMPAT-009: a float32 tensor divided by a Python float is computed in float64
 
@@ -2163,6 +2128,32 @@ workaround.
   (the two core-op spellings by name do not raise for complex128).
 - Exit condition: complex128 is a supported frontend dtype end to end (or the
   core refuses it again by design), and the case XPASSes and loses its marker.
+
+## KI-COMPAT-015: portable Torch SGD updates leave detached parameter aliases stale
+
+- Severity: High (silent stale values in retained parameter-storage aliases).
+- Status: Open; CPU reproduced 2026-10-16 on the SGD execution-option working tree.
+- Owner: native optimizers / Torch compatibility storage semantics.
+- Symptom: after `p = torch.tensor([1., 2.], requires_grad=True)` and
+  `alias = p.detach()`, backward through `(p * torch.tensor([.25, .5])).sum()`
+  followed by `torch.optim.SGD([p], lr=.125).step()` changes `p` to
+  `[.96875, 1.9375]` but leaves `alias` at `[1., 2.]`. The parameter's physical
+  allocation changes. Genuine Torch preserves the allocation and updates both.
+- Cause: the portable native update uses `_update_preserve_dtype`, which calls
+  `target.update(value)` and rebinds the holder instead of copying into its
+  existing allocation. This is separate from checkpoint loading and option parsing.
+- Workaround: avoid retaining parameter-storage aliases across portable SGD
+  updates; recreate detached aliases after each step.
+- Evidence: four CPU option combinations reproduce the stale alias; all four
+  corresponding independent Torch probes preserve it. Raw candidate/genuine
+  `*-alias-v2.json` and scripts are unversioned under
+  `$JITTOR_LAB_ROOT/_state/sgd-execution-options/20261016/`; see
+  [SGD execution options](../../docs/results/2026-10-16-sgd-execution-options.md).
+  CUDA portable updates and other optimizer algorithms are not yet verified.
+- Exit condition: a frontend-owned native storage write preserves actual
+  allocations and aliases across CPU/CUDA SGD updates, including plain,
+  momentum and Nesterov paths, with genuine Torch controls. Preserve legacy
+  native optimizer defaults and published gradients.
 
 ## KI-DIST-001: FSDP2 flat sharding peaks above the unsharded model
 
