@@ -44,6 +44,7 @@ changes: [2.0 migration notes](../../docs/releases/2.0.md).
 | Test system and gate tiers | [test system](../../docs/development/test-system.md) |
 | Mechanism notes (numerics, placement, profiling) | [notes index](../../docs/notes/index.md) |
 | Torch compatibility | [compatibility index](../../docs/compatibility/index.md) |
+| ms-swift CLI validation and artifact lifecycle | [`ms-swift-torch-compat`](../skills/ms-swift-torch-compat/SKILL.md), [artifact storage contract](../../docs/notes/ms-swift-artifact-storage.md) |
 | Backend guides (Ascend, Corex, jtrun; legacy MPI) | [guides index](../../docs/guides/index.md) |
 | Performance method | [benchmarking](../../docs/performance/benchmarking.md) |
 | Reproducible verification results | [results index](../../docs/results/index.md) |

@@ -348,11 +348,11 @@ include docs/notes/device-placement.md
 include docs/notes/float32-precision-policy.md
 include docs/notes/index.md
 include docs/notes/mixed-precision.md
+include docs/notes/ms-swift-artifact-storage.md
 include docs/notes/native-fsdp.md
 include docs/notes/native-sharded-checkpoint.md
 include docs/notes/native-tensor-parallel.md
 include docs/notes/native-zero-optimizer.md
-include docs/notes/ms-swift-artifact-storage.md
 include docs/notes/numerics-contract.md
 include docs/notes/pipelined-execution.md
 include docs/notes/profiling.md
@@ -422,6 +422,7 @@ include docs/results/2026-10-15-maintained-ecosystem-nightly.md
 include docs/results/2026-10-15-metric-state-and-tensordict-oracles.md
 include docs/results/2026-10-15-metrics-tensordict-scorecards.md
 include docs/results/2026-10-15-mpi-bfloat16-process-groups.md
+include docs/results/2026-10-15-ms-swift-artifact-lifecycle.md
 include docs/results/2026-10-15-native-fsdp.md
 include docs/results/2026-10-15-native-multihost-runner.md
 include docs/results/2026-10-15-native-multinode-control-plane.md
