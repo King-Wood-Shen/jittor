@@ -1232,7 +1232,7 @@ def install(ctx):
     _bind_missing(g, "eye", eye)
     register_fidelity(
         "torch.eye", eye, Fidelity.APPROXIMATE,
-        "Values, dtype, device and requires_grad are supported; layout, out "
+        "Values, dtype, device, out and requires_grad are supported; layout "
         "and pin_memory arguments are not implemented.")
     # torch.narrow(input, dim, start, length) / torch.tile(input, dims) --
     # function forms mirroring the Var methods (added in _install_tensor_methods).
