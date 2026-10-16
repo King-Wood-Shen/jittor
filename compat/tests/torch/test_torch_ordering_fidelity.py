@@ -87,6 +87,11 @@ class TestTorchOrdering(cu.JittorTestCase):
         np.testing.assert_array_equal(
             actual.numpy(), np.argsort(DISTINCT, axis=1))
 
+    def test_argsort_descending_uses_the_registered_acl_signature(self, device):
+        actual = torch.argsort(torch.tensor(DISTINCT), dim=1, descending=True)
+        expected = np.argsort(DISTINCT, axis=1)[:, ::-1]
+        np.testing.assert_array_equal(actual.numpy(), expected)
+
     def test_topk_returns_the_largest_and_the_smallest(self, device):
         largest = torch.topk(torch.tensor(DISTINCT), 2, dim=1)
         smallest = torch.topk(torch.tensor(DISTINCT), 2, dim=1, largest=False)
