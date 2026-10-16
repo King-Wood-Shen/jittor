@@ -352,6 +352,7 @@ include docs/notes/native-fsdp.md
 include docs/notes/native-sharded-checkpoint.md
 include docs/notes/native-tensor-parallel.md
 include docs/notes/native-zero-optimizer.md
+include docs/notes/ms-swift-artifact-storage.md
 include docs/notes/numerics-contract.md
 include docs/notes/pipelined-execution.md
 include docs/notes/profiling.md
@@ -951,6 +952,9 @@ include tools/gate_conclusion_diff.py
 include tools/gate_conclusion_plugin.py
 include tools/lint/check_import_layering.py
 include tools/measure_core_test_balance.py
+include tools/ms_swift_artifact_storage.py
+include tools/ms_swift_storage_smoke.py
+include tools/ms_swift_storage_worker.sh
 include tools/probes/adversarial_device_sweep.py
 include tools/probes/equivalent_form_sweep.py
 include tools/probes/error_message_probe.py
