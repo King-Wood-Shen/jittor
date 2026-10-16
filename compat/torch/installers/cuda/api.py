@@ -1171,6 +1171,10 @@ def _api_cuda_manual_seed(s):
     # Torch converts the argument before scheduling its lazy CUDA callback.
     # With no visible device, that callback never touches a CUDA generator.
     seed = int(s)
+    if getattr(getattr(jt.compiler, "build_config", None), "backend", None) == "acl":
+        # Transformers calls this even on NPU. PyTorch's CUDA namespace has no
+        # CUDA generator in that process; torch.npu.manual_seed_all owns ACL.
+        return None
     if not device_count():
         return
     from ..core import _normalize_seed
@@ -1181,6 +1185,10 @@ def _api_cuda_manual_seed(s):
 
 def _api_cuda_manual_seed_all(s):
     seed = int(s)
+    if getattr(getattr(jt.compiler, "build_config", None), "backend", None) == "acl":
+        # `transformers.set_seed` calls CUDA first, then the available NPU
+        # namespace. Never send an ACL device ordinal to the cuRAND wrapper.
+        return None
     count = device_count()
     if not count:
         return
