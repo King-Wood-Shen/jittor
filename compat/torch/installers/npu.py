@@ -128,7 +128,10 @@ def _rng_state_tensor(payload):
 def _rng_state_payload(state):
     if not isinstance(state, jt.Var):
         raise TypeError("NPU RNG state must be a CPU ByteTensor")
-    if str(state.dtype) != "uint8" or len(state.shape) != 1:
+    from jittor._core.dtypes import dtype_name
+    if dtype_name(state.dtype) != "uint8":
+        raise TypeError("NPU RNG state must be a ByteTensor")
+    if len(state.shape) != 1:
         raise TypeError("NPU RNG state must be a one-dimensional ByteTensor")
     if state.device.type != "cpu":
         raise TypeError("NPU RNG state must be a CPU ByteTensor")
