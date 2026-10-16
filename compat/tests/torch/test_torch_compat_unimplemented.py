@@ -192,8 +192,8 @@ class TestAutocast(StubPolicyBase):
             self.assertEqual(str(x.dtype), "float32")
             self.assertEqual(str(weight.dtype), "float32")
             self.assertEqual(str(bias.dtype), "float32")
-            out.float().sum().backward()
-            for value in (x.grad, weight.grad, bias.grad):
+            grads = torch.autograd.grad(out.float().sum(), (x, weight, bias))
+            for value in grads:
                 self.assertIsNotNone(value)
                 self.assertEqual(str(value.dtype), "float32")
 
