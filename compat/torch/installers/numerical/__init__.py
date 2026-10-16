@@ -1133,6 +1133,11 @@ def _vinv(self):
 
 
 def install(ctx):
+    from .shape import triu_indices
+    ctx.jittor_module.triu_indices = triu_indices
+    register_api_bindings(ctx.jittor_module, "torch", ("triu_indices",),
+                          Fidelity.APPROXIMATE,
+                          "Dense integer triangular coordinates; sparse layouts are unsupported")
     _modules = ctx.registry.module_map
     g = ctx.jittor_module
     Var = ctx.state["Var"]
