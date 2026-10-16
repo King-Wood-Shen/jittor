@@ -179,3 +179,11 @@ def triu_indices(row, col, offset=0, *, dtype=None, device=None, layout=None):
     rows = g.arange(row, dtype=g.int64, device=device).reshape((-1, 1))
     cols = g.arange(col, dtype=g.int64, device=device).reshape((1, -1))
     return g.nonzero(cols - rows >= offset, as_tuple=False).transpose(0, 1).to(dtype=dtype)
+
+
+def fliplr(input):
+    """Reverse the columns of a dense tensor with at least two dimensions."""
+    from . import jt
+    if input.ndim < 2:
+        raise RuntimeError("Input must be >= 2-d.")
+    return jt.flip(input, 1)
