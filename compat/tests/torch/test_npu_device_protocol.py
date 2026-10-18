@@ -227,3 +227,43 @@ def test_npu_fp16_autocast_matmul_same_dtype_inputs():
     output.float().sum().backward()
     torch.npu.synchronize()
     assert inputs.grad.dtype == weight.grad.dtype == torch.float32
+
+
+@pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
+                    reason="requires a selected ACL device")
+def test_npu_class_forward_precedes_generic_rms_norm_fastpath():
+    assert _on_acl(), "JITTOR_TEST_DEVICES=npu but ACL is not active"
+    previous_policy = jt.flags.backend_fallback
+    jt.flags.backend_fallback = "error"
+    fallback_start = jt.core.backend_fallback_count()
+
+    class ContractRMSNorm(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = torch.nn.Parameter(
+                torch.full((8,), 0.5, dtype=torch.bfloat16, device="npu"))
+            self.variance_epsilon = 1e-6
+
+        def forward(self, hidden):
+            return hidden + self.weight
+
+    hidden = torch.arange(16, dtype=torch.float32).reshape(2, 8).to(
+        device="npu", dtype=torch.bfloat16)
+    expected = hidden + torch.full((8,), 0.5, dtype=torch.bfloat16, device="npu")
+    module = ContractRMSNorm()
+    try:
+        with torch.no_grad():
+            # First call is eligible for the C++ module-call shortcut.
+            actual = module(hidden)
+            torch.npu.synchronize()
+            assert torch.equal(actual, expected)
+
+            # A hook disables that shortcut and exercises the Python dispatch.
+            module.register_forward_hook(lambda _module, _args, output: output)
+            hooked = module(hidden)
+            torch.npu.synchronize()
+            assert torch.equal(hooked, expected)
+        assert jt.flags.backend_fallback == "error"
+        assert jt.core.backend_fallback_count() == fallback_start == 0
+    finally:
+        jt.flags.backend_fallback = previous_policy
