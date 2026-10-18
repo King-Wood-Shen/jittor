@@ -838,6 +838,19 @@ PyObject* dispatch_native(PyObject* module, const TypeInfo& info, PyObject* args
             return PyObject_Call(own, args, kwargs);
         }
     }
+    // The resolved class-level forward is the public computation contract.
+    // Try its generic RMSNorm shortcuts only after that contract declines;
+    // optimized backends can differ in dtype rounding from Transformers' BF16
+    // forward even when given identical operands.
+    PyTypeObject* type = Py_TYPE(module);
+    if (info.prefer_forward) {
+        PyObject* forward = _PyType_Lookup(type, name_forward());
+        if (forward) {
+            Py_INCREF(forward);
+            PyObjHolder hold(forward);
+            return call_with(forward, module, args, kwargs);
+        }
+    }
     if (info.rms_named) {
         if (!kwargs && PyTuple_GET_SIZE(args) == 1) {
             PyObject* fast = rms_norm_inference(module, dict, PyTuple_GET_ITEM(args, 0));
@@ -847,15 +860,6 @@ PyObject* dispatch_native(PyObject* module, const TypeInfo& info, PyObject* args
                                                        kwargs ? kwargs : empty_kwargs, nullptr);
         if (!fused || fused != Py_None) return fused;
         Py_DECREF(fused);
-    }
-    PyTypeObject* type = Py_TYPE(module);
-    if (info.prefer_forward) {
-        PyObject* forward = _PyType_Lookup(type, name_forward());
-        if (forward) {
-            Py_INCREF(forward);
-            PyObjHolder hold(forward);
-            return call_with(forward, module, args, kwargs);
-        }
     }
     if (!kwargs && PyTuple_GET_SIZE(args) == 1 && linear_execute
             && _PyType_Lookup(type, name_execute()) == linear_execute
