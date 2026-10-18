@@ -311,3 +311,37 @@ def test_npu_class_forward_precedes_generic_rms_norm_fastpath():
         assert jt.core.backend_fallback_count() == fallback_start == 0
     finally:
         jt.flags.backend_fallback = previous_policy
+
+
+@pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
+                    reason="requires a selected ACL device")
+def test_bf16_single_token_sdpa_acl_hook_uses_flash_score_for_matching_heads():
+    assert _on_acl(), "JITTOR_TEST_DEVICES=npu but ACL is not active"
+    from unittest import mock
+    from backends.acl.kernels.ops import flashattention_op as acl_sdpa
+
+    rng = np.random.RandomState(5102)
+    q = torch.tensor(rng.normal(0, 0.2, (1, 16, 1, 128)).astype(np.float32),
+                     device="npu", dtype=torch.bfloat16)
+    k = torch.tensor(rng.normal(0, 0.2, (1, 16, 29, 128)).astype(np.float32),
+                     device="npu", dtype=torch.bfloat16)
+    v = torch.tensor(rng.normal(0, 0.2, (1, 16, 29, 128)).astype(np.float32),
+                     device="npu", dtype=torch.bfloat16)
+    original_flash = acl_sdpa.FlashAttentionACL
+    original_incremental = acl_sdpa.IncreFlashAttentionACL
+    with mock.patch.object(acl_sdpa, "FlashAttentionACL", wraps=original_flash) as flash, \
+            mock.patch.object(acl_sdpa, "IncreFlashAttentionACL",
+                              wraps=original_incremental) as incremental, \
+            jt.no_grad():
+        output = acl_sdpa.scaled_dot_product_attention_acl(
+            q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False,
+            scale=0.08838834764831845)
+        output.sync()
+
+    assert flash.call_count == 1
+    assert incremental.call_count == 0
+    assert acl_sdpa.scaled_dot_product_attention_acl.backend_name == "acl_flash_attention_score_v2"
+    assert tuple(output.shape) == tuple(q.shape)
+    assert str(output.dtype).split(".")[-1] == "bfloat16"
+    assert np.isfinite(output.float().cpu().numpy()).all()
+    assert jt.core.backend_fallback_count() == 0

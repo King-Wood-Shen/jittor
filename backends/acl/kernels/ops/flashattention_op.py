@@ -378,9 +378,15 @@ def scaled_dot_product_attention_acl(
     if (
         _jittor_dtype_name(query.dtype) == "bfloat16"
         and query_length == 1
+        and query_heads != key_heads
         and attn_mask is None
         and not is_causal
     ):
+        # The native PyTorch-NPU SDPA path uses FusionAttention for matching
+        # query/key head counts. IncrementalFlashAttention produces a distinct
+        # BF16 rounding result for this decode shape, so keep exact-head
+        # requests on FlashAttentionScoreV2 below. Preserve the incremental
+        # path for GQA until its native dispatch is validated independently.
         scaled_dot_product_attention_acl.backend_name = "acl_incre_flash_attention_v4"
         return IncreFlashAttentionACL(query_heads, key_heads, scale_factor)(query, key, value)
 
