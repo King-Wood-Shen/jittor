@@ -29,10 +29,11 @@ def test_core_stamp_scans_relocated_core(tmp_path):
     def missing_backend(*args):
         raise FileNotFoundError
     namespace = dict(os=os, jittor_path=str(tmp_path / "python/jittor"),
-                     core_root=lambda tree: str(core), backend_root=missing_backend)
+                     core_root=lambda tree: str(core), backend_root=missing_backend,
+                     _core_source_signature_cache=[None])
     exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), "exec"), namespace)
     signature = namespace["core_source_signature"]
-    before = signature()
+    before = signature(str(tmp_path))
     assert "src/core/common.h" in before
     header.write_text("second version")
-    assert signature() != before
+    assert signature(str(tmp_path)) != before
