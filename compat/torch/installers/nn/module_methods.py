@@ -240,11 +240,14 @@ def _dispatch_module_call(self, *args, **kwargs):
     inst_fwd = self.__dict__.get("forward", None)
     if inst_fwd is not None and callable(inst_fwd):
         return inst_fwd(*args, **kwargs)
+    # A class-specific forward is the module's public computation contract.
+    # Generic fused RMSNorm dispatch is an optimization for modules without
+    # such a contract; it must not replace a Transformers/custom forward.
+    if _prefer_forward(type(self)):
+        return type(self).forward(self, *args, **kwargs)
     rms_norm = _standard_rms_norm(self, args, kwargs)
     if rms_norm is not None:
         return rms_norm
-    if _prefer_forward(type(self)):
-        return type(self).forward(self, *args, **kwargs)
     return _ORIG_MODULE_DISPATCH_CALL(self, *args, **kwargs)
 
 

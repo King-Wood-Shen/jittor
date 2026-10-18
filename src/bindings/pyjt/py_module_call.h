@@ -28,7 +28,7 @@ namespace jittor {
 // `module_call`, for a call whose placement this does not resolve).
 //
 // `dispatch_parts` lets the shortcut run `_dispatch_module_call` itself:
-// "prefer_forward" (`_prefer_forward`), "standard_rms_norm", and, for the
+// "prefer_forward" (`_prefer_forward`) before "standard_rms_norm", and, for the
 // bias-free `nn.Linear` it computes directly, "linear_execute" (the native
 // `Linear.execute`) and "matmul_kernel" (the cuBLAS relay the dispatcher must
 // pick for it). Without the first two the shortcut calls
