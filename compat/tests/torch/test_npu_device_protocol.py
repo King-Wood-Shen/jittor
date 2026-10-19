@@ -122,6 +122,28 @@ def test_npu_random_namespace_round_trips_native_acl_state():
 
 @pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
                     reason="requires a selected ACL device")
+def test_npu_fusion_attention_tnd_preserves_packed_sample_boundaries():
+    assert _on_acl(), "JITTOR_TEST_DEVICES=npu but ACL is not active"
+    torch.manual_seed(73)
+    q = torch.randn((5, 2, 8), dtype=torch.float32, device="npu")
+    k = torch.randn((5, 2, 8), dtype=torch.float32, device="npu")
+    v = torch.randn((5, 2, 8), dtype=torch.float32, device="npu")
+    with forbid_backend_fallbacks():
+        output = torch.npu.npu_fusion_attention(
+            q, k, v, 2, "TND", scale=8 ** -0.5,
+            actual_seq_qlen=(2, 5), actual_seq_kvlen=(2, 5), sparse_mode=3)[0]
+        changed = torch.npu.npu_fusion_attention(
+            q, k, torch.cat((v[:2], v[2:] + 17), dim=0), 2, "TND",
+            scale=8 ** -0.5, actual_seq_qlen=(2, 5),
+            actual_seq_kvlen=(2, 5), sparse_mode=3)[0]
+    assert output.shape == q.shape
+    assert bool(torch.isfinite(output).all().item())
+    torch.testing.assert_close(output[:2], changed[:2], rtol=0, atol=0)
+    assert not torch.allclose(output[2:], changed[2:])
+
+
+@pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
+                    reason="requires a selected ACL device")
 def test_torch_npu_primitives_match_their_definitions():
     import torch_npu
 
