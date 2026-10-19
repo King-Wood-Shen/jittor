@@ -329,6 +329,13 @@ class TestComparisonWhere(Base):
 
 
 class TestCumulative(Base):
+    def test_inplace_add_on_deferred_arange(self):
+        def body(dev):
+            x = torch.arange(29, dtype=torch.int64)
+            x.add_(0)
+            self.ae(x.numpy(), np.arange(29, dtype=np.int64), msg=f"deferred arange add_ {dev}")
+        both_devices(body)
+
     def test_cumsum(self):
         x = np.random.RandomState(10).randn(3, 4).astype("float32")
         def body(dev):
