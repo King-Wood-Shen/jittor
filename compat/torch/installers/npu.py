@@ -212,8 +212,8 @@ def npu_swiglu(input, dim=-1):
     return (gate * jt.sigmoid(gate)) * value
 
 
-def npu_fusion_attention(query, key, value, head_num, input_layout,
-                         pse=None, atten_mask=None, scale=1.0,
+def npu_fusion_attention(query, key, value, head_num, input_layout="BSND",
+                         pse=None, padding_mask=None, atten_mask=None, scale=1.0,
                          keep_prob=1.0, pre_tockens=2147483647,
                          next_tockens=2147483647, inner_precise=0,
                          seed=0, offset=0, *, actual_seq_qlen=None,
@@ -233,11 +233,20 @@ def npu_fusion_attention(query, key, value, head_num, input_layout,
             ", ".join(sorted(kwargs))))
     if pse is not None:
         raise NotImplementedError("npu_fusion_attention pse is not supported")
+    if padding_mask is not None:
+        raise NotImplementedError("npu_fusion_attention padding_mask is not supported")
     if atten_mask is not None and int(sparse_mode) not in (2, 3):
         raise NotImplementedError(
             "npu_fusion_attention only supports the NPU causal mask modes")
     if not 0.0 <= float(keep_prob) <= 1.0:
         raise ValueError("keep_prob must be between zero and one")
+    if float(keep_prob) != 1.0 or int(seed) != 0 or int(offset) != 0:
+        raise NotImplementedError(
+            "npu_fusion_attention seeded dropout is not supported")
+    if int(pre_tockens) != 2147483647 or int(next_tockens) != 2147483647 \
+            or int(inner_precise) != 0:
+        raise NotImplementedError(
+            "npu_fusion_attention local windows and inner_precise are not supported")
     if input_layout not in ("BSND", "TND"):
         raise NotImplementedError("npu_fusion_attention layout {} is not supported".format(
             input_layout))
@@ -258,7 +267,9 @@ def npu_fusion_attention(query, key, value, head_num, input_layout,
                    "is_causal": causal and q_len == kv_len,
                    "scale": float(scale)}
         if causal and q_len != kv_len:
-            q_pos = torch.arange(q_len, device=q.device) + (kv_len - q_len)
+            q_pos = torch.arange(q_len, device=q.device)
+            if int(sparse_mode) == 3:
+                q_pos = q_pos + (kv_len - q_len)
             k_pos = torch.arange(kv_len, device=q.device)
             options["attn_mask"] = k_pos.unsqueeze(0) <= q_pos.unsqueeze(1)
             options["is_causal"] = False
