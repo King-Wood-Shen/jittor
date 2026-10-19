@@ -317,6 +317,12 @@ def _native_all_gather_flat(tensor, group=None):
     return _collectives._all_gather_shards(flat)
 
 
+# Bound temporary Jittor buffers while object collectives carry large FULL
+# model state dictionaries. Payload lengths use int64, so the serialized size
+# itself is not limited by the int32 element buffers used for byte transport.
+_OBJECT_COLLECTIVE_CHUNK_BYTES = 64 * 1024 * 1024
+
+
 def _native_all_gather_object(object_list, obj, group=None):
     size = _require_supported_group(group)
     if len(object_list) < size:
@@ -327,20 +333,32 @@ def _native_all_gather_object(object_list, obj, group=None):
         return None
 
     payload = pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
-    local_length = jt.array(np.asarray([len(payload)], dtype=np.int32))
+    local_length = jt.array(np.asarray([len(payload)], dtype=np.int64))
     lengths = np.asarray(
-        _native_all_gather_flat(local_length, group=group).numpy(), dtype=np.int32
+        _native_all_gather_flat(local_length, group=group).numpy(), dtype=np.int64
     ).reshape(-1)
     max_length = int(lengths.max()) if lengths.size else 0
-    encoded = np.zeros((max_length,), dtype=np.int32)
-    if payload:
-        encoded[:len(payload)] = np.frombuffer(payload, dtype=np.uint8).astype(np.int32)
-    gathered = np.asarray(
-        _native_all_gather_flat(jt.array(encoded), group=group).numpy(), dtype=np.int32
-    ).reshape(size, max_length)
+    chunk_bytes = int(_OBJECT_COLLECTIVE_CHUNK_BYTES)
+    if chunk_bytes <= 0:
+        raise ValueError("object collective chunk size must be positive")
+    received = [bytearray(int(length)) for length in lengths]
+    for offset in range(0, max_length, chunk_bytes):
+        width = min(chunk_bytes, max_length - offset)
+        encoded = np.zeros((width,), dtype=np.int32)
+        chunk = payload[offset:offset + width]
+        if chunk:
+            encoded[:len(chunk)] = np.frombuffer(chunk, dtype=np.uint8).astype(np.int32)
+        gathered = np.asarray(
+            _native_all_gather_flat(jt.array(encoded), group=group).numpy(),
+            dtype=np.int32,
+        ).reshape(size, width)
+        for rank, length in enumerate(lengths):
+            count = min(width, max(0, int(length) - offset))
+            if count:
+                received[rank][offset:offset + count] = gathered[
+                    rank, :count].astype(np.uint8).tobytes()
     for rank, length in enumerate(lengths):
-        raw = gathered[rank, :int(length)].astype(np.uint8).tobytes()
-        object_list[rank] = pickle.loads(raw)
+        object_list[rank] = pickle.loads(received[rank])
     return None
 
 
