@@ -323,6 +323,16 @@ def _native_all_gather_flat(tensor, group=None):
 _OBJECT_COLLECTIVE_CHUNK_BYTES = 64 * 1024 * 1024
 
 
+def _encode_object_length(length):
+    return np.asarray([length], dtype=np.uint64).view(np.int32)
+
+
+def _decode_object_lengths(words, size):
+    words = np.asarray(words, dtype=np.int32).reshape(size, 2).view(np.uint32)
+    return (words[:, 0].astype(np.uint64)
+            | (words[:, 1].astype(np.uint64) << np.uint64(32)))
+
+
 def _native_all_gather_object(object_list, obj, group=None):
     size = _require_supported_group(group)
     if len(object_list) < size:
@@ -333,10 +343,13 @@ def _native_all_gather_object(object_list, obj, group=None):
         return None
 
     payload = pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
-    local_length = jt.array(np.asarray([len(payload)], dtype=np.int64))
-    lengths = np.asarray(
-        _native_all_gather_flat(local_length, group=group).numpy(), dtype=np.int64
-    ).reshape(-1)
+    # Jittor's NCCL path can corrupt int64 values gathered as a tiny tensor
+    # (the 2.52 GB Swift checkpoint length arrived negative). Transport each
+    # uint64 length as two int32 words, whose byte patterns NCCL preserves.
+    local_words = _encode_object_length(len(payload))
+    lengths = _decode_object_lengths(
+        _native_all_gather_flat(jt.array(local_words), group=group).numpy(), size
+    )
     max_length = int(lengths.max()) if lengths.size else 0
     chunk_bytes = int(_OBJECT_COLLECTIVE_CHUNK_BYTES)
     if chunk_bytes <= 0:

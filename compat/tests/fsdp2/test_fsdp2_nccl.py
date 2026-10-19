@@ -134,6 +134,14 @@ class TestFSDP2Nccl(unittest.TestCase):
             np.testing.assert_array_equal(value.numpy(), np.asarray([total]))
 
         from jittor.compat.torch.installers import distributed as distributed_impl
+        lengths = np.asarray([2**31 + 17, 2**40 + 29], dtype=np.uint64)
+        words = np.concatenate([
+            distributed_impl._encode_object_length(int(length))
+            for length in lengths
+        ])
+        np.testing.assert_array_equal(
+            distributed_impl._decode_object_lengths(words, len(lengths)), lengths
+        )
         objects = [None] * world_size
         with mock.patch.object(
                 distributed_impl, "_OBJECT_COLLECTIVE_CHUNK_BYTES", 31):
