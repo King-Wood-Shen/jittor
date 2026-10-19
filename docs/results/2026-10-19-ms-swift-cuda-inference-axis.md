@@ -1,0 +1,43 @@
+# ms-swift CUDA 推理与优化开关矩阵
+
+- 状态：当前树单卡 CUDA 定向验证完成；cache-off 未触发，不授予整个 ms-swift、外部推理引擎或投机解码的 Jittor 内核覆盖。
+- 日期：2026-10-19。
+- 同步基线：`origin/2.0-refactor` `3577b70b4ca72296c8e49cbf37ebb51fe3c76497`，已包含在验证 HEAD `f6fe012b1a17a7ab9377c196a7836ea9df7afb5f`。
+- 上游源码：外置 ms-swift checkout `88d727951203256baa564c643c651b6f8d90fd7e`；验证不修改该 checkout。
+- 维护者：ms-swift CUDA 推理适配。
+- 复查条件：Jittor HEAD、ms-swift/Transformers/PEFT 版本、生成配置、模型权重、adapter 权重或引擎分派变化。
+
+## 固定实验与判据
+
+Slurm job `105611`（RTX 4090，完成/exit 0）执行，原生 PyTorch 与 Jittor Torch shim 使用同一外置 ms-swift 源码、Qwen2-0.5B 本地权重和同一 LoRA checkpoint。两侧安装身份均为 Torch `2.6.0`、Transformers `4.57.6`、PEFT `0.17.1`、ms-swift `4.6.0.dev0`，并分别断言 oracle 不是 shim、候选确为 shim。入口为 `swift.infer_engine.TransformersEngine.infer`；六个情景分别新建引擎，调用公开 `InferRequest` 与 `RequestConfig`。观察实际模型 `forward` 的输入形状、设备和 `use_cache`，记录输出 token ID；shim 最终 `use_cuda=1` 且 backend fallback 增量为 0。加载 adapter 使用 `TransformersEngine(adapters=[...])`，合并使用加载后模型的 PEFT `merge_and_unload()`，再由同一个 Swift 引擎推理。
+
+完整脚本、Slurm 提交文件、两侧逐项输出与日志未版本化，位于 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261019-inference-axis-v1/`。原始模型 `model.safetensors` SHA-256 为 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`；adapter `adapter_model.safetensors` SHA-256 为 `2c06c96d42696f442b5c7d255cdf83d2d7576ddd8b1025d31e97486ab4bffbfd`。实验中的 5 token 长度只用于触发 prefill/decode、采样、批处理与 LoRA 路径，不构成性能结论。`duration_s` 原值留在原始结果；含冷启动与 JIT，不用作速度比较。
+
+## 本轴覆盖矩阵
+
+| 场景 | 实际执行归属与判据 | 当前结论 |
+| --- | --- | --- |
+| Transformers greedy、KV cache on | Swift `TransformersEngine.infer` → 模型 `generate`，独立 PyTorch 对照；逐步读取 CUDA 输入与输出 | 两侧 5 个 token ID 完全一致；首步 `[1,25]`、后续 `[1,1]`；shim fallback 0 |
+| Transformers sampling | `RequestConfig(temperature=0.8, top_k=8, top_p=0.8, seed=1234)`；检查准备后的 `do_sample` 与两侧 token | 两侧 `do_sample=true`，5 个 token ID 完全一致；该 prompt 恰与 greedy 相同，不外推随机分布一致 |
+| Transformers batch | 同一次 `infer` 两条请求，实际首步 batch size 2 | 两条响应各 5 个 token ID 完全一致；两侧首步 `[2,25]`、后续 `[2,1]` |
+| Transformers adapter 加载 | Swift 引擎加载 PEFT LoRA；观察底层模型 CUDA `forward` | 两侧 `PeftModelForCausalLM`，5 个 token ID 完全一致；该短输出与 base 相同，不证明长输出或权重轨迹相等 |
+| Transformers adapter 合并 | 在 Swift 引擎内将 PEFT 模型合并为 Qwen2 基类并继续推理 | 两侧合并后为 `Qwen2ForCausalLM`，5 个 token ID 完全一致；48 个 LoRA 层实际非零，合并后的最大权重变化两侧同为 `2.016779e-6`；不覆盖 Swift export CLI |
+| Transformers KV cache off | 尝试把引擎及模型 `generation_config.use_cache` 设为 false；检查准备配置与真实 `forward` | Swift 公开 `infer` 两侧准备后的 `use_cache` 与全部真实 `forward` 参数仍为 true，不能计入该入口的 cache-off |
+| vLLM | Swift 建立 `vllm.LLMEngine` 或 `AsyncLLMEngine` 并向该实例提交请求 | 源码确认控制层分派；本作业无真实引擎内核验证 |
+| SGLang | Swift 建立 `sglang.Engine`，调用其 `async_generate` | 源码确认控制层分派；本作业无真实引擎内核验证 |
+| LMDeploy | Swift 调用 `lmdeploy.pipeline`，由其 backend 执行 | 源码确认控制层分派；本作业无真实引擎内核验证 |
+| speculative decoding | Swift 把 `speculative_config` 交给 vLLM，或把 speculative 参数交给 SGLang `ServerArgs` | 只有参数转发审计；没有证明 draft/target 计算进入 JTorch，故不做 JTorch 速度或输出授级 |
+
+ms-swift 的 `RequestConfig` 没有 `use_cache` 参数。其 `prepare_generation_config` 生成新的 `GenerationConfig` 时只转发部分字段；这次即使把引擎的配置和模型配置设为 false，准备后的配置及实际模型调用仍为 true。原生 PyTorch 与 shim 呈现同一现象，归属在 Swift/Transformers 生成配置契约，不应以 token 相同冒称关闭缓存的路径已通过。
+
+为限定计算能力边界，Slurm job `105725` 另在 Swift 加载出的相同模型上直接调用公开的 Transformers `model.generate(use_cache=False)`。两侧五次真实 `forward` 的 `use_cache` 均为 false，输入长度从 6 逐步增至 10；原生 PyTorch 与 shim 的输出 token ID 完全一致，shim CUDA 且 fallback 0。这只证明底层无缓存生成可运行，不提升 Swift `TransformersEngine.infer` 的 cache-off 覆盖。
+
+独立 Slurm merge probe 在同一固定 adapter 的 48 个实际 LoRA 层上比较合并前 `base_layer.weight` 与合并后基础模型权重；adapter B 最大绝对值两侧均为 `5.711696e-6`，合并权重最大绝对变化两侧均为 `2.016779e-6`。Shim 在该 probe 中仍为 CUDA 且 fallback 0。它证明合并不是空动作；短文本的 token 未变化是该输入的结果。
+
+外部引擎的执行归属见所绑定 ms-swift 源码 `swift/infer_engine/{vllm_engine,sglang_engine,lmdeploy_engine}.py`。vLLM 在其他独立任务中可能有 Jittor adapter；这不等于本次 Swift vLLM 请求进入了 JTorch。此矩阵只把已实际执行并有设备与 fallback 证据的 Transformers 路径列为 CUDA 计算验证。
+
+## 仓库门禁与限制
+
+同一 Slurm 节点上的 `bash tools/check_repo_layout.sh` 通过。首次完整 `JITTOR_TORCH_SHIM=1 PYTHONPATH=python python -m pytest -q tests/structure` 为 `1511 passed, 6 skipped, 3 failed`；其中报告页未加入 toctree、生成的 `MANIFEST.in` 未更新是本任务新增文档造成，已补齐；另一失败为该解释器缺少 `asv`（`No module named asv`），是环境依赖，不以文档改动规避。随后 Slurm job `105785` 的布局、manifest `--check --project .` 与两个受影响结构文件定向复验通过，`23 passed, 50 subtests passed`。完整及定向日志分别在上述外置 state 的 `structure.log`、`structure-targeted.log`、`layout-final.log` 与 `manifest-check.log`。
+
+本次没有修改 Jittor 计算代码，故未把历史训练门禁或旧实验重标成当前 HEAD 的推理结果。短输出验证的是指定 Qwen2 模型、输入、dtype 与六个情景；没有大上下文、吞吐或延迟性能结论，也没有外部引擎在 JTorch 上执行的证据。
