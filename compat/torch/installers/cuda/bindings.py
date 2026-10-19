@@ -85,6 +85,7 @@ from .api import (
     _api_mp_reductions_rebuild_tensor,
     _api_mp_reductions_reduce_tensor,
     _api_mps_is_available,
+    _api_mps_current_allocated_memory,
     _api_overrides_get_default_nowrap_functions,
     _current_stream,
     _device_name,
@@ -286,6 +287,9 @@ def _install_cuda(g, registry=None):
         _mod.manual_seed_all = getattr(_mod, "manual_seed_all", _api_mod_manual_seed_all)
         _mod.seed = getattr(_mod, "seed", _api_mod_seed)
         _mod.reset_peak_memory_stats = getattr(_mod, "reset_peak_memory_stats", _api_mod_reset_peak_memory_stats)
+        if _dev_ns == "mps":
+            _mod.current_allocated_memory = getattr(
+                _mod, "current_allocated_memory", _api_mps_current_allocated_memory)
         _mod.reset_max_memory_allocated = getattr(_mod, "reset_max_memory_allocated", _api_mod_reset_max_memory_allocated)
         _mod.memory_allocated = getattr(_mod, "memory_allocated", _api_mod_memory_allocated)
         _mod.max_memory_allocated = getattr(_mod, "max_memory_allocated", _api_mod_max_memory_allocated)

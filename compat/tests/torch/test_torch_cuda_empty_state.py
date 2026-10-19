@@ -7,6 +7,12 @@ import pytest
 import torch
 
 
+def test_mps_memory_probe_reports_unavailable():
+    assert not torch.mps.is_available()
+    with pytest.raises(RuntimeError, match="without MPS backend"):
+        torch.mps.current_allocated_memory()
+
+
 @pytest.mark.parametrize("api,states,expected", [
     ("get_rng_state_all", None, []),
     ("set_rng_state_all", [], None),

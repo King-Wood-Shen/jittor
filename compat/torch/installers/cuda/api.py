@@ -1545,6 +1545,10 @@ def _api_mps_is_available():
     return False
 
 
+def _api_mps_current_allocated_memory():
+    raise RuntimeError("Cannot execute getCurrentAllocatedMemory() without MPS backend.")
+
+
 def _api_cpu_get_cpu_capability():
     return 'DEFAULT'
 
@@ -1716,6 +1720,7 @@ _CUDA_PLACEHOLDERS = frozenset((
     _api_functorch_c__add_batch_dim, _api_functorch_c__remove_batch_dim,
     _api_c_mod__accelerator_setAllocatorSettings, _api_c_mod__cuda_setAllocatorSettings,
     _api_accelerator_is_available, _api_accelerator_set_stream,
+    _api_mps_current_allocated_memory,
     _nvtx_mark, _nvtx_range_start, _nvtx_range_end,
 ))
 
