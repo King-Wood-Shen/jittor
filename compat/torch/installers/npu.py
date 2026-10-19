@@ -303,6 +303,7 @@ def npu_fusion_attention(
     return output, None, None, None, None, None, None
 
 
+
 def _unsupported(*args, **kw):
     raise NotImplementedError(
         "This NPU API is outside the Jittor ACL device facade")
@@ -323,7 +324,7 @@ _REFUSED = (
 _SUPPORTED = ("is_available", "device_count", "current_device", "set_device",
               "device", "synchronize", "empty_cache", "is_bf16_supported",
               "manual_seed", "manual_seed_all", "npu_rms_norm",
-              "npu_rotary_mul", "npu_swiglu")
+              "npu_rotary_mul", "npu_swiglu", "npu_fusion_attention")
 
 
 def install(ctx):
@@ -347,18 +348,6 @@ def install(ctx):
     registry.publish("torch.npu.random", random, replace=True)
     target.npu = npu
 
-    from .cuda.api import (
-        _api_cuda_get_rng_state, _api_cuda_get_rng_state_all,
-        _api_cuda_set_rng_state, _api_cuda_set_rng_state_all,
-    )
-    random = types.ModuleType("torch.npu.random")
-    random.get_rng_state = _api_cuda_get_rng_state
-    random.get_rng_state_all = _api_cuda_get_rng_state_all
-    random.set_rng_state = _api_cuda_set_rng_state
-    random.set_rng_state_all = _api_cuda_set_rng_state_all
-    npu.random = random
-    registry.publish("torch.npu.random", random, bind_parent=False)
-
     register_api_bindings(
         npu, "torch.npu",
         ("is_available", "device_count", "current_device", "set_device",
@@ -367,11 +356,6 @@ def install(ctx):
         "Native ACL discovery and selection; the index accepts an int, a "
         "string, a torch.device or None, as torch's does. Seed APIs reset "
         "the native ACL stream generators.")
-    register_api_bindings(
-        random, "torch.npu.random",
-        ("get_rng_state", "get_rng_state_all", "set_rng_state", "set_rng_state_all"),
-        Fidelity.EXACT,
-        "Serializes and restores native ACL stream counter states as CPU byte tensors.")
     register_api_bindings(
         random, "torch.npu.random",
         ("get_rng_state", "get_rng_state_all", "set_rng_state",
@@ -389,14 +373,23 @@ def install(ctx):
         "Executed as ACL tensor graphs rather than the fused CANN kernels; "
         "npu_rms_norm does not produce the auxiliary reciprocal-norm output.")
     register_api_bindings(
+        npu, "torch.npu", ("npu_fusion_attention",), Fidelity.APPROXIMATE,
+        "BSND and TND attention execute through JTorch SDPA with causal and "
+        "sequence-boundary semantics; no fused CANN kernel or fused-memory "
+        "benefit is provided.")
+    register_api_bindings(
+        npu, "torch.npu", ("npu_fusion_attention",), Fidelity.APPROXIMATE,
+        "Runs supported BSND and TND inputs through JTorch SDPA graphs; this "
+        "does not call CANN fused attention or expose its workspaces.")
+    register_api_bindings(
         npu, "torch.npu", _REFUSED, Fidelity.UNIMPLEMENTED,
         "Refused rather than answered: no synthetic device metadata, memory "
         "peaks or streams.")
 
     if not _acl_build():
         return
-    # `import torch_npu` is what a Torch model does before calling any of the
-    # three primitives above. Publishing a facade is only safe where no real
+    # `import torch_npu` is what a Torch model does before calling primitives
+    # above. Publishing a facade is only safe where no real
     # one is loaded -- otherwise the native extension and this would both
     # claim the name and the model would get whichever imported last.
     if registry.get("torch_npu") is not None:
@@ -416,4 +409,5 @@ def install(ctx):
          "npu_fusion_attention"), Fidelity.APPROXIMATE,
         "Runs supported BSND and TND attention as ACL SDPA graphs; this does "
         "not expose CANN fused-kernel workspaces or fused-kernel performance.")
+
     registry.publish("torch_npu", facade, bind_parent=False)
