@@ -1162,6 +1162,7 @@ def structure(session):
         }
     )
     session.install(
+        ASV,
         PYTEST,
         PYTEST_TIMEOUT,
         SETUPTOOLS,
