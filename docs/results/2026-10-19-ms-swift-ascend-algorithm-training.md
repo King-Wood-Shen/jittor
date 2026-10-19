@@ -20,7 +20,7 @@
 | ORPO | 三步；30 个文件、598 个字段，最大绝对误差 `8.94e-8`；candidate fallback 0（作业 5564/5565，对照 5566） | 通过 |
 | GRPO | 两端都完成三步，初始 LoRA 参数一致，candidate NPU forward 已观察且 fallback 0；采样后第一次 logits 最大绝对误差 `0.7639`（作业 5605/5606，对照 5617） | 部分通过；不声称数值等价 |
 
-GRPO 使用 `num_generations=2` 和真实奖励插件。native 与 candidate 的生成随机流产生不同 completion，随后 rollout、奖励和优化轨迹分叉；这次结果证明完整训练路径执行，不证明相同采样结果下的 loss/更新等价。将 GRPO 提升为数值通过前，需建立两端可复现且相同的生成序列协议。
+GRPO 使用 `num_generations=2` 和真实奖励插件。native 与 candidate 的生成随机流产生不同 completion，随后 rollout、奖励和优化轨迹分叉；这次结果证明完整训练路径执行，不证明相同采样结果下的 loss/更新等价。尝试向公开入口传递 TRL `generation_kwargs` 来控制 beam sampling 时，ms-swift 参数解析拒绝该字段；没有修改安装包或外部源码。将 GRPO 提升为数值通过前，需建立两端可复现且相同的生成序列协议。
 
 ## 缺陷修复与诊断
 
@@ -33,3 +33,5 @@ KTO 曾有带观察器的重跑把 candidate reference logits 记录为 policy l
 ## 回归与限制
 
 新增长期回归 `test_add_into_lazy_integer_tensor` 在 Slurm NPU 上通过：1 passed、13 deselected、0 skipped，并要求实际 NPU 执行。`bash tools/check_repo_layout.sh` 通过。Torch 模式完整 `tests/structure` 有 1498 passed、8 skipped、14 failed；失败归因于 ASV 可选依赖缺失、一个冷 CPU 子进程超时、ACL BMM float64 不支持，以及 pooling fused reindex/void 注册缺口，与本次算法和 lazy in-place 修复无关。原始日志、逐步 trace、数据、环境和设备证据保存在 `/home/xinshen/_state/ms-swift-ascend/runs/algorithms-world1-0b872e5-20261019/`，没有纳入仓库。
+
+文档索引与报告链接已用标准库检查；`test_docs_structure.py` 的追加定向运行未能收集，因为登录环境和隔离 oracle 环境都没有安装 pytest。没有为了单条文档测试改动共享环境。
