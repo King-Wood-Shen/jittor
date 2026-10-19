@@ -7,6 +7,7 @@ import contextlib
 from contextvars import ContextVar
 import threading
 from collections import deque
+from typing import Optional
 import jittor as jt
 import numpy as np
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
@@ -18,7 +19,8 @@ from ..diagnostics import EXPECTED, swallowed
 
 # Keep the Torch create_graph mode visible to custom Function backward calls.
 # Native jt.grad behavior remains unchanged outside a Torch autograd call.
-_backward_create_graph = ContextVar("torch_backward_create_graph", default=None)
+_backward_create_graph: ContextVar[Optional[bool]] = ContextVar(
+    "torch_backward_create_graph", default=None)
 
 
 @contextlib.contextmanager
