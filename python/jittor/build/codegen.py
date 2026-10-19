@@ -457,8 +457,11 @@ def gen_jit_op_maker(op_headers, export=False, extra_flags="", backend=None):
         name2 = "".join(name2)
         with open(header, encoding='utf8') as f:
             src = f.read()
-        # XxxXxxOp(args)
-        res = _compiler_state.re.findall(pybind_attrs_reg + '[^~]('+name2+"\\([^\\n]*\\))", src, _compiler_state.re.S)
+        # Constructor declarations may span lines or contain {} defaults.
+        # Stop at the declaration semicolon instead of at a newline.
+        res = _compiler_state.re.findall(
+            pybind_attrs_reg + r"(?<![~\w])(" + name2 + r"\([^;]*\))\s*;",
+            src, _compiler_state.re.S)
         assert len(res) >= 1, "Wrong op args in " + header
         # registe op
         cc_name = header[:-2] + ".cc"

@@ -33,6 +33,14 @@ def test_generator_registers_typed_definition_with_explicit_or_class_backend(bac
     assert "op_registe(" not in source
 
 
+def test_generator_accepts_multiline_hccl_constructor(tmp_path):
+    header = ROOT / "backends/comm/hccl/ops/hccl_reduce_op.h"
+    source = _load_generator(tmp_path)([str(header)], backend="accelerator")
+    assert "op_constructor_entry(&make_hccl_reduce)" in source
+    assert 'string reduce_op="sum"' in source
+    assert "int group_id=0" in source
+
+
 def test_generator_rejects_unknown_backend_before_reading_headers():
     with pytest.raises(ValueError, match="backend must be"):
         _load_generator()(["missing_op.h"], backend="typo")
