@@ -52,6 +52,7 @@ def test_install_module_methods_defines_nothing():
 # already own the native attribute.
 _UNCONDITIONAL_OWNERS = (
     ("execute", "_execute"),
+    ("register_module", "_register_module"),
     ("_dispatch_call", "_call"),
     ("named_parameters", "_named_parameters"),
     ("named_buffers", "_named_buffers"),
@@ -154,6 +155,7 @@ _FIDELITY_APIS = (
     "torch.nn.Module.named_buffers",
     "torch.nn.Module.named_modules",
     "torch.nn.Module.load_state_dict",
+    "torch.nn.Module.register_module",
     "torch.nn.Module.parameters",
     "torch.nn.Module.train",
     "torch.nn.Module.eval",
@@ -482,6 +484,23 @@ def test_register_parameter_registers_the_name():
     net.register_parameter("extra", p)
     assert net.extra is p
     assert dict(net.named_parameters())["extra"] is p
+
+
+def test_register_module_replaces_a_child_through_live_storage():
+    net = nn.Module()
+    first = nn.Linear(2, 2)
+    replacement = nn.Linear(2, 2)
+
+    assert net.register_module("child", first) is None
+    assert net.child is first
+    assert dict(net.named_modules())["child"] is first
+    assert net.register_module("child", replacement) is None
+    assert net.child is replacement
+    assert net._modules["child"] is replacement
+    assert dict(net.named_modules())["child"] is replacement
+    assert list(net.parameters()) == [replacement.weight, replacement.bias]
+    net.register_module("optional", None)
+    assert net.optional is None and net._modules["optional"] is None
 
 
 def test_forward_result_matches_manual_matmul():

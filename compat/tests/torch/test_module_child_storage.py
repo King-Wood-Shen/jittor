@@ -11,6 +11,18 @@ from _helpers.device_types import instantiate_device_type_tests
 
 
 class TestModuleChildStorage:
+    def test_register_module_replaces_child_on_device(self, device):
+        root = torch.nn.Module()
+        first = torch.nn.Linear(2, 1).to(device)
+        replacement = torch.nn.Linear(2, 1).to(device)
+
+        assert root.register_module("child", first) is None
+        assert root.child is first
+        assert root.register_module("child", replacement) is None
+        assert root._modules["child"] is replacement
+        assert [name for name, _ in root.named_modules()] == ["", "child"]
+        assert list(root.parameters()) == [replacement.weight, replacement.bias]
+
     def test_native_child_adoption_rebinds_an_existing_view(self, device):
         import jittor as jt
         from jittor.compat.torch.context import get_install_context

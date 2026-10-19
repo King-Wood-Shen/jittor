@@ -1141,6 +1141,15 @@ def _register_parameter(self, name, param):
     object.__setattr__(self, name, param)
 
 
+def _register_module(self, name, module):
+    """Torch's ``register_module`` alias, backed by Jittor's live child view."""
+    # Jittor already owns the child-module storage and traversal semantics.
+    # Publish the Torch spelling through that live view so replacements are
+    # visible to named_modules(), parameters(), and FSDP2's module wrapping.
+    self._modules[name] = module
+    return None
+
+
 def _module_type(self, dst_type=None):
     """Torch's ``Module.type``, which Jittor has nothing to do for."""
     return self
@@ -1341,6 +1350,7 @@ def _install_module_methods(nn, registry=None):
     M.npu = _module_npu
     M.cpu = _module_cpu
     M.zero_grad = _zero_grad
+    M.register_module = _register_module
     # Guarded: jittor owns `half` natively and its version wins, exactly as
     # before this promotion.
     if not hasattr(M, "float"):
@@ -1365,7 +1375,7 @@ def _install_module_methods(nn, registry=None):
         M._non_persistent_buffers_set = property(_nonpersist_set)
 
     register_api_bindings(M, 'torch.nn.Module',
-        ('__setattr__', 'buffers', 'cpu', 'cuda', 'double', 'eval', 'execute', 'float', 'forward', 'get_buffer', 'get_execution_pipelining', 'get_parameter', 'get_submodule', 'half', 'load_state_dict', 'named_buffers', 'named_modules', 'named_parameters', 'npu', 'parameters', 'register_parameter', 'set_execution_pipelining', 'to', 'to_empty', 'train', 'type', 'zero_grad') + tuple(()),
+        ('__setattr__', 'buffers', 'cpu', 'cuda', 'double', 'eval', 'execute', 'float', 'forward', 'get_buffer', 'get_execution_pipelining', 'get_parameter', 'get_submodule', 'half', 'load_state_dict', 'named_buffers', 'named_modules', 'named_parameters', 'npu', 'parameters', 'register_module', 'register_parameter', 'set_execution_pipelining', 'to', 'to_empty', 'train', 'type', 'zero_grad') + tuple(()),
         Fidelity.APPROXIMATE, 'Module state and parameter management over native holders; Torch lazy iterator, meta, and layout semantics are approximate')
     register_api_bindings(M, 'torch.nn.Module', ('extra_repr',),
         Fidelity.EXACT, 'Torch Module default extra_repr is empty; explicit subclass overrides retain normal MRO precedence')
