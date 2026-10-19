@@ -306,6 +306,28 @@ def dispatch_context(*args, **kwargs):
     return DispatchContext(*_dispatch_backend(args, kwargs))
 
 
+def _backend_of(value):
+    """``dispatch_context(value).backend`` for a single argument.
+
+    The backend is all some callers read (assignment asks it of every target),
+    and for one Var it is a single native query; the dtype names and the tuple
+    the full context builds around it are skipped. Published as an attribute of
+    the native ``dispatch_context`` only, so a stand-in that replaces it -- the
+    way a caller states the device -- is never bypassed.
+    """
+    var_type = _VAR_TYPE
+    if var_type is None:
+        _bind_core()
+        var_type = _VAR_TYPE
+    if not isinstance(value, var_type):
+        return dispatch_context(value).backend
+    backend = _DISPATCH_CONTEXT_NATIVE([value])[0]
+    return "acl" if backend == "acl_legacy" else backend
+
+
+dispatch_context._backend_of = _backend_of
+
+
 #: The function `select_kernel` reads placement through unless a caller has
 #: replaced the module attribute. Kept so the fast path can tell "nobody
 #: overrode this" from "a test states the device itself"; the override is a
@@ -423,6 +445,16 @@ def try_dispatch(op, *args, **kwargs):
         return None
     implementation = select_kernel(op, *args, **kwargs)
     return None if implementation is None else implementation(*args, **kwargs)
+
+
+def _is_registered(op):
+    """Whether anything is registered under ``op`` on any backend."""
+    return op in _registered_ops
+
+
+# On the native `try_dispatch` only: a caller that replaces it -- to observe or
+# route calls -- has no shortcut to skip it with.
+try_dispatch._is_registered = _is_registered
 
 
 def optional_kernel(op, backend, *, dtypes=None, supports=None, priority=0,
