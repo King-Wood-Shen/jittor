@@ -100,6 +100,34 @@ class TestFSDP2InsideMpi(unittest.TestCase):
         module = torch.nn.Linear(8, 8, bias=False)
         self.assertIs(fully_shard(module), module)
 
+    def test_tied_parameter_aliases_remain_sharded_after_meta_wrap(self):
+        from torch.distributed.device_mesh import init_device_mesh
+        from torch.distributed.fsdp import fully_shard
+
+        class TiedModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embed_tokens = torch.nn.Embedding(8, 4)
+                self.layers = torch.nn.ModuleList(
+                    [torch.nn.Linear(4, 4, bias=False)])
+                self.lm_head = torch.nn.Linear(4, 8, bias=False)
+                self.lm_head.weight = self.embed_tokens.weight
+
+        mesh = init_device_mesh("cuda", (_RANKS,))
+        model = TiedModel().to(torch.device("meta"))
+        # Accelerate reties weights after moving the model to meta.
+        model.lm_head.weight = model.embed_tokens.weight
+        fully_shard(model.layers[0], mesh=mesh)
+        fully_shard(model, mesh=mesh)
+
+        self.assertIs(model.embed_tokens.weight, model.lm_head.weight)
+        state = model.state_dict()
+        self.assertIs(state["embed_tokens.weight"], state["lm_head.weight"])
+        for value in state.values():
+            self.assertIsNotNone(value.device_mesh)
+            self.assertEqual(tuple(value.placements), (torch.distributed.tensor.Shard(0),))
+        print("FSDP2_TIED_ALIAS_OK rank={}".format(jt.rank), flush=True)
+
     # ---- clip_grad_norm_ ---------------------------------------------------
 
     def _sharded_model_with_grads(self):
@@ -170,10 +198,12 @@ class TestFSDP2InsideMpi(unittest.TestCase):
 class TestLaunch(unittest.TestCase):
     def test_run_the_rank_tests_under_mpirun(self):
         completed = run_mpi_python(
-            _RANKS, ["-m", "pytest", "-q", "-p", "no:cacheprovider",
+            _RANKS, ["-m", "pytest", "-q", "-s", "-p", "no:cacheprovider",
                      os.path.abspath(__file__)],
             timeout=2400, merge_stderr=True)
         self.assertEqual(completed.returncode, 0, completed.stdout[-8000:])
+        for rank in range(_RANKS):
+            self.assertIn("FSDP2_TIED_ALIAS_OK rank={}".format(rank), completed.stdout)
 
 
 if __name__ == "__main__":
