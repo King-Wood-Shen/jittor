@@ -128,6 +128,33 @@ class TestFSDP2InsideMpi(unittest.TestCase):
             self.assertEqual(tuple(value.placements), (torch.distributed.tensor.Shard(0),))
         print("FSDP2_TIED_ALIAS_OK rank={}".format(jt.rank), flush=True)
 
+    def test_full_state_distribute_then_assign_loads_local_flat_shard(self):
+        from torch.distributed.device_mesh import init_device_mesh
+        from torch.distributed.fsdp import fully_shard
+        from torch.distributed.tensor import Shard, distribute_tensor
+
+        mesh = init_device_mesh("cuda", (_RANKS,))
+        module = torch.nn.Linear(8, 8, bias=True)
+        full = jt.array(np.arange(64, dtype=np.float32).reshape(8, 8))
+        full_bias = jt.array(np.arange(8, dtype=np.float32) + 100)
+        fully_shard(module, mesh=mesh)
+
+        self.assertEqual(tuple(module.weight.size()), (8, 8))
+        local = distribute_tensor(full, mesh, (Shard(0),))
+        self.assertEqual(tuple(local.size()), (8, 8))
+        self.assertEqual(tuple(local.shape), (4, 8))
+        local_bias = distribute_tensor(full_bias, mesh, (Shard(0),))
+        module.load_state_dict(
+            {"weight": local, "bias": local_bias}, assign=True)
+
+        expected_flat = np.concatenate((full.numpy().reshape(-1), full_bias.numpy()))
+        shard_size = (len(expected_flat) + _RANKS - 1) // _RANKS
+        expected_flat = np.pad(
+            expected_flat, (0, shard_size * _RANKS - len(expected_flat)))
+        expected = expected_flat[jt.rank * shard_size:(jt.rank + 1) * shard_size]
+        np.testing.assert_array_equal(
+            module._fsdp_state.true_fsdp_flat_shard.numpy(), expected)
+
     # ---- clip_grad_norm_ ---------------------------------------------------
 
     def _sharded_model_with_grads(self):
