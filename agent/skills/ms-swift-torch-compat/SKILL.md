@@ -5,6 +5,10 @@ description: 在 Jittor torch shim 与独立原生 Torch 两侧验证 ms-swift�
 
 # ms-swift × Jittor torch shim
 
+## 本轮主要优化与开关
+
+按[主要优化与开关的验收路径](references/priority-optimizations.md)选择代表场景；本轮记录训练收敛、功能正确性、零 fallback 和设备峰值显存，不把耗时或吞吐作为验收门槛。旧性能数据只按原基线解释。
+
 ## 当前验收入口（2026-10-15）
 
 [注册 FULL SFT 与完整安装来源报告](../../../docs/results/2026-10-15-swift-trainer-installed-source.md)
