@@ -1,8 +1,8 @@
 # ms-swift CUDA 推理与优化开关矩阵
 
-- 状态：当前树单卡 CUDA 定向验证完成；cache-off 未触发，不授予整个 ms-swift、外部推理引擎或投机解码的 Jittor 内核覆盖。
+- 状态：首轮六场景矩阵与合并后代表场景复验完成；Swift 入口 cache-off 未触发，不授予整个 ms-swift、外部推理引擎或投机解码的 Jittor 内核覆盖。
 - 日期：2026-10-19。
-- 同步基线：`origin/2.0-refactor` `3577b70b4ca72296c8e49cbf37ebb51fe3c76497`，已包含在验证 HEAD `f6fe012b1a17a7ab9377c196a7836ea9df7afb5f`。
+- 首轮同步基线：`origin/2.0-refactor` `3577b70b4ca72296c8e49cbf37ebb51fe3c76497`；六场景完整矩阵 HEAD 为 `f6fe012b1a17a7ab9377c196a7836ea9df7afb5f`。
 - 上游源码：外置 ms-swift checkout `88d727951203256baa564c643c651b6f8d90fd7e`；验证不修改该 checkout。
 - 维护者：ms-swift CUDA 推理适配。
 - 复查条件：Jittor HEAD、ms-swift/Transformers/PEFT 版本、生成配置、模型权重、adapter 权重或引擎分派变化。
@@ -41,3 +41,13 @@ ms-swift 的 `RequestConfig` 没有 `use_cache` 参数。其 `prepare_generation
 同一 Slurm 节点上的 `bash tools/check_repo_layout.sh` 通过。首次完整 `JITTOR_TORCH_SHIM=1 PYTHONPATH=python python -m pytest -q tests/structure` 为 `1511 passed, 6 skipped, 3 failed`；其中报告页未加入 toctree、生成的 `MANIFEST.in` 未更新是本任务新增文档造成，已补齐；另一失败为该解释器缺少 `asv`（`No module named asv`），是环境依赖，不以文档改动规避。随后 Slurm job `105785` 的布局、manifest `--check --project .` 与两个受影响结构文件定向复验通过，`23 passed, 50 subtests passed`。完整及定向日志分别在上述外置 state 的 `structure.log`、`structure-targeted.log`、`layout-final.log` 与 `manifest-check.log`。
 
 本次没有修改 Jittor 计算代码，故未把历史训练门禁或旧实验重标成当前 HEAD 的推理结果。短输出验证的是指定 Qwen2 模型、输入、dtype 与六个情景；没有大上下文、吞吐或延迟性能结论，也没有外部引擎在 JTorch 上执行的证据。
+
+## 同步后复验
+
+恢复任务时发现 `origin/2.0-refactor` 前进至 `5a120a315ed2f213d937b546116101006643f87d`。该范围还包括 Jittor executor/FusedOp/liveness/运行时 flag 调整；按实际影响未重跑全部六格，而在合并树 `7131681d43e9b0dfa6ef0ad6ef5225647ea3271e` 上复验一条真实 Swift CUDA greedy 请求，并重跑 CPU core 与结构门禁。
+
+Slurm job `105900` 原生 PyTorch 侧和 job `105928` 修正探针导入顺序后的 shim 侧均使用上面绑定的 ms-swift、模型与 tokenizer。Swift `TransformersEngine.infer` 在两侧实际执行五次 CUDA forward，形状 `[1,25]` 后四次 `[1,1]`；token ID 与首轮完整矩阵一致，Shim `use_cuda=1`、fallback 0。`105900` 首次 Shim 探针失败是探针先 import 原生 `torch` 后启用 shim；修正导入顺序后只重跑 Shim 并通过。这是探针设置错误，未修改产品代码。
+
+Slurm job `105905` 在合并树上通过 CPU core：native `98 passed, 41 skipped, 1 xfailed`；Torch `224 passed, 1 skipped`；合计 `322 passed, 42 skipped, 1 xfailed`。完整结构门禁首次的两个报告登记失败已修复；复验通过布局与生成 manifest 检查。计算节点安装钉定的 `asv==0.6.6` 时代理连接被拒绝（日志 `asv-install.log`），所以结构复跑仅排除该 ASV CLI 测试，其余为 `1511 passed, 8 skipped, 1 deselected, 1058 subtests passed`。另有 4 项 environment skips：两个测试解释器未安装 jittor、两个未安装 pytest-xdist；详情见 `structure-postsync-noasv.log`。未排除 ASV 的完整结构门禁仍待可联网的维护环境补跑。
+
+首轮六场景矩阵数据仍绑定首轮 HEAD `f6fe012b1`；当前合并树另有一条 greedy CUDA 复验，不能把后续矩阵格扩写成完整当前树覆盖。

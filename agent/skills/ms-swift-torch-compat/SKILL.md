@@ -8,7 +8,7 @@ description: 在 Jittor torch shim 与独立原生 Torch 两侧验证 ms-swift�
 ## CUDA 推理轴（2026-10-19）
 
 [当前树推理与优化开关矩阵](../../../docs/results/2026-10-19-ms-swift-cuda-inference-axis.md)
-记录固定 Qwen2-0.5B、真实 `TransformersEngine.infer` 的原生 PyTorch/CUDA shim
+首轮固定 Qwen2-0.5B、真实 `TransformersEngine.infer` 的原生 PyTorch/CUDA shim
 对照：greedy、`do_sample=true`、batch、PEFT adapter 加载与实际非零权重合并均执行，
 两侧短输出 token 一致，shim fallback 为 0。ms-swift 当前 `RequestConfig` 未暴露
 `use_cache`；直接修改引擎配置后真实调用仍为 cache-on，因此 cache-off 未验。
@@ -16,6 +16,8 @@ description: 在 Jittor torch shim 与独立原生 Torch 两侧验证 ms-swift�
 实际执行并对齐，但不能代替 Swift 公开推理入口的开关验收。
 vLLM/SGLang/LMDeploy 和 speculative 参数只完成执行归属审计，未授予 JTorch 内核覆盖。
 后续扩大推理规格或接外部引擎时须重新绑定上游 SHA、设备与实际计算归属。
+六场景完整矩阵绑定 Jittor HEAD `f6fe012b1`；远端前进并合入 `5a120a315` 后，
+仅在合并树 `7131681d` 补跑真实 CUDA greedy 与 core 回归，不把该单格外推为完整矩阵。
 
 ## 当前验收入口（2026-10-15）
 
