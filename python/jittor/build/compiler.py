@@ -346,8 +346,12 @@ def _write_jit_utils_cache_key(files, output):
     ).format(module_dir=os.path.dirname(os.path.abspath(output)),
              cache=cache_path, cmd=cmd, jittor=jittor_path)
     try:
-        result = sp.run([sys.executable, "-c", script],
-                        stdout=sp.PIPE, stderr=sp.STDOUT)
+        # The import caller holds jittor.lock. The child needs that same lock
+        # if cache_compile has to create the first key, so let it acquire the
+        # lock itself before waiting for it to exit.
+        with lock.unlock_scope():
+            result = sp.run([sys.executable, "-c", script],
+                            stdout=sp.PIPE, stderr=sp.STDOUT)
     except OSError as error:
         LOG.v("cache key child could not start: %s" % error)
         return
