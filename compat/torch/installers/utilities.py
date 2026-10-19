@@ -289,6 +289,15 @@ class _UtilsNS(_types2.ModuleType):
         raise AttributeError(name)
 
 
+class _TorchSymIntFloorDiv:
+    """Import marker for consumers that inspect Torch symbolic floor division."""
+
+    def __new__(cls, *args, **kwargs):
+        raise NotImplementedError(
+            "Torch symbolic shape arithmetic is not implemented by Jittor compat"
+        )
+
+
 class LeafSpec:
     pass
 
@@ -864,6 +873,21 @@ def install(ctx):
         _pytree._register_pytree_node = _api_pytree__register_pytree_node
         _modules["torch.utils._pytree"] = _pytree
     g.utils._pytree = _modules["torch.utils._pytree"]
+    # DeepSpeed imports this private type while registering its fake sequence
+    # parallel op. Jittor tensors do not expose Torch SymInt expressions; the
+    # marker lets non-symbolic paths import and perform the type check without
+    # claiming to implement Torch's symbolic shape algebra.
+    _sympy = _modules.get("torch.utils._sympy")
+    if _sympy is None:
+        _sympy = _types2.ModuleType("torch.utils._sympy")
+        _sympy.__path__ = []
+        _modules["torch.utils._sympy"] = _sympy
+    _sympy_functions = _modules.get("torch.utils._sympy.functions")
+    if _sympy_functions is None:
+        _sympy_functions = _types2.ModuleType("torch.utils._sympy.functions")
+        _sympy_functions.FloorDiv = _TorchSymIntFloorDiv
+        _modules["torch.utils._sympy.functions"] = _sympy_functions
+    g.utils._sympy = _sympy
     if "torch.utils._contextlib" not in _modules:
         _contextlib_mod = _types2.ModuleType("torch.utils._contextlib")
         import contextlib as _ctxlib_utils
