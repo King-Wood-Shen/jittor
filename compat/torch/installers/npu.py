@@ -188,11 +188,12 @@ def npu_swiglu(input, dim=-1):
 
 
 def npu_fusion_attention(
-    query, key, value, head_num, input_layout, pse=None, padding_mask=None,
-    atten_mask=None, scale=1.0, keep_prob=1.0,
-    pre_tockens=2147483647, next_tokens=2147483647, inner_precise=0,
-    prefix=None, actual_seq_qlen=None, actual_seq_kvlen=None, sparse_mode=0,
-    gen_mask_parallel=True, sync=False, softmax_layout="",
+    query, key, value, head_num, input_layout="BSND", pse=None,
+    padding_mask=None, atten_mask=None, scale=1.0, keep_prob=1.0,
+    pre_tockens=2147483647, next_tockens=2147483647, inner_precise=0,
+    seed=0, offset=0, prefix=None, actual_seq_qlen=None,
+    actual_seq_kvlen=None, sparse_mode=0, gen_mask_parallel=True,
+    sync=False, softmax_layout="", **kwargs,
 ):
     """Run the BSND and TND layouts used by Transformers' NPU FA wrapper.
 
@@ -200,6 +201,27 @@ def npu_fusion_attention(
     CANN's fused operator. Unsupported fused-attention features fail loudly.
     """
     _require_acl()
+    # Older callers used the more conventional spelling; torch_npu exposes
+    # `next_tockens`, so accept both while rejecting ambiguous values.
+    next_tokens_alias = kwargs.pop("next_tokens", None)
+    if kwargs:
+        raise TypeError("unsupported npu_fusion_attention options: %s" %
+                        ", ".join(sorted(kwargs)))
+    if next_tokens_alias is not None:
+        if int(next_tockens) != 2147483647:
+            raise TypeError("pass only one of next_tockens and next_tokens")
+        next_tockens = next_tokens_alias
+    if pse is not None or padding_mask is not None or prefix is not None:
+        raise NotImplementedError(
+            "Jittor ACL npu_fusion_attention does not support pse, padding masks, or prefix")
+    if (float(keep_prob) != 1.0 or int(seed) != 0 or int(offset) != 0):
+        raise NotImplementedError(
+            "Jittor ACL npu_fusion_attention does not support seeded dropout")
+    if (int(pre_tockens) != 2147483647 or int(next_tockens) != 2147483647
+            or int(inner_precise) != 0 or not gen_mask_parallel or sync
+            or softmax_layout):
+        raise NotImplementedError(
+            "Jittor ACL npu_fusion_attention supports only full-window default settings")
     if input_layout not in ("BSND", "TND"):
         raise NotImplementedError(
             "Jittor ACL npu_fusion_attention currently supports BSND and TND")
@@ -207,7 +229,7 @@ def npu_fusion_attention(
         raise NotImplementedError(
             "Jittor ACL npu_fusion_attention does not support pse, padding masks, or prefix")
     if (int(pre_tockens) != 2147483647
-            or int(next_tokens) != 2147483647 or int(inner_precise) != 0
+            or int(next_tockens) != 2147483647 or int(inner_precise) != 0
             or not gen_mask_parallel or sync or softmax_layout):
         raise NotImplementedError(
             "Jittor ACL npu_fusion_attention supports only full-window default settings")
