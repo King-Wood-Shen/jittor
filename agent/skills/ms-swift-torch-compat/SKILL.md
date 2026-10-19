@@ -9,7 +9,12 @@ description: 基于干净 ms-swift 注册表和公开入口，验证 Jittor Torc
 
 目标是尽可能广地支持 ms-swift 的公开训练和推理入口。所有结论绑定 ms-swift、Jittor 完整 SHA、设备、模型、配置、验证命令和原始日志。一个 tiny 模型通过不代表整库支持；注册可见、导入成功、脚本启动不代表算法通过。
 
-本轮优先功能和正确性。用户已明确不要求速度、吞吐、耗时、显存性能验收；L4 记“未测”，不能沿用旧数值。按 downstream-library-adaptation/SKILL.md 分别报告 L1 导入/前向，L2 独立 PyTorch 对照的前向与全部请求梯度，L3 多步训练轨迹，L5 真机零 fallback。训练业务验收另记录 loss 是否稳定收敛；收敛不能冒充严格 L2 对拍，L3 也不能自动推出 L2。推理按真实调用路径对照输出、logits、KV cache 等适用结果。
+本轮优先功能和正确性、训练收敛及目标设备峰值显存；不要求速度、吞吐或耗时验证。未测的性能等级仍记“未测”，不能沿用旧数值。按 downstream-library-adaptation/SKILL.md 分别报告 L1 导入/前向，L2 独立 PyTorch 对照的前向与全部请求梯度，L3 多步训练轨迹，L5 真机零 fallback。训练业务验收另记录 loss 是否稳定收敛；收敛不能冒充严格 L2 对拍，L3 也不能自动推出 L2。推理按真实调用路径对照输出、logits、KV cache 等适用结果。
+
+
+## 本轮主要优化与开关
+
+按[主要优化与开关的验收路径](references/priority-optimizations.md)选择代表场景；本轮记录训练收敛、功能正确性、零 fallback 和设备峰值显存，不把耗时或吞吐作为验收门槛。旧性能数据只按原基线解释。
 
 ## 起步和复用
 
