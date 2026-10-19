@@ -185,10 +185,13 @@ def softmax_acl(x, log=False, zero_all_neg_inf=False, dim=None):
     if dim is None:
         dim = 0 if x.ndim in (0, 1, 3) else 1
     if log:
+        result_dtype = x.dtype
         x = x.float32()
         m = jt.max(x, dim, keepdims=True)
         shifted = x - m
-        return shifted - jt.log(jt.exp(shifted).sum(dim, keepdims=True))
+        # Accumulate in float32, then honor the input dtype at the public
+        # boundary, as the native and Torch log_softmax contracts require.
+        return (shifted - jt.log(jt.exp(shifted).sum(dim, keepdims=True))).cast(result_dtype)
     return SoftmaxACL()(x, dim)
 
 

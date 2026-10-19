@@ -734,6 +734,21 @@ class TestACL(unittest.TestCase):
         print('test_matmul pass')
 
     @jt.flag_scope(use_acl=1)
+    def test_log_softmax_preserves_low_precision_output_dtype(self):
+        logits = np.array([[1.25, -0.75, 2.5], [-2.0, 0.5, 0.25]], dtype=np.float32)
+        shifted = logits - logits.max(axis=-1, keepdims=True)
+        expected = shifted - np.log(np.exp(shifted).sum(axis=-1, keepdims=True))
+        with jt.flag_scope(use_cuda=1):
+            for dtype, atol in (("float16", 2e-3), ("bfloat16", 2e-2),
+                                ("float32", 1e-6)):
+                with self.subTest(dtype=dtype):
+                    output = jt.nn.log_softmax(jt.array(logits).cast(dtype), dim=-1)
+                    self.assertEqual(str(output.dtype), dtype)
+                    _assert_acl_device(self, output)
+                    np.testing.assert_allclose(output.float32().numpy(), expected,
+                                               atol=atol, rtol=atol)
+
+    @jt.flag_scope(use_acl=1)
     def test_inference_rms_norm(self):
         rng = np.random.RandomState(2026)
         x_np = rng.randn(2, 3, 1024).astype("float32")
