@@ -10,6 +10,13 @@ from _helpers.device_types import instantiate_device_type_tests
 
 
 class TestTensorInplaceStorage:
+    def test_add_into_lazy_integer_tensor(self, device):
+        position = torch.arange(8, dtype=torch.int64, device=device)
+        if hasattr(torch, "_torch_compat_install_context"):
+            assert position.location() == "none"
+        assert position.add_(2) is position
+        np.testing.assert_array_equal(position.cpu().numpy(), np.arange(2, 10))
+
     def test_low_precision_slice_mutations_preserve_aliases(self, device):
         for dtype in (torch.float16, torch.bfloat16):
             for operation, expected in ((lambda x: x.copy_(torch.tensor([6., 8.], device=device)), [6., 8.]),
