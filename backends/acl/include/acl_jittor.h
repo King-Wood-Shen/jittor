@@ -6,6 +6,7 @@
 // ***************************************************************
 #pragma once
 #include "core/common.h"
+#include "core/var.h"
 #include "aclnn/aclnn.h"
 #include <acl/acl.h>
 #include "acl_runtime.h"
