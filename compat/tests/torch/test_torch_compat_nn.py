@@ -188,7 +188,11 @@ class TestActivations(Base):
                     ("torch", torch.log_softmax(half, -1, dtype=torch.float32)),
                     ("Tensor", half.log_softmax(-1, dtype=torch.float32))):
                 self.assertEqual(out.dtype, torch.float32, f"{name} dtype {dev}")
-                self.assertEqual(out.device.type, dev, f"{name} device {dev}")
+                # ACL accepts the legacy "cuda" request alias but reports
+                # its canonical device type as "npu". Preserve the actual
+                # input device through log_softmax on every backend.
+                self.assertEqual(out.device.type, half.device.type,
+                                 f"{name} device {dev}")
                 self.ac(out.numpy(), ref, atol=1e-5, msg=f"{name} log_softmax {dev}")
             module = nn.LogSoftmax(dim=-1)
             self.ac(module(half.float()).numpy(), ref, atol=1e-5,
