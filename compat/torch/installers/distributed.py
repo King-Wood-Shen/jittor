@@ -1251,6 +1251,69 @@ def _install_distributed(g, registry=None):
         setattr(c10d, name, getattr(dist, name))
         setattr(g._C._distributed_c10d, name, getattr(dist, name))
 
+    # DeepSpeed imports its optional elastic launcher while resolving a
+    # torchrun-launched job. The job uses torchrun directly, so these names
+    # only need to keep that unused launcher importable; invoking the elastic
+    # agent remains explicitly unsupported by this Jittor process group.
+    def _elastic_unsupported(*args, **kwargs):
+        raise NotImplementedError(
+            "Torch elastic agent execution is not implemented by Jittor compat; "
+            "launch distributed workers with torchrun"
+        )
+
+    def _elastic_module(name, package=False):
+        module = _modules.get(name)
+        if module is None:
+            module = _types.ModuleType(name)
+            if package:
+                module.__path__ = []
+            _modules[name] = module
+        return module
+
+    elastic = _elastic_module("torch.distributed.elastic", package=True)
+    agent = _elastic_module("torch.distributed.elastic.agent", package=True)
+    server = _elastic_module("torch.distributed.elastic.agent.server", package=True)
+    elastic_api = _elastic_module("torch.distributed.elastic.agent.server.api")
+    elastic_api.RunResult = type("RunResult", (), {})
+    elastic_api.WorkerGroup = type("WorkerGroup", (), {})
+    elastic_api.WorkerSpec = type("WorkerSpec", (), {})
+    import enum as _enum
+    elastic_api.WorkerState = _enum.Enum(
+        "WorkerState", "INIT HEALTHY UNHEALTHY STOPPED SUCCEEDED FAILED"
+    )
+
+    class _LocalElasticAgent:
+        def __init__(self, *args, **kwargs):
+            _elastic_unsupported(*args, **kwargs)
+
+    local_agent = _elastic_module(
+        "torch.distributed.elastic.agent.server.local_elastic_agent"
+    )
+    local_agent.LocalElasticAgent = _LocalElasticAgent
+    server.api = elastic_api
+    server.local_elastic_agent = local_agent
+    agent.server = server
+    elastic.agent = agent
+
+    metrics = _elastic_module("torch.distributed.elastic.metrics", package=True)
+    metrics.put_metric = _elastic_unsupported
+    utils = _elastic_module("torch.distributed.elastic.utils", package=True)
+    elastic_dist = _elastic_module("torch.distributed.elastic.utils.distributed")
+    elastic_dist.get_free_port = _elastic_unsupported
+    elastic_logging = _elastic_module("torch.distributed.elastic.utils.logging")
+    import logging as _logging
+    elastic_logging.get_logger = _logging.getLogger
+    macros = _elastic_module("torch.distributed.elastic.utils.macros")
+    macros.substitute = _elastic_unsupported
+    utils.distributed = elastic_dist
+    utils.logging = elastic_logging
+    utils.macros = macros
+    multiprocessing = _elastic_module(
+        "torch.distributed.elastic.multiprocessing", package=True
+    )
+    multiprocessing.start_processes = _elastic_unsupported
+    dist.elastic = elastic
+
     # `torch._C._distributed_c10d` is the extension module the public names come
     # from, and callers reach for them there as well as on `torch.distributed`:
     # `op=torch._C._distributed_c10d.ReduceOp.SUM` is a default argument in
