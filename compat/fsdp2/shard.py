@@ -102,6 +102,20 @@ class _ShardTensorMethod:
         return self.function(tensor, *args, **kwargs)
 
 
+def _fsdp_var_size(var, dim=None):
+    """A sharded parameter's Torch-facing size is its global parameter size."""
+    entry = getattr(var, "_jittor_fsdp2_entry", None)
+    shape = tuple(getattr(entry, "shape", tuple(var.shape)))
+    if dim is None:
+        return shape
+    dim = int(dim)
+    if dim < 0:
+        dim += len(shape)
+    if dim < 0 or dim >= len(shape):
+        raise IndexError("dimension out of range")
+    return shape[dim]
+
+
 def _parameter_requires_grad(param):
     return _storage._parameter_requires_grad(param)
 
@@ -112,6 +126,9 @@ def _mark_fsdp_param_var(var, state, entry, role):
         object.__setattr__(var, "_jittor_fsdp2_entry", entry)
         object.__setattr__(var, "_jittor_fsdp2_module", getattr(state, "true_fsdp_module", None))
         object.__setattr__(var, "_jittor_fsdp2_role", role)
+        object.__setattr__(
+            var, "size", _ShardTensorMethod(_fsdp_var_size, state, entry, role)
+        )
         object.__setattr__(
             var,
             "_dtensor_device_mesh",
