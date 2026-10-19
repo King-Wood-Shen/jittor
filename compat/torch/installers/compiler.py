@@ -131,6 +131,13 @@ class Proxy:
     """Annotation placeholder; no FX tracing."""
 
 
+class Interpreter:
+    """Import marker; Jittor compat does not execute Torch FX graphs."""
+
+    def __init__(self, *args, **kwargs):
+        raise NotImplementedError("torch.fx.Interpreter execution is not implemented by Jittor compat")
+
+
 class Node:
     """Annotation placeholder; no FX node representation."""
 
@@ -756,6 +763,7 @@ def install(ctx):
     _fx.__path__ = []
     _fx.Graph = Graph
     _fx.GraphModule = GraphModule
+    _fx.Interpreter = Interpreter
     _fx.Proxy = Proxy
     _fx.Node = Node
     _fx.wrap = _api_fx_wrap
