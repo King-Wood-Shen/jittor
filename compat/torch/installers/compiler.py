@@ -138,6 +138,22 @@ class Interpreter:
         raise NotImplementedError("torch.fx.Interpreter execution is not implemented by Jittor compat")
 
 
+class FakeTensorProp:
+    """Import marker; Jittor compat does not propagate Torch fake tensors."""
+
+    def __init__(self, *args, **kwargs):
+        raise NotImplementedError(
+            "torch.fx.passes.fake_tensor_prop.FakeTensorProp is not implemented by Jittor compat")
+
+
+class ShapeEnv:
+    """Import marker; Jittor compat does not track Torch symbolic shapes."""
+
+    def __init__(self, *args, **kwargs):
+        raise NotImplementedError(
+            "torch.fx.experimental.symbolic_shapes.ShapeEnv is not implemented by Jittor compat")
+
+
 class Node:
     """Annotation placeholder; no FX node representation."""
 
@@ -550,7 +566,8 @@ def _api_onnx_is_in_onnx_export():
     return False
 
 
-_COMPILER_PLACEHOLDERS = frozenset((Graph, GraphModule, Proxy, Node, OptimizedModule,
+_COMPILER_PLACEHOLDERS = frozenset((Graph, GraphModule, Proxy, Node, FakeTensorProp,
+                                   ShapeEnv, OptimizedModule,
                                    onnx_export))
 
 
@@ -769,6 +786,22 @@ def install(ctx):
     _fx.wrap = _api_fx_wrap
     _modules["torch.fx"] = _fx
     g.fx = _fx
+    _fx_passes = _types2.ModuleType("torch.fx.passes")
+    _fx_passes.__path__ = []
+    _fake_tensor_prop = _types2.ModuleType("torch.fx.passes.fake_tensor_prop")
+    _fake_tensor_prop.FakeTensorProp = FakeTensorProp
+    _fx_passes.fake_tensor_prop = _fake_tensor_prop
+    _fx.passes = _fx_passes
+    _modules["torch.fx.passes"] = _fx_passes
+    _modules["torch.fx.passes.fake_tensor_prop"] = _fake_tensor_prop
+    _fx_experimental = _types2.ModuleType("torch.fx.experimental")
+    _fx_experimental.__path__ = []
+    _symbolic_shapes = _types2.ModuleType("torch.fx.experimental.symbolic_shapes")
+    _symbolic_shapes.ShapeEnv = ShapeEnv
+    _fx_experimental.symbolic_shapes = _symbolic_shapes
+    _fx.experimental = _fx_experimental
+    _modules["torch.fx.experimental"] = _fx_experimental
+    _modules["torch.fx.experimental.symbolic_shapes"] = _symbolic_shapes
     # torch._dynamo: minimal importable stubs for libraries that probe or
     # decorate with Dynamo APIs. Jittor runs eagerly/JIT through its own stack.
     _dynamo = _types2.ModuleType("torch._dynamo")

@@ -122,6 +122,11 @@ class FakeTensorMode(_PlaceholderContext):
     """Import-compatible mode placeholder; no fake-tensor dispatch is installed."""
 
 
+def _api_fake_tensor_maybe_get_fake_mode(value):
+    """Return no mode for values handled by Jittor's real-tensor backend."""
+    return None
+
+
 
 def _flatten_dense_tensors(tensors):
     tensors = list(tensors)
@@ -911,6 +916,7 @@ def install(ctx):
         _functional_tensor = _types2.ModuleType("torch._subclasses.functional_tensor")
         _fake_tensor.FakeTensor = FakeTensor
         _fake_tensor.FakeTensorMode = FakeTensorMode
+        _fake_tensor.maybe_get_fake_mode = _api_fake_tensor_maybe_get_fake_mode
         _fake_tensor.unset_fake_temporarily = (
             _api_fake_tensor_unset_fake_temporarily
         )
