@@ -211,6 +211,10 @@ def _copy_detached_storage(self, value):
     if (tuple(self.shape) != tuple(value.shape)
             or self.dtype != value.dtype):
         return False
+    # A lazy tensor has no storage to preserve yet. Keep its pending graph by
+    # assigning the new value through the normal in-place path.
+    if self.location() == "none":
+        return False
     if self.numel():
         # Resolve pending readers (including clone snapshots) before changing
         # bytes. _copy_into owns placement, stream ordering and dense copies.
