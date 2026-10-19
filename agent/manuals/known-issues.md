@@ -2155,6 +2155,32 @@ workaround.
   momentum and Nesterov paths, with genuine Torch controls. Preserve legacy
   native optimizer defaults and published gradients.
 
+## KI-COMPAT-016: KTO causal-mask in-place add can copy into unallocated storage
+
+- Severity: Medium (the CUDA training step fails explicitly).
+- Status: Resolved on the current worktree; the storage-copy fast path now falls through to `Var.assign` when the destination has no allocation.
+- Owner: Torch compatibility tensor in-place semantics and Jittor storage lifecycle.
+- Symptom: the public `swift.cli.main rlhf --rlhf_type kto` entry with a fixed
+  two-row Qwen2-0.5B preference set completes three native Torch steps, but
+  its strict Jittor CUDA run fails on the first step at
+  `transformers.masking_utils.sdpa_mask_recent_torch`'s `kv_arange += kv_offset`
+  with `_copy_into needs an allocated tensor (var_holder.cc:273)`.
+- Cause: the frontend's `_copy_detached_storage` took the imperative
+  `_copy_into` path for a length-29, non-view, stopped-gradient `arange` whose
+  destination had no allocation at that point. A standalone CUDA `arange += 0`
+  succeeds, so the missing allocation depends on deferred graph execution.
+- Fix: skip imperative storage copy when `_mem_ptr_now` is empty and let `_ip`
+  assign the computed value through the existing graph-aware path.
+- Workaround: none required after the storage-copy fast-path fix.
+- Evidence: pre-fix Slurm jobs `105635`, `105802`, and `105917` under
+  `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261019-qwen2-{kto,dpo}-*`; fixed
+  KTO job `105933` completed three steps with checkpoint and fallback=0, and
+  fixed DPO job `105947` completed three steps with checkpoint and fallback=0.
+  The KTO loss max difference was `3.28e-7`; DPO was `1.07e-6`.
+- Exit condition: satisfied by the fixed KTO and DPO public CUDA entries, each
+  with three steps, checkpoints, zero fallback, and matching native Torch
+  loss and parameter trajectories.
+
 ## KI-DIST-001: FSDP2 flat sharding peaks above the unsharded model
 
 - Severity: Limitation (memory; numerics are correct)

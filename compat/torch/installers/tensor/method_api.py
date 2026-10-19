@@ -212,6 +212,12 @@ def _copy_detached_storage(self, value):
             or self.dtype != value.dtype):
         return False
     if self.numel():
+        # An imperative copy requires existing destination storage. Deferred
+        # tensors such as Transformers' causal-mask arange can still be
+        # unallocated here; let _ip fall through to Var.assign so it keeps the
+        # result graph and does not call _copy_into with a null mem_ptr.
+        if not self._mem_ptr_now:
+            return False
         # Resolve pending readers (including clone snapshots) before changing
         # bytes. _copy_into owns placement, stream ordering and dense copies.
         _owner.jt.sync_all()
