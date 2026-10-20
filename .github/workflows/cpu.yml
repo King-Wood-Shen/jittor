@@ -36,14 +36,18 @@ jobs:
     # a cache miss, not just the tests.
     timeout-minutes: 45
     steps:
+      # Git must be present before checkout; otherwise it downloads an archive.
+      - name: Install native CPU toolchain and git
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends build-essential libomp-dev git
       - name: Check out source
         uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Install native CPU toolchain
-        run: |
-          apt-get update
-          apt-get install --yes --no-install-recommends build-essential libomp-dev
+      # Nox gives each test process a private HOME, so trust the runner-owned checkout system-wide.
+      - name: Trust the checkout
+        run: git config --system --add safe.directory "${GITHUB_WORKSPACE}"
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -72,14 +76,18 @@ jobs:
     # the manual probes and the independent-PyTorch oracle.
     timeout-minutes: 240
     steps:
+      # Git must be present before checkout; otherwise it downloads an archive.
+      - name: Install native CPU toolchain and git
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends build-essential libomp-dev git
       - name: Check out source
         uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Install native CPU toolchain
-        run: |
-          apt-get update
-          apt-get install --yes --no-install-recommends build-essential libomp-dev
+      # Nox gives each test process a private HOME, so trust the runner-owned checkout system-wide.
+      - name: Trust the checkout
+        run: git config --system --add safe.directory "${GITHUB_WORKSPACE}"
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
