@@ -120,6 +120,49 @@ def manual_seed_all(seed):
     jt.core.rng_manual_seed_all("acl", value)
 
 
+def _random_state_api(name, *args):
+    """Use the native ACL RNG snapshot protocol shared with CUDA's shim API."""
+    from .cuda.api import (
+        _api_cuda_get_rng_state,
+        _api_cuda_get_rng_state_all,
+        _api_cuda_set_rng_state,
+        _api_cuda_set_rng_state_all,
+        _api_cuda_initial_seed,
+    )
+    return {
+        "get_rng_state": _api_cuda_get_rng_state,
+        "get_rng_state_all": _api_cuda_get_rng_state_all,
+        "set_rng_state": _api_cuda_set_rng_state,
+        "set_rng_state_all": _api_cuda_set_rng_state_all,
+        "initial_seed": _api_cuda_initial_seed,
+    }[name](*args)
+
+
+def _random_get_rng_state(device=None):
+    _require_acl()
+    return _random_state_api("get_rng_state", device)
+
+
+def _random_get_rng_state_all():
+    _require_acl()
+    return _random_state_api("get_rng_state_all")
+
+
+def _random_set_rng_state(state, device=None):
+    _require_acl()
+    return _random_state_api("set_rng_state", state, device)
+
+
+def _random_set_rng_state_all(states):
+    _require_acl()
+    return _random_state_api("set_rng_state_all", states)
+
+
+def _random_initial_seed():
+    _require_acl()
+    return _random_state_api("initial_seed")
+
+
 def npu_rms_norm(input, weight, epsilon=1e-6):
     """``torch_npu.npu_rms_norm``, as an ACL tensor graph.
 
@@ -291,7 +334,17 @@ def install(ctx):
         setattr(npu, name, globals()[name])
     for name in _REFUSED:
         setattr(npu, name, _unsupported)
+    random = types.ModuleType("torch.npu.random")
+    random.get_rng_state = _random_get_rng_state
+    random.get_rng_state_all = _random_get_rng_state_all
+    random.set_rng_state = _random_set_rng_state
+    random.set_rng_state_all = _random_set_rng_state_all
+    random.manual_seed = manual_seed
+    random.manual_seed_all = manual_seed_all
+    random.initial_seed = _random_initial_seed
+    npu.random = random
     registry.publish("torch.npu", npu, replace=True)
+    registry.publish("torch.npu.random", random, replace=True)
     target.npu = npu
 
     from .cuda.api import (
@@ -319,6 +372,13 @@ def install(ctx):
         ("get_rng_state", "get_rng_state_all", "set_rng_state", "set_rng_state_all"),
         Fidelity.EXACT,
         "Serializes and restores native ACL stream counter states as CPU byte tensors.")
+    register_api_bindings(
+        random, "torch.npu.random",
+        ("get_rng_state", "get_rng_state_all", "set_rng_state",
+         "set_rng_state_all", "manual_seed", "manual_seed_all", "initial_seed"),
+        Fidelity.EXACT,
+        "Packs and restores Jittor's native ACL seed and stream position in a "
+        "CPU ByteTensor for Transformers training checkpoint continuation.")
     register_api_bindings(
         npu, "torch.npu", ("synchronize", "empty_cache"), Fidelity.APPROXIMATE,
         "Submits Jittor's pending work and waits for every device it "
