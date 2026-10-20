@@ -1,6 +1,6 @@
 # ms-swift Ascend 单卡 RLHF 算法训练对照
 
-- 状态：DPO、KTO、CPO、纯 SimPO、ORPO 在限定三步场景通过；GRPO 的公开入口和设备执行通过，采样轨迹未达到数值对照准入；GKD 本地 teacher 尝试在首步出现零 loss/零梯度，未通过。
+- 状态：DPO、KTO、CPO、纯 SimPO、ORPO 在限定三步场景通过；GRPO 的公开入口和设备执行通过，采样轨迹未达到数值对照准入；RM 在小模型本地 pair 场景完成 NPU 训练；GKD 本地 teacher 尝试在首步出现零 loss/零梯度，未通过。
 - 日期：2026-10-19
 - 代码基线：集成提交 `0b872e5ddf94304ebd9281f50a1cec874092a4dd`；修复提交 `7f396c615d017afde175d337399d516f28253005`。
 - 下游来源：ms-swift 4.5.2；native 与 shim 环境中的 `swift/cli/rlhf.py` SHA256 均为 `f68c8b93ff4bfd08374fa2bca6efadcfe23e7beec13db162953275138fa56d65`。PEFT LoRA forward、PEFT model 与 TRL KTO trainer 源文件在两环境逐文件 SHA256 相同。
