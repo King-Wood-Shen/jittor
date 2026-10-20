@@ -163,6 +163,22 @@ def test_config_is_detached_and_every_native_flag_has_one_owner():
     assert native_fields <= STARTUP_FLAGS | RUNTIME_FLAGS | READONLY_FLAGS | FLAG_ALIASES.keys()
 
 
+@pytest.mark.parametrize("name", [
+    "async_execution", "async_flush_ops", "async_min_caller_us", "stream_dying_inputs",
+    "async_release_lag_bytes",
+])
+def test_async_execution_controls_are_scoped_runtime_flags(name):
+    if not hasattr(jt.flags, name):
+        pytest.skip(f"{name} unavailable in this backend build")
+    original = getattr(jt.flags, name)
+    try:
+        with jt.runtime.scope(**{name: 0}):
+            assert getattr(jt.runtime, name) == 0
+        assert getattr(jt.runtime, name) == original
+    finally:
+        setattr(jt.flags, name, original)
+
+
 def test_flag_policy_changes_invalidate_the_native_binding_build_stamp():
     files = jt.compiler.core_generator_signature()["files"]
     policy = files["_runtime/flag_policy.py"]

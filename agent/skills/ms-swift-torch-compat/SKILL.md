@@ -1,11 +1,21 @@
 ---
 name: ms-swift-torch-compat
-description: 在 Jittor torch shim 与独立原生 Torch 两侧验证 ms-swift。维护 CPU/CUDA 注册 tiny Llama 的真实 FULL SFT Trainer 三步门禁、完整安装来源绑定及历史自带 LoRA tuner 对拍；不将有界场景外推为全库或分布式支持。
+description: 在真实 NVIDIA CUDA 上验证 ms-swift 经 Jittor torch shim 的公开训练、推理、算法和开关；CPU 仅允许独立原生 PyTorch oracle，不做 CPU 适配或 CPU 全量/smoke 门禁。
 ---
 
 # ms-swift × Jittor torch shim
 
-## 当前验收入口（2026-10-15）
+## 本轮 CUDA 范围
+
+当前授权范围是 CUDA 的公开训练、推理、算法和开关。不要开发 CPU 适配，也不要运行 CPU 全量或 smoke 门禁。CPU 结果只保留为历史记录；对照使用真正运行在 CUDA 上的独立原生 PyTorch oracle。按代表场景覆盖，不把单一 tiny case 外推到整个 ms-swift。
+
+本轮开关与优化优先级以[验收矩阵](references/priority-optimizations.md)为准；它覆盖训练状态、精度/注意力、数据/损失、偏好/RL 和条件优化。对每项记录实际公开入口、实际执行分支、loss 或推理输出、零 fallback 与设备级峰值显存。计时和速度比不作本轮门槛。
+
+候选端 `sitecustomize` 必须让 `jittor_utils.query_cuda_cc` 探测子进程和 `jit_utils_core.cache_compile(...)` 缓存键子进程跳过 Jittor/shim bootstrap。否则子进程会尝试获取父进程持有的 `jittor.lock`，造成冷缓存导入死锁；这两个内部子进程须在完整模型进程初始化前独立退出。命中已有编译缓存时不会启动它们，不应把缺少子进程日志误报为 guard 失败。
+
+Jittor 的 `torch.utils.checkpoint.checkpoint` 当前为兼容近似：直接调用被包装函数并发出警告，不保存激活或降低显存。CUDA 开关验收只能确认公开参数是否进入 checkpoint 调用路径、以及训练是否正确；不能据此宣称节省显存。
+
+## 历史验收入口（2026-10-15）
 
 [注册 FULL SFT 与完整安装来源报告](../../../docs/results/2026-10-15-swift-trainer-installed-source.md)
 记录干净 Swift 4.5.2 的真实 `SwiftSft.main()`：注册 LlamaLoader、Llama template 和

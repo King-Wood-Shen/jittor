@@ -2,7 +2,7 @@
 
 import jittor as jt
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
-from jittor._runtime.dispatch import try_dispatch
+from jittor._runtime.dispatch import dispatch_context, try_dispatch
 
 from .vector import cosine_similarity
 
@@ -75,6 +75,16 @@ class _CrossEntropyRows(jt.Function):
 
     def execute(self, x, target, target_weight):
         rows = x.shape[0]
+        # Torch inputs can arrive as a materialized host target beside a
+        # lazy CUDA output.  The comparison in ``ternary`` requires all
+        # operands to use one backend; make the index and its per-row weight
+        # follow the output's device before composing the row expression.
+        # ``location() == "none"`` is normal for a lazily placed CUDA Var.
+        # Ask the dispatch context for its actual backend, then preserve the
+        # CPU path and place indices beside CUDA logits.
+        if dispatch_context(x).backend == "cuda" and x.location() != "cpu":
+            target = target.to_device(x.device_id)
+            target_weight = target_weight.to_device(x.device_id)
         self.narrow_dtype = (x.dtype if _jittor_dtype_name(x.dtype)
                              in ("float16", "bfloat16") else None)
         if self.narrow_dtype is not None:
