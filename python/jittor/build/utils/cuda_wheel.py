@@ -18,6 +18,7 @@ import collections
 import hashlib
 import os
 import re
+from typing import Sequence, Tuple
 
 try:
     from importlib import metadata as importlib_metadata
@@ -73,14 +74,21 @@ CUDA13_COMPONENTS = (
 #: before it -- because that is the order they have to be loaded in.
 CUDNN_SPLIT_LIBRARIES = {
     8: (
-        "cudnn_ops_infer", "cudnn_ops_train",
-        "cudnn_cnn_infer", "cudnn_cnn_train",
-        "cudnn_adv_infer", "cudnn_adv_train",
+        "cudnn_ops_infer",
+        "cudnn_ops_train",
+        "cudnn_cnn_infer",
+        "cudnn_cnn_train",
+        "cudnn_adv_infer",
+        "cudnn_adv_train",
     ),
     9: (
-        "cudnn_graph", "cudnn_ops", "cudnn_cnn", "cudnn_adv",
+        "cudnn_graph",
+        "cudnn_ops",
+        "cudnn_cnn",
+        "cudnn_adv",
         "cudnn_heuristic",
-        "cudnn_engines_precompiled", "cudnn_engines_runtime_compiled",
+        "cudnn_engines_precompiled",
+        "cudnn_engines_runtime_compiled",
     ),
 }
 
@@ -127,9 +135,7 @@ CUDNN_PRELOAD_PREFIX = ("cudart", "cublasLt", "cublas", "nvrtc")
 
 def cudnn_preload_order(cudnn_major):
     """Everything to load before calling into cuDNN `cudnn_major`, in order."""
-    return (CUDNN_PRELOAD_PREFIX
-            + CUDNN_SPLIT_LIBRARIES[cudnn_major]
-            + ("cudnn",))
+    return CUDNN_PRELOAD_PREFIX + CUDNN_SPLIT_LIBRARIES[cudnn_major] + ("cudnn",)
 
 
 def _specifier_matches(specifier, version):
@@ -145,7 +151,7 @@ def _specifier_matches(specifier, version):
         clause = clause.strip()
         for operator in ("==", "!=", ">=", "<=", ">", "<"):
             if clause.startswith(operator):
-                wanted = clause[len(operator):].strip()
+                wanted = clause[len(operator) :].strip()
                 break
         else:
             raise CudaWheelError("unparsable version specifier %r" % specifier)
@@ -211,14 +217,13 @@ class CudaWheelStack:
     """Resolved paths and versions for one supported CUDA wheel stack."""
 
     cuda_version = "12.2"
-    component_specs = CUDA12_COMPONENTS
+    component_specs: Sequence[Tuple[str, str, str, str]] = CUDA12_COMPONENTS
 
     def __init__(self, components, versions):
         self.components = dict(components)
         self.versions = dict(versions)
         version_text = ";".join(
-            "%s=%s" % (name, self.versions[name])
-            for name, _, _, _ in self.component_specs
+            "%s=%s" % (name, self.versions[name]) for name, _, _, _ in self.component_specs
         )
         digest = hashlib.sha256(version_text.encode("ascii")).hexdigest()[:12]
         self.fingerprint = "pipcu" + self.cuda_version.replace(".", "") + "_" + digest
@@ -237,18 +242,14 @@ class CudaWheelStack:
             roots = [self.component_dir(component)]
         else:
             roots = [self.components[name] for name, _, _, _ in self.component_specs]
-        return _unique_existing(
-            os.path.join(root, "include") for root in roots if root
-        )
+        return _unique_existing(os.path.join(root, "include") for root in roots if root)
 
     def lib_dirs(self, component=None):
         if component is not None:
             roots = [self.component_dir(component)]
         else:
             roots = [self.components[name] for name, _, _, _ in self.component_specs]
-        return _unique_existing(
-            os.path.join(root, "lib") for root in roots if root
-        )
+        return _unique_existing(os.path.join(root, "lib") for root in roots if root)
 
     def find_library(self, name, component=None):
         component = component or LIBRARY_COMPONENTS.get(name)
@@ -261,6 +262,7 @@ class CudaWheelStack:
             patterns = ("lib" + name + ".so", "lib" + name + ".so.*")
         matches = []
         import glob
+
         for directory in dirs:
             for pattern in patterns:
                 matches.extend(glob.glob(os.path.join(directory, pattern)))
@@ -268,11 +270,13 @@ class CudaWheelStack:
         if not matches:
             return None
         # Prefer the ABI SONAME (for example .so.12) over a patch-version file.
-        matches.sort(key=lambda path: (
-            os.path.basename(path).count("."),
-            len(os.path.basename(path)),
-            _natural_version_key(path),
-        ))
+        matches.sort(
+            key=lambda path: (
+                os.path.basename(path).count("."),
+                len(os.path.basename(path)),
+                _natural_version_key(path),
+            )
+        )
         return matches[0]
 
     def linker_flags(self, name):
@@ -336,7 +340,9 @@ def discover_wheel_nvcc(distribution=None):
     except importlib_metadata.PackageNotFoundError:
         return None
     if str(dist.version) != "13.0.88":
-        raise CudaWheelError("jittor[cuda13] requires nvidia-cuda-nvcc==13.0.88, found %s" % dist.version)
+        raise CudaWheelError(
+            "jittor[cuda13] requires nvidia-cuda-nvcc==13.0.88, found %s" % dist.version
+        )
     path = os.path.abspath(os.fspath(dist.locate_file("nvidia/cu13/bin/nvcc")))
     if not os.path.isfile(path) or not os.access(path, os.X_OK):
         raise CudaWheelError("nvidia-cuda-nvcc does not contain an executable nvidia/cu13/bin/nvcc")
@@ -346,13 +352,23 @@ def discover_wheel_nvcc(distribution=None):
 def _validate_stack(stack):
     if stack.cuda_version == "13.0":
         root = stack.components["cuda_nvcc"]
-        if any(os.path.realpath(path) != os.path.realpath(root)
-               for path in stack.components.values()):
-            raise CudaWheelError("CUDA 13 compiler/runtime/CCCL wheels must share one nvidia/cu13 prefix")
-        required = ("bin/nvcc", "include/cuda_runtime.h", "include/crt/host_config.h",
-                    "nvvm/libdevice/libdevice.10.bc", "nvvm/bin/cicc", "lib/libcudadevrt.a",
-                    "include/cccl/cub/cub.cuh", "include/cccl/thrust/version.h",
-                    "include/cccl/cuda/std/version")
+        if any(
+            os.path.realpath(path) != os.path.realpath(root) for path in stack.components.values()
+        ):
+            raise CudaWheelError(
+                "CUDA 13 compiler/runtime/CCCL wheels must share one nvidia/cu13 prefix"
+            )
+        required = (
+            "bin/nvcc",
+            "include/cuda_runtime.h",
+            "include/crt/host_config.h",
+            "nvvm/libdevice/libdevice.10.bc",
+            "nvvm/bin/cicc",
+            "lib/libcudadevrt.a",
+            "include/cccl/cub/cub.cuh",
+            "include/cccl/thrust/version.h",
+            "include/cccl/cuda/std/version",
+        )
         for path in required:
             if not os.path.isfile(os.path.join(root, path)):
                 raise CudaWheelError("CUDA 13 wheel toolchain is missing %s" % path)
@@ -369,22 +385,35 @@ def _validate_stack(stack):
         "nccl": "nccl.h",
     }
     for component, header in required_headers.items():
-        if not any(os.path.isfile(os.path.join(path, header))
-                   for path in stack.include_dirs(component)):
-            raise CudaWheelError(
-                "%s %s is missing from the NVIDIA wheel" % (component, header)
-            )
+        if not any(
+            os.path.isfile(os.path.join(path, header)) for path in stack.include_dirs(component)
+        ):
+            raise CudaWheelError("%s %s is missing from the NVIDIA wheel" % (component, header))
     # Which cuDNN split libraries have to be there depends on the major
     # version: cuDNN 9 renamed all six of cuDNN 8's.
     if stack.cudnn_major not in CUDNN_SPLIT_LIBRARIES:
         raise CudaWheelError(
             "cuDNN %s is not supported; jittor supports cuDNN %s"
-            % (stack.versions.get("cudnn"),
-               " and ".join(str(v) for v in CUDNN_MAJORS)))
+            % (stack.versions.get("cudnn"), " and ".join(str(v) for v in CUDNN_MAJORS))
+        )
     required_libraries = (
-        "cudart", "cublas", "cublasLt", "nvrtc", "nvrtc-builtins", "cudnn",
-    ) + CUDNN_SPLIT_LIBRARIES[stack.cudnn_major] + (
-        "cufft", "curand", "cusparse", "nvJitLink", "nvToolsExt", "nccl",
+        (
+            "cudart",
+            "cublas",
+            "cublasLt",
+            "nvrtc",
+            "nvrtc-builtins",
+            "cudnn",
+        )
+        + CUDNN_SPLIT_LIBRARIES[stack.cudnn_major]
+        + (
+            "cufft",
+            "curand",
+            "cusparse",
+            "nvJitLink",
+            "nvToolsExt",
+            "nccl",
+        )
     )
     for name in required_libraries:
         if not stack.find_library(name):
@@ -405,8 +434,7 @@ def _validate_stack(stack):
 #:             For the CUDA 13 toolchain, any installed but incomplete or
 #:             mismatched set is also broken; mixing its shared prefix with a
 #:             different toolkit cannot supply the compiler's missing pieces.
-CudaWheelReport = collections.namedtuple(
-    "CudaWheelReport", "stack reason present broken")
+CudaWheelReport = collections.namedtuple("CudaWheelReport", "stack reason present broken")
 
 
 def inspect_cuda_wheel_stack(nvcc_version=None, distribution=None):
@@ -426,13 +454,12 @@ def inspect_cuda_wheel_stack(nvcc_version=None, distribution=None):
     if os.name != "posix":
         return CudaWheelReport(None, None, 0, False)
     if _truthy(os.environ.get("JITTOR_CUDA_WHEEL_DISABLE")):
-        return CudaWheelReport(
-            None, "JITTOR_CUDA_WHEEL_DISABLE is set", 0, False)
+        return CudaWheelReport(None, "JITTOR_CUDA_WHEEL_DISABLE is set", 0, False)
     family = _version_tuple(nvcc_version)[:2] if nvcc_version else (12, 2)
     if family not in ((12, 2), (13, 0)):
         return CudaWheelReport(
-            None, "jittor CUDA wheels require nvcc 12.2 or 13.0, found %s" % nvcc_version,
-            0, False)
+            None, "jittor CUDA wheels require nvcc 12.2 or 13.0, found %s" % nvcc_version, 0, False
+        )
 
     stack_type = Cuda13WheelStack if family == (13, 0) else CudaWheelStack
     specs = stack_type.component_specs
@@ -449,13 +476,11 @@ def inspect_cuda_wheel_stack(nvcc_version=None, distribution=None):
             continue
         actual = str(dist.version)
         if not _specifier_matches(specifier, actual):
-            reason = reason or (
-                "%s%s is required, found %s" % (dist_name, specifier, actual))
+            reason = reason or ("%s%s is required, found %s" % (dist_name, specifier, actual))
             continue
         root = os.path.abspath(os.fspath(dist.locate_file(relative_path)))
         if not os.path.isdir(root):
-            reason = reason or (
-                "%s does not contain %s" % (dist_name, relative_path))
+            reason = reason or ("%s does not contain %s" % (dist_name, relative_path))
             continue
         components[component] = root
         versions[component] = actual
@@ -472,8 +497,7 @@ def inspect_cuda_wheel_stack(nvcc_version=None, distribution=None):
         # Every pinned wheel is installed at its pinned version and the set is
         # still unusable. Nothing outside jittor[cuda12] pins this exact
         # combination, so this is that installation and it is broken.
-        return CudaWheelReport(
-            None, str(error), len(specs), True)
+        return CudaWheelReport(None, str(error), len(specs), True)
     return CudaWheelReport(stack, None, len(specs), False)
 
 

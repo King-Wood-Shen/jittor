@@ -3,9 +3,11 @@
 Installation publishes these objects. Native delegates belong to InstallContext;
 Function input/output bookkeeping belongs to each native one-shot call context.
 """
+
 import contextlib
 import threading
 from collections import deque
+from typing import Callable, Deque
 import jittor as jt
 import numpy as np
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
@@ -36,8 +38,7 @@ def save_for_backward(self, *tensors):
     # therefore catches an in-place edit of the tensor the forward
     # actually saved (the usual case: an intermediate computed inside
     # forward), not an edit of the caller's original made afterwards.
-    self._saved_versions = tuple(
-        (t.id if isinstance(t, jt.Var) else None) for t in tensors)
+    self._saved_versions = tuple((t.id if isinstance(t, jt.Var) else None) for t in tensors)
 
 
 def _saved_tensors(self):
@@ -45,12 +46,12 @@ def _saved_tensors(self):
     versions = getattr(self, "_saved_versions", None)
     if versions:
         for tensor, version in zip(saved, versions):
-            if isinstance(tensor, jt.Var) and version is not None \
-                    and tensor.id != version:
+            if isinstance(tensor, jt.Var) and version is not None and tensor.id != version:
                 raise RuntimeError(
                     "one of the variables needed for gradient "
                     "computation has been modified by an inplace "
-                    "operation")
+                    "operation"
+                )
     return saved
 
 
@@ -81,13 +82,16 @@ def _sum_grad_to(grad, shape):
         # wrong backward -- the gradient just becomes zero and the model
         # quietly stops learning through that input.
         import warnings as _warnings
+
         _warnings.warn(
             "a custom autograd Function returned a gradient of shape %s "
             "for an input of shape %s; the element counts (%d vs %d) are "
             "not broadcast-compatible, so a zero gradient is used for that "
             "input. Check the backward's return order."
             % (tuple(gshape), tuple(shape), g_items, tgt_items),
-            RuntimeWarning, stacklevel=3)
+            RuntimeWarning,
+            stacklevel=3,
+        )
         return jt.zeros([int(s) for s in shape], dtype=grad.dtype)
     # drop leading dims that the input doesn't have (broadcast prepended them)
     extra = len(gshape) - len(shape)
@@ -95,8 +99,7 @@ def _sum_grad_to(grad, shape):
         grad = grad.sum(dims=tuple(range(extra)))
         gshape = grad.shape
     # sum over dims where the input was size-1 but grad is larger (keepdim)
-    reduce_dims = [i for i in range(len(shape))
-                   if int(shape[i]) == 1 and int(gshape[i]) != 1]
+    reduce_dims = [i for i in range(len(shape)) if int(shape[i]) == 1 and int(gshape[i]) != 1]
     if reduce_dims:
         grad = grad.sum(dims=tuple(reduce_dims), keepdims=True)
     if list(grad.shape) != list(shape):
@@ -124,10 +127,11 @@ def _call_record_inputs(self, *args, **kw):
     ctx = self._new_call_context()
     # capture forward input shapes (positional only -- jittor only tapes those)
     try:
-        ctx._fwd_input_shapes = [
-            (tuple(v.shape) if isinstance(v, jt.Var) else None) for v in args]
+        ctx._fwd_input_shapes = [(tuple(v.shape) if isinstance(v, jt.Var) else None) for v in args]
     except EXPECTED as exc:
-        swallowed("torch/installers/autograd.py _call_record_inputs: ctx._fwd_input_shapes = [", exc)
+        swallowed(
+            "torch/installers/autograd.py _call_record_inputs: ctx._fwd_input_shapes = [", exc
+        )
         ctx._fwd_input_shapes = None
     # torch.autograd.Function exposes `ctx.needs_input_grad`: one bool per
     # argument PASSED to apply(), True iff it is a tensor requiring grad.
@@ -145,10 +149,11 @@ def _call_record_inputs(self, *args, **kw):
     if kw:
         raise TypeError("apply() takes no keyword arguments")
     try:
-        ctx.needs_input_grad = tuple(
-            bool(isinstance(v, jt.Var) and v.requires_grad) for v in args)
+        ctx.needs_input_grad = tuple(bool(isinstance(v, jt.Var) and v.requires_grad) for v in args)
     except EXPECTED as exc:
-        swallowed("torch/installers/autograd.py _call_record_inputs: ctx.needs_input_grad = tuple(", exc)
+        swallowed(
+            "torch/installers/autograd.py _call_record_inputs: ctx.needs_input_grad = tuple(", exc
+        )
         ctx.needs_input_grad = tuple(isinstance(v, jt.Var) for v in args)
     # Torch custom Functions own their backward edge even when forward()
     # returns input.detach(). Clear the stop-grad bit before Jittor tapes the
@@ -160,8 +165,9 @@ def _call_record_inputs(self, *args, **kw):
             result = execute(*forward_args, **forward_kw)
             values = result if isinstance(result, (tuple, list)) else (result,)
             for value in values:
-                if isinstance(value, jt.Var) and _jittor_dtype_name(
-                        value.dtype).startswith(("float", "bfloat", "complex")):
+                if isinstance(value, jt.Var) and _jittor_dtype_name(value.dtype).startswith(
+                    ("float", "bfloat", "complex")
+                ):
                     value.start_grad()
             return result
 
@@ -174,9 +180,13 @@ def _call_record_inputs(self, *args, **kw):
         outs = out if isinstance(out, (tuple, list)) else (out,)
         ctx._fwd_outputs = [
             (tuple(o.shape), _jittor_dtype_name(o.dtype)) if isinstance(o, jt.Var) else None
-            for o in outs]
+            for o in outs
+        ]
     except EXPECTED as exc:
-        swallowed("torch/installers/autograd.py _call_record_inputs: outs = out if isinstance(out, (tuple, list)) else (out,)", exc)
+        swallowed(
+            "torch/installers/autograd.py _call_record_inputs: outs = out if isinstance(out, (tuple, list)) else (out,)",
+            exc,
+        )
         ctx._fwd_outputs = None
     return out
 
@@ -188,16 +198,14 @@ def set_materialize_grads(self, value):
 def function_grad(self, *grad_outputs):
     bw = getattr(type(self), "backward", None)
     if bw is None:
-        raise AttributeError(
-            f"{type(self).__name__!r} object has no attribute 'grad'")
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute 'grad'")
     # materialize_grads (torch default True): jittor hands None for a taped
     # output that doesn't reach the backward'd scalar, but torch passes
     # zeros_like(output) for FLOATING-point outputs (int/bool ones stay
     # None — non-differentiable). 3DGS's rasterizer returns (color, radii,
     # depth); a colour-only loss leaves depth's grad None, yet the C++
     # backward requires a real zero tensor for it.
-    if getattr(self, "_materialize_grads", True) and any(
-            g is None for g in grad_outputs):
+    if getattr(self, "_materialize_grads", True) and any(g is None for g in grad_outputs):
         outs = getattr(self, "_fwd_outputs", None)
         if outs is not None:
             go = list(grad_outputs)
@@ -225,9 +233,18 @@ def _as_list(x):
     return list(x)
 
 
-def grad(outputs, inputs, grad_outputs=None, retain_graph=None,
-         create_graph=False, only_inputs=True, allow_unused=None,
-         is_grads_batched=False, materialize_grads=False, **kw):
+def grad(
+    outputs,
+    inputs,
+    grad_outputs=None,
+    retain_graph=None,
+    create_graph=False,
+    only_inputs=True,
+    allow_unused=None,
+    is_grads_batched=False,
+    materialize_grads=False,
+    **kw,
+):
     # torch.autograd.grad(outputs, inputs, ...) -> tuple of grads, one per
     # input. jittor's jt.grad takes a single scalar loss; when several
     # outputs (or grad_outputs weights) are given, reduce them to one scalar
@@ -241,13 +258,13 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None,
         # This used to sum every output element, i.e. silently assume a
         # grad_output of ones -- a different vector-Jacobian product from
         # the one the caller forgot to specify, with no error.
-        non_scalar = [tuple(o.shape) for o in outs
-                      if isinstance(o, jt.Var) and o.numel() != 1]
+        non_scalar = [tuple(o.shape) for o in outs if isinstance(o, jt.Var) and o.numel() != 1]
         if non_scalar:
             raise RuntimeError(
                 "grad can be implicitly created only for scalar outputs "
                 "(got output shape(s) %s); pass grad_outputs="
-                % ", ".join(str(shape) for shape in non_scalar))
+                % ", ".join(str(shape) for shape in non_scalar)
+            )
         loss = outs[0].sum() if len(outs) == 1 else sum(o.sum() for o in outs)
     else:
         gos = _as_list(grad_outputs)
@@ -260,9 +277,9 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None,
     if materialize_grads and allow_unused is False:
         raise ValueError(
             "Expected allow_unused to be True or not passed when "
-            "materialize_grads=True, but got: allow_unused=False.")
-    allow_unused = bool(materialize_grads) if allow_unused is None \
-        else bool(allow_unused)
+            "materialize_grads=True, but got: allow_unused=False."
+        )
+    allow_unused = bool(materialize_grads) if allow_unused is None else bool(allow_unused)
     with _backward_callbacks():
         gs = list(jt.core.grad_optional(loss, ins, rg))
     missing = [i for i, value in enumerate(gs) if value is None]
@@ -276,7 +293,8 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None,
     elif missing and not allow_unused:
         raise RuntimeError(
             "One of the differentiated Tensors appears to not have been "
-            "used in the graph. Set allow_unused=True if this is desired.")
+            "used in the graph. Set allow_unused=True if this is desired."
+        )
     if not create_graph:
         # detach() severs the graph edge but leaves jittor's requires_grad
         # flag set, and torch reports requires_grad=False here; clear it on
@@ -292,8 +310,7 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None,
     return tuple(gs)
 
 
-def backward(tensors, grad_tensors=None, retain_graph=None,
-             create_graph=False, inputs=None, **kw):
+def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, inputs=None, **kw):
     # torch.autograd.backward(tensors, ...) accumulates grads into leaf
     # .grad. Route each tensor through Var.backward (the optimizer bridge /
     # no-optimizer leaf path installed on Var).
@@ -314,14 +331,31 @@ class profile(_profiler.profile):
 
     _event_list = EventList
 
-    def __init__(self, enabled=True, *, use_cuda=False, use_device=None, record_shapes=False,
-                 with_flops=False, profile_memory=False, with_stack=False, with_modules=False,
-                 use_kineto=False, use_cpu=True, experimental_config=None, **_ignored):
+    def __init__(
+        self,
+        enabled=True,
+        *,
+        use_cuda=False,
+        use_device=None,
+        record_shapes=False,
+        with_flops=False,
+        profile_memory=False,
+        with_stack=False,
+        with_modules=False,
+        use_kineto=False,
+        use_cpu=True,
+        experimental_config=None,
+        **_ignored,
+    ):
         activities = {_profiler.ProfilerActivity.CPU}
         if use_cuda or use_device == "cuda":
             activities.add(_profiler.ProfilerActivity.CUDA)
-        super().__init__(activities=activities, record_shapes=record_shapes,
-                         profile_memory=profile_memory, enabled=enabled)
+        super().__init__(
+            activities=activities,
+            record_shapes=record_shapes,
+            profile_memory=profile_memory,
+            enabled=enabled,
+        )
 
     @property
     def function_events(self):
@@ -366,7 +400,6 @@ def _normalize_index(idx):
     if isinstance(idx, list):
         return [_normalize_index(i) for i in idx]
     return idx
-
 
     setattr(_call_record_inputs, "_torch_records_inputs", True)
 
@@ -427,7 +460,7 @@ def _backward_callbacks():
     stack = getattr(_callback_tasks, "stack", None)
     if stack is None:
         stack = _callback_tasks.stack = []
-    callbacks = deque()
+    callbacks: Deque[Callable[[], None]] = deque()
     stack.append(callbacks)
     try:
         yield
