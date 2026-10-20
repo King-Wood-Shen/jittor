@@ -473,6 +473,7 @@ include docs/results/2026-10-16-sgd-execution-options.md
 include docs/results/2026-10-16-transformers-main-source-training.md
 include docs/results/2026-10-16-transformers-maintained-cpu-nightly.md
 include docs/results/2026-10-16-verl-maintained-cpu-nightly.md
+include docs/results/2026-10-20-ms-swift-ascend-options.md
 include docs/results/2026-10-20-ms-swift-gradient-checkpoint-ascend.md
 include docs/results/index.md
 include docs/tutorials/index.md
