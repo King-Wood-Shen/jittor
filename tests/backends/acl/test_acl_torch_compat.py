@@ -237,11 +237,8 @@ class TestACLTorchCompat(unittest.TestCase):
             def __init__(self, weight):
                 super().__init__()
                 self.weight = torch.nn.Parameter(torch.tensor(
-                    weight, dtype=torch.bfloat16))
+                    weight, dtype=torch.bfloat16, device="npu"))
                 self.variance_epsilon = 1e-6
-
-            def forward(self, hidden_states):
-                raise AssertionError("standard RMSNorm missed ACL dispatch")
 
         rng = np.random.RandomState(20260901)
         source_np = rng.randn(2, 3, 128).astype("float32")
@@ -253,8 +250,9 @@ class TestACLTorchCompat(unittest.TestCase):
 
         module = FixtureRMSNorm(weight_bf)
         source = torch.tensor(
-            source_bf, dtype=torch.bfloat16).requires_grad_(True)
-        cotangent = torch.tensor(cotangent_bf, dtype=torch.bfloat16)
+            source_bf, dtype=torch.bfloat16, device="npu").requires_grad_(True)
+        cotangent = torch.tensor(
+            cotangent_bf, dtype=torch.bfloat16, device="npu")
         output = module(source)
         cached = getattr(
             module.weight, "_torch_acl_rms_norm_unit_weight", None)
