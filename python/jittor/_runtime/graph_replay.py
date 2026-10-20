@@ -1315,6 +1315,12 @@ def auto_replay_for(module, args, kw):
     flags = jt.flags
     if not flags.auto_graph_replay or not flags.no_grad:
         return None
+    # Automatic replay is inference-only. A trainer also runs reference and
+    # evaluation forwards under no_grad while its model remains in training
+    # mode; capturing those calls can replay a graph across mutable mask and
+    # cache state inside the training step.
+    if _training(module):
+        return None
     # PEFT switches LoRA layers on and off in-place for reference-model
     # forwards.  No parameter is rebound and training mode stays unchanged,
     # so a captured student graph would silently stand in for the base model.

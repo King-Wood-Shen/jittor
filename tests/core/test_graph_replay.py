@@ -346,6 +346,21 @@ class TestGraphReplay(unittest.TestCase):
         self.assertIsNotNone(replay)
         self.assertGreaterEqual(replay.stats["replayed"], 3)
 
+    def test_the_automatic_policy_does_not_capture_training_mode_forwards(self):
+        model = _Keywords()
+        model.train()
+        jt.flags.auto_graph_replay = 1
+        with jt.no_grad():
+            for x, b in zip(self.feed[:3], self.feed[1:]):
+                model(x=x, bias=b, scale=2.0).sync(True, False)
+        self.assertNotIn("_auto_graph_replay", model.__dict__)
+
+        model.eval()
+        with jt.no_grad():
+            for x, b in zip(self.feed[:3], self.feed[1:]):
+                model(x=x, bias=b, scale=2.0).sync(True, False)
+        self.assertIsNotNone(model.__dict__["_auto_graph_replay"].replay)
+
     def test_the_automatic_policy_leaves_an_object_argument_alone(self):
         # A KV cache is the same object on every decode step while what it
         # holds changes; matched by identity, a capture would keep answering
