@@ -13,6 +13,7 @@
 
 2026-10-20-ms-swift-simpo-gradient-checkpoint-cuda
 2026-10-20-ms-swift-transformers-infer-cuda
+2026-10-20-ms-swift-simpo-bf16-cuda
 
 2026-10-16-diffusers-maintained-cpu-nightly
 2026-10-16-h3-upstream-gradient-components
