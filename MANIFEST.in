@@ -474,6 +474,7 @@ include docs/results/2026-10-16-transformers-main-source-training.md
 include docs/results/2026-10-16-transformers-maintained-cpu-nightly.md
 include docs/results/2026-10-16-verl-maintained-cpu-nightly.md
 include docs/results/2026-10-20-ms-swift-simpo-gradient-checkpoint-cuda.md
+include docs/results/2026-10-20-ms-swift-transformers-infer-cuda.md
 include docs/results/index.md
 include docs/tutorials/index.md
 include examples/README.md
