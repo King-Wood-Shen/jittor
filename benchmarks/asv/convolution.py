@@ -159,17 +159,28 @@ class Conv2dBenchmarks:
         self._assert_device()
 
     def _assert_device(self):
-        values = [self.x, self.weight, self.bias, self.output] + list(self.gradients)
+        labeled_values = [
+            ("input", self.x),
+            ("weight", self.weight),
+            ("bias", self.bias),
+            ("output", self.output),
+        ]
+        labeled_values.extend(
+            ("gradient_%d" % index, value) for index, value in enumerate(self.gradients)
+        )
         if self.mode == "forward_backward":
-            values.append(self.cotangent)
+            labeled_values.append(("cotangent", self.cotangent))
         if self.backend_name == "jittor":
             expected = "device" if self.device == "cuda" else "cpu"
-            if any(value.location() != expected for value in values):
-                raise RuntimeError("convolution operands or results are on the wrong device")
+            observed = [(name, value.location()) for name, value in labeled_values]
+            if any(location != expected for _, location in observed):
+                raise RuntimeError(
+                    "convolution operands or results are on the wrong device: %r" % observed
+                )
             if self.device == "cuda":
                 if self.backend.core.backend_fallback_count() != self._fallback_before:
                     raise RuntimeError("CUDA convolution attempted a CPU fallback")
-        elif any(value.device.type != self.device for value in values):
+        elif any(value.device.type != self.device for _, value in labeled_values):
             raise RuntimeError("convolution operands or results are on the wrong device")
 
     def _forward(self):
