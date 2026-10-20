@@ -24,6 +24,7 @@
 2026-10-16-metrics-tensordict-maintained-cpu-nightly
 2026-10-16-openmmlab-maintained-cpu-nightly
 2026-10-16-transformers-maintained-cpu-nightly
+2026-10-20-swift-two-rank-sft-lora-resume
 2026-10-16-diffusers-official-installation
 2026-10-16-metrics-tensordict-installed-source
 2026-10-16-verl-maintained-cpu-nightly
@@ -198,6 +199,7 @@
 | [FlashAttention 完整安装来源训练](2026-10-16-flash-attention-installed-source-training.md) | 原 12 CUDA 场景、48 worker 与 936 数值检查通过；共同 12 条因缺 CPU 对应实现阻塞，固定本地构建 artifact 拒绝同步载荷篡改 | 2026-10-16 |
 
 | [PEFT / Swift 独立 CPU nightly](2026-10-15-maintained-ecosystem-nightly.md) | 完整依赖与来源校验、两维护门禁本地执行通过；未观测 GitHub scheduled run | 2026-10-15 |
+| [ms-swift 双卡 CUDA SFT/LoRA 与新进程恢复](2026-10-20-swift-two-rank-sft-lora-resume.md) | 两 rank NCCL 与数据分片、有限梯度、loss 整体下降、三份检查点和 NVML 峰值通过；Swift 自带 multiprocess launcher 缺 shim，adapter 独立初始化不作逐位等价结论 | 2026-10-20 |
 | [OpenMMLab 安装来源训练](2026-10-15-openmmlab-installed-source-training.md) | MMEngine/MMCV 四条限定 L3；462 数组、三种输入与三步真实 train_step，完整安装来源绑定 | 2026-10-15 |
 
 | [Transformers 主线来源复验](2026-10-16-transformers-main-source-training.md) | 独立09e9源码 CPU/CUDA 共160 worker、7854数组对，20条限定L3；原B4测量不重标 | 2026-10-16 |

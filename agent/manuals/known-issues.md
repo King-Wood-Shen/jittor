@@ -1,8 +1,8 @@
 # Known-Issues Ledger
 
 - Status: Maintained
-- Last reviewed: 2026-10-13
-- Baseline: `1a6e203fc`
+- Last reviewed: 2026-10-20
+- Baseline: `87daee79b757c77ebb9283a66f4f80904f2cc8b5`
 - Owner: Jittor core maintainers
 - Review when: an entry is fixed or narrowed, a strict expected failure
   XPASSes, a new defect is reproduced, or at quarterly maintenance
@@ -2180,6 +2180,23 @@ workaround.
   the second fails today.
 - Exit condition: the reference-peak run passes. NPU/HCCL and multi-node have no
   evidence yet (see [deferred-hardware.md](deferred-hardware.md)).
+
+## KI-DIST-004: Swift CLI multiprocess launcher is not provided by the Jittor Torch shim
+
+- Severity: Medium (downstream integration limitation)
+- Status: Limitation; reproduced 2026-10-20 on two CUDA ranks
+- Owner: Torch compatibility / distributed
+- Symptom: the public `swift sft` path with `NPROC_PER_NODE=2` tries to import
+  `torch.distributed.run`, which is not provided by the Jittor Torch shim.
+- Cause: Swift delegates process creation to PyTorch's `torchrun` module, while
+  this shim uses Jittor's native distributed launcher and process group.
+- Workaround: invoke the unchanged public Swift SFT CLI once per rank through
+  `jittor.distributed.launch --backend=nccl`; set
+  `SWIFT_SINGLE_DEVICE_MODE=1` when each rank sees one CUDA device.
+- Evidence: [ms-swift two-rank CUDA SFT/resume report](../../docs/results/2026-10-20-swift-two-rank-sft-lora-resume.md),
+  including the direct launcher failure and the 2-rank NCCL workaround.
+- Exit condition: Swift's public multiprocess CLI can launch through the shim
+  without `torch.distributed.run` and each rank uses the intended NCCL device.
 
 ## KI-BACKEND-020: the NPU work in #18036 and #18039 was only partly on this branch
 
