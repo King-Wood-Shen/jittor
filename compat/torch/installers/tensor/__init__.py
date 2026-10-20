@@ -305,6 +305,7 @@ from .indexing import masked_scatter_
 from .indexing import unfold
 
 from .indexing import addcmul
+from .indexing import addcmul_
 
 from .indexing import addcdiv
 
@@ -333,6 +334,7 @@ for _reduction_impl, _reduction_api, _reduction_detail in (
          _MASKED_SCATTER_FIDELITY_DETAIL),
         (unfold, "torch.Tensor.unfold", _UNFOLD_FIDELITY_DETAIL),
         (addcmul, "torch.Tensor.addcmul", _ADDC_FIDELITY_DETAIL),
+        (addcmul_, "torch.Tensor.addcmul_", _ADDC_FIDELITY_DETAIL),
         (addcdiv, "torch.Tensor.addcdiv", _ADDC_FIDELITY_DETAIL),
         (broadcast_to, "torch.broadcast_to", _BROADCAST_TO_FIDELITY_DETAIL),
         (diagonal, "torch.diagonal", _NATIVE_DIAGONAL_FIDELITY_DETAIL)):
@@ -388,6 +390,7 @@ def _install_reductions(g):
     Var.masked_scatter_ = masked_scatter_
     Var.unfold = unfold
     Var.addcmul = addcmul
+    Var.addcmul_ = addcmul_
     Var.addcdiv = addcdiv
     g.broadcast_to = Var.broadcast_to = broadcast_to
 

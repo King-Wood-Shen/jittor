@@ -13,10 +13,33 @@ def initialize_base(self, params, lr, *args, **kwargs):
     if isinstance(params, tensor_type._frontend_backend.Var):
         raise TypeError("optimizer params must be an iterable of tensors or parameter groups")
     params = list(params)
-    params = [dict(group, params=([group["params"]]
-                                 if isinstance(group["params"], tensor_type._frontend_backend.Var)
-                                 else list(group["params"])))
-              if isinstance(group, Mapping) else group for group in params]
+    if isinstance(lr, Mapping):
+        # torch.optim.Optimizer subclasses call super().__init__(params,
+        # defaults), while Jittor's native base takes a scalar learning rate.
+        # Apply the defaults to every group before translating that call so
+        # external optimizers such as Swift GaLore do not publish dict-valued
+        # learning rates for groups that omit an explicit override.
+        defaults = dict(lr)
+        default_lr = defaults.get("lr", 0.0)
+        if params and isinstance(params[0], Mapping):
+            groups = []
+            for group in params:
+                merged = dict(defaults)
+                merged.update(group)
+                group_params = merged.get("params", ())
+                merged["params"] = ([group_params]
+                                    if isinstance(group_params, tensor_type._frontend_backend.Var)
+                                    else list(group_params))
+                groups.append(merged)
+            params = groups
+        else:
+            params = [dict(defaults, params=params)]
+        lr = default_lr
+    else:
+        params = [dict(group, params=([group["params"]]
+                                      if isinstance(group["params"], tensor_type._frontend_backend.Var)
+                                      else list(group["params"])))
+                  if isinstance(group, Mapping) else group for group in params]
     with tensor_frontend(tensor_type):
         state["base_init"](self, params, lr, *args, **kwargs)
 
