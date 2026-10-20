@@ -247,6 +247,22 @@ struct VarPtr {
     void set_stop_grad(bool stop_grad);
 };
 
+// Some constructors only decide to forward: from their arguments alone they
+// build another value and hand it on (`Op::forward`), and the op itself is
+// deleted unused -- one operator in seven in a DeepMill detect loop, each paying
+// for a full construction. An operator type that can make that decision first
+// declares `static VarPtr forward_before_construct(...)` taking its
+// constructor's arguments, returning the value it would forward to, or null
+// when it has to be constructed after all. Its op maker asks before `new`;
+// for any other operator type this is a null VarPtr and costs nothing.
+template<class OpT, class... Args>
+inline auto forward_before_construct(int, Args&&... args)
+    -> decltype(OpT::forward_before_construct(std::forward<Args>(args)...)) {
+    return OpT::forward_before_construct(std::forward<Args>(args)...);
+}
+template<class OpT, class... Args>
+inline VarPtr forward_before_construct(long, Args&&...) { return VarPtr(); }
+
 std::ostream& operator<<(std::ostream& os, const Var& var);
 std::ostream& operator<<(std::ostream& os, const Var* var);
 std::ostream& operator<<(std::ostream& os, const VarPtr& v);
@@ -271,9 +287,14 @@ VarPtr contiguous_storage(Var* value);
  * it as an input -- the ``forward``ed-op pattern does this.
  */
 VarPtr cast_operand_to_compute_dtype(Var* value, NanoString dtype);
-void adapt_cpu_scalar_operands(const vector<Var**>& inputs, vector<VarPtr>& owners);
-inline void collect_placement_inputs(Var*& value, vector<Var**>& inputs) { inputs.push_back(&value); }
-inline void collect_placement_inputs(vector<Var*>& values, vector<Var**>& inputs) {
+// The constructor arguments a CPU-scalar adaptation may replace. Every
+// construction of an operator that accepts such operands builds one -- every
+// binary op does -- so its usual handful of slots stays inline rather than
+// costing a heap allocation and a free per op.
+using PlacementInputs = SmallVector<Var**, 4>;
+void adapt_cpu_scalar_operands(const PlacementInputs& inputs, vector<VarPtr>& owners);
+inline void collect_placement_inputs(Var*& value, PlacementInputs& inputs) { inputs.push_back(&value); }
+inline void collect_placement_inputs(vector<Var*>& values, PlacementInputs& inputs) {
     for (auto*& value : values) inputs.push_back(&value);
 }
 template<class Operator>
