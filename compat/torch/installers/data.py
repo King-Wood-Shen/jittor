@@ -207,6 +207,28 @@ class _BatchSampler(_Sampler):
         return n // self.batch_size if self.drop_last else (n + self.batch_size - 1) // self.batch_size
 
 
+class _UnbatchedSampler(_Sampler):
+    """Yield one index at a time for ``DataLoader(batch_size=None)``."""
+    def __init__(self, sampler):
+        self.sampler = sampler
+
+    def __iter__(self):
+        return iter(([index] for index in self.sampler))
+
+    def __len__(self):
+        return len(self.sampler)
+
+
+class _IterableBatchSampler(_Sampler):
+    """Adapt an IterableDataset to the index-shaped loader iterator."""
+    def __init__(self, dataset):
+        self.dataset = dataset
+
+    def __iter__(self):
+        for value in self.dataset:
+            yield [value]
+
+
 class _DistributedSampler(_Sampler):
     def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True,
                  seed=0, drop_last=False):
@@ -282,7 +304,9 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
 
     def __next__(self):
         batch_indices = next(self._batch_iter)
-        return self._loader.collate_fn([self._loader.dataset[i] for i in batch_indices])
+        values = (batch_indices if self._loader._iterable_dataset else
+                  [self._loader.dataset[i] for i in batch_indices])
+        return values[0] if self._loader.batch_size is None else self._loader.collate_fn(values)
 
 
 class _WorkerInfo:
@@ -346,7 +370,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
     def _fetch(self, batch_indices):
         loader = self._loader
-        return loader.collate_fn([loader.dataset[i] for i in batch_indices])
+        values = (batch_indices if loader._iterable_dataset else
+                  [loader.dataset[i] for i in batch_indices])
+        return values[0] if loader.batch_size is None else loader.collate_fn(values)
 
     def _fill(self):
         want = self._num_workers * self._prefetch
@@ -406,6 +432,7 @@ class _DataLoader:
                  worker_init_fn=None, generator=None, prefetch_factor=None,
                  persistent_workers=False, **kwargs):
         self.dataset = dataset
+        self._iterable_dataset = not hasattr(dataset, "__len__")
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.num_workers = num_workers
@@ -423,9 +450,11 @@ class _DataLoader:
             self.sampler = None
         else:
             self.sampler = sampler if sampler is not None else (
-                _RandomSampler(dataset, generator=generator) if shuffle else _SequentialSampler(dataset)
-            )
-            self.batch_sampler = _BatchSampler(self.sampler, batch_size, drop_last)
+                _IterableBatchSampler(dataset) if self._iterable_dataset else
+                (_RandomSampler(dataset, generator=generator) if shuffle else _SequentialSampler(dataset)))
+            self.batch_sampler = (_IterableBatchSampler(dataset) if self._iterable_dataset else
+                                  (_UnbatchedSampler(self.sampler) if batch_size is None
+                                  else _BatchSampler(self.sampler, batch_size, drop_last)))
         self._iterator = None
     def __iter__(self):
         if int(self.num_workers or 0) > 0:
