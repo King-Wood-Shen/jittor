@@ -51,6 +51,7 @@ KTO 曾有带观察器的重跑把 candidate reference logits 记录为 policy l
 | ORPO | 本报告中公开 RLHF CLI 三步数值对照通过 | 既有通过；缺本轮 loss 趋势和设备峰值显存归档 |
 | GRPO | 公开 RLHF CLI 在两端完成三步，candidate NPU forward 及零 fallback 已证实，但轨迹未对齐 | 部分通过；不作为数值通过 |
 | GKD | 2026-10-20 本地 teacher 的公开 CLI 在 NPU 实际训练一步，记录 loss `0.0`、grad norm `0.0` 后停止 | 阻塞；未证明有效梯度或收敛，详见本报告续接 |
+| RM | 2026-10-20 Swift 公开 reward-model CLI 在 NPU 完成 12 步；loss `0.6721 → 0.0261`，全程有限非零梯度、accuracy `1.0`、fallback `0` | 受限小模型/短 pair 数据场景通过；峰值 248 MB，详见本报告续接 |
 
 现有 FULL SFT CPU/CUDA 证据见 [`2026-10-15-swift-trainer-installed-source.md`](2026-10-15-swift-trainer-installed-source.md)；Swift LoRA CPU/CUDA 手动三步证据见 [`2026-10-14-downstream-oracle-scorecards.md`](2026-10-14-downstream-oracle-scorecards.md)。这些报告没有提供本轮所需的真实 NPU loss 趋势与设备峰值显存，因此不重复宣称满足该项验收。RL 目标按有限的奖励/损失/梯度和可解释的整体趋势判断，不要求逐步单调。
 
@@ -73,3 +74,12 @@ KTO 曾有带观察器的重跑把 candidate reference logits 记录为 policy l
 - 尝试记录：作业 `5823` 因 host wrapper job-marker 不在 compute node 可见路径退出；`5825` 因缺 `CCACHE_BASEDIR` 在 Jittor 导入时退出；`5826` 因 Swift 4.5.2 不识别 `--train_type full` 而停在 CLI 解析；`5832` 因长 `TMPDIR` 令 datasets manager 的 AF_UNIX 路径超限而退出；`5835` 修复上述启动问题后进入 NPU 训练，但首步即报告 loss `0.0`、grad norm `0.0`，随后取消，避免继续执行无更新步骤。以上日志与独立缓存未版本化保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-ascend/runs/gkd-world1-0b872e5-20261020-r1/`。
 - 设备证据：作业 `5835` 使用 `backend_fallback=error`，执行到一步未触发 fallback 异常；因提前停止，没有最终 `fallback_count` 断言，故不登记为零 fallback 通过。作业期间以 `npu-smi info -t proc-mem` 每秒采样实际设备进程内存，峰值 `192 MB`；Swift 的 `memory(GiB)` 字段未用于峰值结论。
 - 根因边界：Swift GKD trainer 在 `num_valid == 0` 时明确将 loss 置零，但本次没有保存 student/teacher logits 和有效标签数，故无法确认该分支是否触发，也不能排除其他零梯度原因。修复前需添加能保留有效响应 token 数和两侧 logits 形状的 NPU 诊断；本轮到达尝试上限后转向 RM，不再给 GKD 数值通过结论。
+
+
+## 2026-10-20 RM 本地 pair 补验
+
+- 状态：受限场景通过。ms-swift `4.5.2` 的公开入口 `swift/cli/rlhf.py --rlhf_type rm` 在 Ascend 910B3 单 NPU 完成 12/12 步；0.0905M 参数 Llama full-tuner、2 组 chosen/rejected pair、batch 1、短序列。仅说明该小夹具上的训练链路和梯度/损失行为，不外推到大模型或复杂数据。
+- 同步基线：官方 `origin/2.0-refactor` SHA `d0fd6f577b6b025f0e2eecc08962f89a3ff7bb64`；运行源码 SHA `ac97bef528678a7a04e4c1aa71108abcbc26c18b`。
+- 数值：12 步 loss 从 `0.6721071` 整体降至 `0.02609223`（中间值均下降）；grad norm 从 `8.36881924` 到 `0.41558614`，12 步均有限且非零；`rewards/accuracies` 每步为 `1.0`。汇总 `train_loss=0.16713837`。
+- 设备/回退：作业 `5842` 使用严格 `backend_fallback=error`，完成后 `STRICT_PASS npu fallback_count 0`，退出码 `0`。每秒采样 `npu-smi info -t proc-mem` 共 95 次，实际进程峰值 `248 MB`；Swift 的 `memory(GiB)` 不是峰值来源。
+- 复现材料均在 `$JITTOR_LAB_ROOT/_state/ms-swift-ascend/runs/rm-world1-0b872e5-20261020-r1/`，包括数据、独立缓存、训练日志、逐步 `logging.jsonl`、source hash、采样记录和 checkpoint。模型 `model.safetensors` SHA256 `0c27276ae7a985335cf509008d6df93c4474faa78a2ef7c73326bd2090c386c6`；pair 数据 SHA256 `e602a15211f3c1661a4de03593247e6b6ebef6d673c22b7697d22cb738181490`。依赖：TRL `0.29.1`、Transformers `4.57.6`、PEFT `0.17.1`、Jittor `1.3.11.0`、Python `3.11`。入口、Swift reward trainer、TRL reward trainer SHA256 分别为 `f68c8b93ff4bfd08374fa2bca6efadcfe23e7beec13db162953275138fa56d65`、`291c8d92d0ef8cfe9abb62aa3f88095a7fc4b8a7407dde56a8ad70fe1205814e`、`26d12d73eaddd84c3cd799143e2f839bdd554acf23a46173a9deeca83837c4a3`。
