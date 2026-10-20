@@ -3,6 +3,7 @@
 - Status: Implemented and verified for the flat-output, bound-module checkpoint path; the tiny fixture showed no memory saving
 - Date: 2026-10-20
 - Baseline: `fix/msw-ascend-options`, synchronized `origin/2.0-refactor` at `d0fd6f577b6b025f0e2eecc08962f89a3ff7bb64`
+- Fix commits: `2edb94c72` (ACL RNG APIs), `6c40dbbe0` (ACL compile dependency), `b58efb851` (checkpoint recomputation)
 - Scope: `torch.utils.checkpoint.checkpoint`, ACL RNG preservation, Llama SFT BF16/SDPA public-entry comparison
 - Maintainer: Jittor maintainers
 - Recheck when: checkpoint output support or module parameter registration changes, and before claiming a memory benefit on a larger model
@@ -30,7 +31,7 @@ Loss and gradient norms remained finite. The trajectory was not monotonic, but b
 
 The focused shim regression compared forward values, input gradients, parameter gradients, and RNG state. It passed on CPU and on ACL with dropout active: `2 passed` in Slurm job 5774. The public SFT on/off comparison passed in Slurm job 5772. `bash tools/check_repo_layout.sh` passed. The generated root source manifest was updated for this report and matched the manifest generator.
 
-The full `tests/structure` run in the shim image ended with `13 failed, 1499 passed, 8 skipped` (job 5777). Failures were from the missing `asv` dependency, ACL float64 batched-matmul cases, and legacy pool structure checks. The first attempt also ran with ACL enabled and had additional ACL-backend failures; the CPU-mode rerun retained the 13 unrelated failures. The required core tier did not complete: its native CPU session failed the host-image assertion that neither CUDA nor ACL is compiled in, while this shim image has ACL support. The CPU core runner began a cold build and was stopped after that assertion; its Torch session did not finish. These repository-wide gate results do not pass and are distinct from the focused checkpoint/Swift evidence above.
+The full `tests/structure` run in the shim image ended with `13 failed, 1499 passed, 8 skipped` (job 5777). Failures were from the missing `asv` dependency, eight ACL float64 batched-matmul cases, and four legacy pool structure checks. The first attempt enabled ACL globally and had two extra failures, including an unrelated process-mode child timeout during a cold compile; the CPU-mode rerun completed without that timeout and retained the 13 failures. The required core tier did not complete: its native CPU session failed the host-image assertion that neither CUDA nor ACL is compiled in, while this shim image has ACL support. The CPU core runner completed a cold native build and was stopped after that assertion; its Torch session did not finish. These repository-wide gate results do not pass and are distinct from the focused checkpoint/Swift evidence above.
 
 Run scripts, raw audit records, and logs are retained outside the repository at:
 
