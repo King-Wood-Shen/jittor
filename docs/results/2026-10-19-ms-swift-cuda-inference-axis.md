@@ -84,4 +84,5 @@ Slurm CPU 内存字段或 allocator 数据推算。ms-swift 源码确认 specula
 引擎；当前 vLLM、SGLang、LMDeploy 均未安装。对应源码文件 SHA-256 分别为 vLLM
 `51244ca497c5338dfca3f3480615333f2506b3b6c137e33f7d126f33fa9254cd`、SGLang
 `9f4fbd470c8a62a086abfbc6ffe1f5c8eb31843b52604100a90c47860dcb2db0`。未尝试安装依赖，故没有
-外部推理引擎或 speculative CUDA 结果。
+外部推理引擎或 speculative CUDA 结果。该环境也未安装 `flash-attn` 或 `liger-kernel`，因此未运行
+Swift 的 flash attention 选项或额外 Liger 推理优化；没有因本轮验证而拉取新依赖。
