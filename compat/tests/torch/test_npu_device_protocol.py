@@ -107,6 +107,28 @@ def test_npu_seed_apis_seed_acl_streams_and_cuda_seed_is_inactive():
 
 @pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
                     reason="requires a selected ACL device")
+def test_npu_random_state_round_trips_the_acl_stream():
+    assert _on_acl(), "JITTOR_TEST_DEVICES=npu but ACL is not active"
+    before = torch.npu.random.get_rng_state()
+    try:
+        torch.npu.manual_seed_all(2718)
+        torch.rand((7,), dtype=torch.float32, device="npu")
+        checkpoint_state = torch.npu.random.get_rng_state()
+        expected = torch.rand((19,), dtype=torch.float32, device="npu").cpu().numpy()
+        torch.npu.random.set_rng_state(checkpoint_state)
+        actual = torch.rand((19,), dtype=torch.float32, device="npu").cpu().numpy()
+        np.testing.assert_array_equal(actual, expected)
+
+        states = torch.npu.random.get_rng_state_all()
+        assert len(states) == torch.npu.device_count()
+        torch.npu.random.set_rng_state_all(states)
+        assert torch.npu.random.initial_seed() >= 0
+    finally:
+        torch.npu.random.set_rng_state(before)
+
+
+@pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
+                    reason="requires a selected ACL device")
 def test_torch_npu_primitives_match_their_definitions():
     import torch_npu
 
