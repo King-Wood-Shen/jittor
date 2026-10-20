@@ -111,6 +111,7 @@
 2026-10-15-cuda-extension-philox
 2026-10-15-flash-attention-training-oracles
 2026-10-16-flash-attention-installed-source-training
+2026-10-20-ms-swift-ascend-fp16
 2026-10-16-accelerate-installed-source-protocols
 2026-10-16-accelerate-maintained-cpu-nightly
 2026-10-15-deepspeed-bfloat16-multirank
