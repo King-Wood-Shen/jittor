@@ -21,7 +21,8 @@ from ..amp import (
     is_autocast_available as _is_autocast_available,
     amp_definitely_not_available as _amp_definitely_not_available,
     _amp_cast,
-    _CudaAutocast, _CpuAutocast, _CudaGradScaler, _CpuGradScaler,
+    _CudaAutocast, _CpuAutocast, _NpuAutocast,
+    _CudaGradScaler, _CpuGradScaler, _NpuGradScaler,
     OptState as _OptState,
 )
 from ..library import Tag
@@ -722,7 +723,8 @@ def _install_amp_namespace(g, _modules):
 
     for device_name, autocast_class, scaler_class in (
             ("cuda", _CudaAutocast, _CudaGradScaler),
-            ("cpu", _CpuAutocast, _CpuGradScaler)):
+            ("cpu", _CpuAutocast, _CpuGradScaler),
+            ("npu", _NpuAutocast, _NpuGradScaler)):
         root = getattr(g, device_name, None)
         if root is None:
             continue

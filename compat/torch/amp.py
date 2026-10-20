@@ -20,7 +20,8 @@ import jittor as jt
 
 from .fidelity import Fidelity, register_fidelity
 from .grad_scaler import (          # noqa: F401
-    GradScaler, OptState, _CpuGradScaler, _CudaGradScaler, _GradScaler,
+    GradScaler, OptState, _CpuGradScaler, _CudaGradScaler, _NpuGradScaler,
+    _GradScaler,
 )
 
 
@@ -436,6 +437,11 @@ class _CpuAutocast(_DeviceAutocast):
     _device_default_dtype = "bfloat16"
 
 
+class _NpuAutocast(_DeviceAutocast):
+    _device = "npu"
+    _device_default_dtype = "float16"
+
+
 def _var_device_type(value):
     from .types import _var_is_cpu_resident
     return "cpu" if _var_is_cpu_resident(value) else _accelerator_device_type()
@@ -559,6 +565,9 @@ _AMP_FIDELITY = (
      "behaviour and limitations"),
     (("torch.cpu.amp.autocast",), _CpuAutocast, Fidelity.APPROXIMATE,
      "Legacy cpu-pinned subclass of torch.autocast with a bfloat16 default "
+     "and the same register behaviour and limitations"),
+    (("torch.npu.amp.autocast",), _NpuAutocast, Fidelity.APPROXIMATE,
+     "Legacy npu-pinned subclass of torch.autocast with the float16 default "
      "and the same register behaviour and limitations"),
     (("torch.amp.custom_fwd", "torch.amp.autocast_mode.custom_fwd"),
      custom_fwd, Fidelity.APPROXIMATE,

@@ -494,10 +494,26 @@ def _matmul_kernel_dispatch(op, a, b, trans_a, trans_b):
     so the transpose flags, which describe the layout of the operands handed
     in, stay valid for the cast copies.
     """
+    dtype = _mixed_float_compute_dtype(a, b)
+    backend = getattr(getattr(jt.compiler, "build_config", None), "backend", None)
+    if backend == "acl":
+        amp_reg = int(jt.flags.amp_reg)
+        if (dtype is None and a.dtype == b.dtype
+                and _jittor_dtype_name(a.dtype) == "float32"
+                and not amp_reg & jt.amp_flags.prefer32):
+            if amp_reg & jt.amp_flags.prefer_bfloat16:
+                dtype = "bfloat16"
+            elif amp_reg & jt.amp_flags.prefer16:
+                dtype = "float16"
+    # ACL mapped_matmul requires equal operand dtypes. Unlike the CUDA/oneDNN
+    # relays, its registered kernel accepts the pair before dtype resolution,
+    # so autocast must normalize mixed pairs and same-dtype float32 operands
+    # before kernel selection.
+    if dtype is not None and backend == "acl":
+        a, b = a.cast(dtype), b.cast(dtype)
     kernel = select_kernel(op, a, b, trans_a, trans_b)
     if kernel is not None:
         return kernel(a, b, trans_a, trans_b)
-    dtype = _mixed_float_compute_dtype(a, b)
     if dtype is None:
         return None
     a, b = a.cast(dtype), b.cast(dtype)

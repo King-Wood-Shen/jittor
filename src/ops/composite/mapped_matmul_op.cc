@@ -37,6 +37,15 @@ MappedMatmulOp::MappedMatmulOp(Var* a, Var* b, bool trans_a, bool trans_b, bool 
 }
 
 VarPtr MappedMatmulOp::grad(Var* out, Var* dout, Var* v, int v_index) {
+    // Autocast may promote the loss/cotangent after a reduced-precision
+    // mapped_matmul. The mapped backend requires equal operand dtypes, so
+    // compute this GEMM in the forward operands' dtype; the cast node that
+    // fed this op restores the original parameter/activation gradient dtype.
+    VarPtr casted_dout;
+    if (dout->dtype() != a->dtype()) {
+        casted_dout = cast_operand_to_compute_dtype(dout, a->dtype());
+        if (casted_dout) dout = casted_dout;
+    }
     // c = A @ B with A = op(a) and B = op(b); dA = dout @ B^T and
     // dB = A^T @ dout, and a transposed operand receives the transpose of its
     // own gradient. Written back in the pre-transpose layout, so no transpose
