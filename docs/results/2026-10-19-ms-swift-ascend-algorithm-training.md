@@ -1,6 +1,6 @@
 # ms-swift Ascend 单卡 RLHF 算法训练对照
 
-- 状态：DPO、KTO、CPO、纯 SimPO、ORPO 在限定三步场景通过；GRPO 的公开入口和设备执行通过，采样轨迹未达到数值对照准入。
+- 状态：DPO、KTO、CPO、纯 SimPO、ORPO 在限定三步场景通过；GRPO 的公开入口和设备执行通过，采样轨迹未达到数值对照准入；GKD 本地 teacher 尝试在首步出现零 loss/零梯度，未通过。
 - 日期：2026-10-19
 - 代码基线：集成提交 `0b872e5ddf94304ebd9281f50a1cec874092a4dd`；修复提交 `7f396c615d017afde175d337399d516f28253005`。
 - 下游来源：ms-swift 4.5.2；native 与 shim 环境中的 `swift/cli/rlhf.py` SHA256 均为 `f68c8b93ff4bfd08374fa2bca6efadcfe23e7beec13db162953275138fa56d65`。PEFT LoRA forward、PEFT model 与 TRL KTO trainer 源文件在两环境逐文件 SHA256 相同。
@@ -50,7 +50,7 @@ KTO 曾有带观察器的重跑把 candidate reference logits 记录为 policy l
 | SimPO | `cpo_alpha=0` 的纯 SimPO 公开 RLHF CLI 三步通过 | 既有通过；缺本轮 loss 趋势和设备峰值显存归档 |
 | ORPO | 本报告中公开 RLHF CLI 三步数值对照通过 | 既有通过；缺本轮 loss 趋势和设备峰值显存归档 |
 | GRPO | 公开 RLHF CLI 在两端完成三步，candidate NPU forward 及零 fallback 已证实，但轨迹未对齐 | 部分通过；不作为数值通过 |
-| GKD | 本轮没有执行本地 teacher 的 ms-swift 公开训练路径 | 未验证；独立外部引擎路径不计入 JTorch 通过 |
+| GKD | 2026-10-20 本地 teacher 的公开 CLI 在 NPU 实际训练一步，记录 loss `0.0`、grad norm `0.0` 后停止 | 阻塞；未证明有效梯度或收敛，详见本报告续接 |
 
 现有 FULL SFT CPU/CUDA 证据见 [`2026-10-15-swift-trainer-installed-source.md`](2026-10-15-swift-trainer-installed-source.md)；Swift LoRA CPU/CUDA 手动三步证据见 [`2026-10-14-downstream-oracle-scorecards.md`](2026-10-14-downstream-oracle-scorecards.md)。这些报告没有提供本轮所需的真实 NPU loss 趋势与设备峰值显存，因此不重复宣称满足该项验收。RL 目标按有限的奖励/损失/梯度和可解释的整体趋势判断，不要求逐步单调。
 
@@ -62,3 +62,14 @@ KTO 曾有带观察器的重跑把 candidate reference logits 记录为 policy l
 - GRPO 续查确认保存的最差字段是 `forward-values-step0-call0.npz:model_output.logits`，绝对差 `0.7639221847`，形状 `(2, 5, 128)`；candidate 观测到 NPU forward、fallback 为 0。现有 observer 没有保存该次 forward 的输入，因此无法排除首批输入/上下文已不同，也不能将最先分歧归因于采样随机流。记录见未版本化目录 `$JITTOR_LAB_ROOT/_state/ms-swift-ascend/runs/algorithms-world1-0b872e5-20261019/compare-grpo-retry4.json`；需要先补齐同输入、同初始权重的 NPU forward 根因复现，再决定是否属于 JTorch/ACL 缺陷。
 
 - 文档验证（2026-10-20）：`bash tools/check_repo_layout.sh` 通过（298 个活动 Markdown 文件）；`JITTOR_TORCH_SHIM=1 PYTHONPATH=python python3 -m pytest -q tests/structure` 未能启动，系统 Python 3 无 pytest（`No module named pytest`）。本次仅改文档，未运行 core 或真实设备作业。
+
+
+## 2026-10-20 GKD 本地 teacher 补验
+
+- 状态：未通过，按五次不同尝试上限停止并转向 reward-model 路径；不把 CLI 完成一步计作训练通过。
+- 同步基线：官方 `origin/2.0-refactor` SHA `d0fd6f577b6b025f0e2eecc08962f89a3ff7bb64`；任务源码 SHA `ac97bef528678a7a04e4c1aa71108abcbc26c18b`。
+- 入口与依赖：ms-swift `4.5.2` 的公开 `swift/cli/rlhf.py --rlhf_type gkd`，TRL `0.29.1`、Transformers `4.57.6`、PEFT `0.17.1`、Jittor `1.3.11.0`，Python `3.11`。native/shim 安装中 `swift/cli/rlhf.py` SHA256 均为 `f68c8b93ff4bfd08374fa2bca6efadcfe23e7beec13db162953275138fa56d65`；GKD trainer、loss、TRL GKD trainer SHA256 分别为 `3ed60c38920ccce6a86529504fc2d7d02def1dd2e22ee9c33c85fe62d0e020a9`、`5d02ce7d1dfd162cb37dba054eff1e23e29d41dd1f2122352a8651f6e7ca0fec`、`888437a4c1f166faef6c2719542ebaea48251bddacd891393936cbd2af3796f9`。
+- 场景：Ascend 910B3 单 NPU；0.0986M 可训练参数的 Llama full-tuner；本地 frozen teacher；12 步上限、batch 1、4 个短 prompt、completion 长度 4。teacher `model.safetensors` SHA256 为 `0c27276ae7a985335cf509008d6df93c4474faa78a2ef7c73326bd2090c386c6`；student 仅将 `lm_head.weight` 乘以 `0.9`，SHA256 为 `a1bf309aee5533d4a35b0e9712247baecfc5738d04415994cc5402c26df9d20e`；数据 SHA256 为 `1f76963ab799e90108a7250312a80244613ed04bae22cf79642f7af2134b7ce0`。Checkpoint 中的自定义 adapter 键被标准 `LlamaForCausalLM` 加载器忽略；实际训练模型报告 `0.0986M` 参数、100% 可训练。
+- 尝试记录：作业 `5823` 因 host wrapper job-marker 不在 compute node 可见路径退出；`5825` 因缺 `CCACHE_BASEDIR` 在 Jittor 导入时退出；`5826` 因 Swift 4.5.2 不识别 `--train_type full` 而停在 CLI 解析；`5832` 因长 `TMPDIR` 令 datasets manager 的 AF_UNIX 路径超限而退出；`5835` 修复上述启动问题后进入 NPU 训练，但首步即报告 loss `0.0`、grad norm `0.0`，随后取消，避免继续执行无更新步骤。以上日志与独立缓存未版本化保存在 `$JITTOR_LAB_ROOT/_state/ms-swift-ascend/runs/gkd-world1-0b872e5-20261020-r1/`。
+- 设备证据：作业 `5835` 使用 `backend_fallback=error`，执行到一步未触发 fallback 异常；因提前停止，没有最终 `fallback_count` 断言，故不登记为零 fallback 通过。作业期间以 `npu-smi info -t proc-mem` 每秒采样实际设备进程内存，峰值 `192 MB`；Swift 的 `memory(GiB)` 字段未用于峰值结论。
+- 根因边界：Swift GKD trainer 在 `num_valid == 0` 时明确将 loss 置零，但本次没有保存 student/teacher logits 和有效标签数，故无法确认该分支是否触发，也不能排除其他零梯度原因。修复前需添加能保留有效响应 token 数和两侧 logits 形状的 NPU 诊断；本轮到达尝试上限后转向 RM，不再给 GKD 数值通过结论。
