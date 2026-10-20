@@ -1,6 +1,7 @@
 """Stable optimizer/scheduler owners retain update and state trajectories."""
 import ast
 import importlib
+import os
 import inspect
 import pickle
 import textwrap
@@ -99,6 +100,54 @@ def test_update_scheduler_and_restore_trajectory(name):
     restored_parameter.requires_grad_(False)
     from jittor.compat.torch.nested import _torch_prune_leaf_registry
     _torch_prune_leaf_registry()
+
+
+@pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
+                    reason="requires a selected ACL device")
+def test_external_optimizer_base_defaults_and_scheduler_run_on_acl():
+    torch = compatibility_owner(jt)
+    assert jt.compiler.has_acl and jt.flags.use_cuda
+    parameter = torch.nn.Parameter(torch.tensor([1.0, -2.0], device="npu"))
+
+    class DefaultsOptimizer(torch.optim.Optimizer):
+        def __init__(self, params):
+            super().__init__(params, {"lr": 0.05, "scale": 2.0})
+
+        @torch.no_grad()
+        def step(self):
+            for group in self.param_groups:
+                assert group["scale"] == 2.0
+                for param in group["params"]:
+                    if param.grad is not None:
+                        state = self.state[param]
+                        state["step"] = state.get("step", 0) + 1
+                        state["moment"] = torch.zeros_like(param)
+                        state["moment"].addcmul_(param.grad, param.grad, value=0.5)
+                        param.add_(param.grad, alpha=-group["lr"] * group["scale"])
+
+    optimizer = DefaultsOptimizer([{"params": [parameter]},
+                                   {"params": [torch.nn.Parameter(torch.ones((1,), device="npu"))],
+                                    "lr": 0.025}])
+    assert [group["lr"] for group in optimizer.param_groups] == [0.05, 0.025]
+    assert [group["scale"] for group in optimizer.param_groups] == [2.0, 2.0]
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda step: 1.0)
+    parameter.grad = torch.tensor([0.5, -0.5], device="npu")
+    optimizer.step()
+    scheduler.step()
+    torch.npu.synchronize()
+    assert torch.allclose(parameter, torch.tensor([0.95, -1.95], device="npu"))
+    state = optimizer.state[parameter]
+    assert int(state["step"]) == 1
+    assert torch.equal(state["moment"], torch.full_like(parameter, 0.125))
+    snapshot = optimizer.state_dict()
+    restored_param = torch.nn.Parameter(torch.zeros((2,), device="npu"))
+    restored = DefaultsOptimizer([{"params": [restored_param]},
+                                  {"params": [torch.nn.Parameter(torch.zeros((1,), device="npu"))],
+                                   "lr": 0.025}])
+    restored.load_state_dict(snapshot)
+    restored_state = restored.state[restored_param]
+    assert int(restored_state["step"]) == 1
+    assert torch.equal(restored_state["moment"], torch.full_like(restored_param, 0.125))
 
 
 def test_swa_ema_average_factories_keep_state_and_importable_math():
