@@ -171,6 +171,10 @@ class Conv2dBenchmarks:
         if self.mode == "forward_backward":
             labeled_values.append(("cotangent", self.cotangent))
         if self.backend_name == "jittor":
+            # Autograd may release the forward value after computing gradients.
+            # Materialize it again before checking its actual residency.
+            if self.mode == "forward_backward" and self.output.location() == "none":
+                self.output.sync()
             expected = "device" if self.device == "cuda" else "cpu"
             observed = [(name, value.location()) for name, value in labeled_values]
             if any(location != expected for _, location in observed):
