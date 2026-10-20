@@ -116,6 +116,7 @@
 2026-10-20-ms-swift-ascend-galore
 2026-10-21-ms-swift-ascend-muonclip
 2026-10-21-ms-swift-ascend-world2
+2026-10-21-ms-swift-ascend-inference
 2026-10-16-accelerate-installed-source-protocols
 2026-10-16-accelerate-maintained-cpu-nightly
 2026-10-15-deepspeed-bfloat16-multirank
@@ -201,6 +202,7 @@
 | [Ascend ms-swift GaLore 公开训练](2026-10-20-ms-swift-ascend-galore.md) | 单卡 BF16 公开 GaLore SFT 六步、外部优化器状态/scheduler NPU 回归通过；其他算法、推理和双卡未验证 | 2026-10-20 |
 | [Ascend ms-swift MuonClip 公开训练](2026-10-21-ms-swift-ascend-muonclip.md) | 单卡 MuonClip BF16 SFT 六步通过；记录并触发低阈值 QK clipping；外部 Muon 与双卡未验证 | 2026-10-21 |
 | [Ascend ms-swift 单机双卡公开训练](2026-10-21-ms-swift-ascend-world2.md) | 双卡 BF16 Swift SFT 两步通过；HCCL、ACL strict fallback 0；自定义 DDP 通信 hook 未实现 | 2026-10-21 |
+| [Ascend ms-swift 公开推理](2026-10-21-ms-swift-ascend-inference.md) | Swift TransformersEngine 单卡推理 4 请求/16 token 通过；真实 logits/KV cache 驻留 NPU，fallback 0 | 2026-10-21 |
 
 | [PEFT / Swift 独立 CPU nightly](2026-10-15-maintained-ecosystem-nightly.md) | 完整依赖与来源校验、两维护门禁本地执行通过；未观测 GitHub scheduled run | 2026-10-15 |
 | [OpenMMLab 安装来源训练](2026-10-15-openmmlab-installed-source-training.md) | MMEngine/MMCV 四条限定 L3；462 数组、三种输入与三步真实 train_step，完整安装来源绑定 | 2026-10-15 |
