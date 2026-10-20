@@ -8,7 +8,7 @@ what Transformers, ms-swift and DeepSpeed all do -- was told there was no NPU
 and went to the host.
 
 What is published here is discovery, selection and synchronization, plus the
-three ``torch_npu`` primitives a Torch model reaches for directly. It is not
+selected ``torch_npu`` APIs a Torch model reaches for directly. It is not
 the torch_npu extension: streams, RNG state and the memory statistics have
 their own contracts and are left refusing rather than answered with a zero.
 """
@@ -140,6 +140,122 @@ def npu_swiglu(input, dim=-1):
     return (gate * jt.sigmoid(gate)) * value
 
 
+def npu_fusion_attention(
+    query, key, value, head_num, input_layout, pse=None, padding_mask=None,
+    atten_mask=None, scale=1.0, keep_prob=1.0,
+    pre_tockens=2147483647, next_tokens=2147483647, inner_precise=0,
+    prefix=None, actual_seq_qlen=None, actual_seq_kvlen=None, sparse_mode=0,
+    gen_mask_parallel=True, sync=False, softmax_layout="",
+):
+    """Run the BSND and TND layouts used by Transformers' NPU FA wrapper.
+
+    Jittor evaluates the attention graph on ACL; this does not claim to call
+    CANN's fused operator. Unsupported fused-attention features fail loudly.
+    """
+    _require_acl()
+    if input_layout not in ("BSND", "TND"):
+        raise NotImplementedError(
+            "Jittor ACL npu_fusion_attention currently supports BSND and TND")
+    if any(value is not None for value in (pse, padding_mask, prefix)):
+        raise NotImplementedError(
+            "Jittor ACL npu_fusion_attention does not support pse, padding masks, or prefix")
+    if (int(pre_tockens) != 2147483647
+            or int(next_tokens) != 2147483647 or int(inner_precise) != 0
+            or not gen_mask_parallel or sync or softmax_layout):
+        raise NotImplementedError(
+            "Jittor ACL npu_fusion_attention supports only full-window default settings")
+    keep_prob = float(keep_prob)
+    if not 0.0 < keep_prob <= 1.0:
+        raise ValueError("keep_prob must be in (0, 1]")
+    sparse_mode = int(sparse_mode)
+    if sparse_mode not in (0, 2, 3):
+        raise NotImplementedError("unsupported npu_fusion_attention sparse_mode")
+
+    rank = 4 if input_layout == "BSND" else 3
+    if any(len(tensor.shape) != rank for tensor in (query, key, value)):
+        raise ValueError("query, key and value must match the selected attention layout")
+    query_heads, head_dim = int(query.shape[-2]), int(query.shape[-1])
+    key_heads, key_dim = int(key.shape[-2]), int(key.shape[-1])
+    if (tuple(key.shape) != tuple(value.shape) or head_dim != key_dim
+            or int(value.shape[-1]) != head_dim):
+        raise ValueError("query, key and value have incompatible attention shapes")
+    if input_layout == "BSND" and int(query.shape[0]) != int(key.shape[0]):
+        raise ValueError("query, key and value batch dimensions must match")
+    if int(head_num) != query_heads:
+        raise ValueError("head_num must equal the query head count")
+    if key_heads <= 0 or query_heads % key_heads:
+        raise ValueError("key/value heads must divide the query head count")
+    causal = sparse_mode in (2, 3)
+
+    def _mask_for(length_q, length_k):
+        if atten_mask is None:
+            return None
+        if str(atten_mask.dtype).lower().rsplit(".", 1)[-1] not in ("bool", "bool_"):
+            raise NotImplementedError(
+                "Jittor ACL npu_fusion_attention currently requires a boolean mask")
+        # torch_npu masks mark blocked positions; SDPA masks mark positions
+        # which participate. Each TND segment starts at local position zero.
+        return ~atten_mask[..., :length_q, :length_k]
+
+    from .nn.attention import scaled_dot_product_attention
+
+    def _run_one(q, k, v, mask):
+        if input_layout == "BSND":
+            q_sdpa, k_sdpa, v_sdpa = (
+                tensor.transpose(1, 2) for tensor in (q, k, v))
+        else:
+            q_sdpa, k_sdpa, v_sdpa = (
+                tensor.unsqueeze(0).transpose(1, 2) for tensor in (q, k, v))
+        output = scaled_dot_product_attention(
+            q_sdpa, k_sdpa, v_sdpa, attn_mask=mask,
+            dropout_p=1.0 - keep_prob, is_causal=causal and mask is None,
+            scale=float(scale), enable_gqa=key_heads != query_heads)
+        if input_layout == "BSND":
+            return output.transpose(1, 2)
+        return output.transpose(1, 2).squeeze(0)
+
+    if input_layout == "BSND":
+        length_q, length_k = int(query.shape[1]), int(key.shape[1])
+        if causal and length_q != length_k:
+            raise NotImplementedError(
+                "causal attention requires equal query and key lengths")
+        output = _run_one(query, key, value, _mask_for(length_q, length_k))
+    else:
+        def _ends(values, total, name):
+            if values is None:
+                raise ValueError("TND attention requires %s cumulative lengths" % name)
+            ends = tuple(int(end) for end in values)
+            previous = 0
+            for end in ends:
+                if end <= previous or end > total:
+                    raise ValueError("%s must be strictly increasing cumulative lengths" % name)
+                previous = end
+            if not ends or ends[-1] != total:
+                raise ValueError("%s must end at the corresponding token count" % name)
+            return ends
+
+        q_ends = _ends(actual_seq_qlen, int(query.shape[0]), "actual_seq_qlen")
+        k_ends = _ends(actual_seq_kvlen, int(key.shape[0]), "actual_seq_kvlen")
+        if len(q_ends) != len(k_ends):
+            raise ValueError("query and key cumulative lengths must have equal size")
+        outputs = []
+        q_start = k_start = 0
+        for q_end, k_end in zip(q_ends, k_ends):
+            length_q, length_k = q_end - q_start, k_end - k_start
+            if causal and length_q != length_k:
+                raise NotImplementedError(
+                    "causal TND attention requires equal query and key lengths")
+            outputs.append(_run_one(
+                query[q_start:q_end], key[k_start:k_end], value[k_start:k_end],
+                _mask_for(length_q, length_k)))
+            q_start, k_start = q_end, k_end
+        output = jt.concat(outputs, dim=0)
+
+    # Transformers consumes attention_out ([0]); the auxiliary fused-kernel
+    # workspaces are not materialized by this graph implementation.
+    return output, None, None, None, None, None, None
+
+
 def _unsupported(*args, **kw):
     raise NotImplementedError(
         "This NPU API is outside the Jittor ACL device facade")
@@ -229,14 +345,11 @@ def install(ctx):
     facade.npu_rms_norm = npu_rms_norm
     facade.npu_rotary_mul = npu_rotary_mul
     facade.npu_swiglu = npu_swiglu
-    # Transformers imports this even for eager attention. A refusal is the
-    # honest export; a silent unfused stand-in would be a different model.
-    facade.npu_fusion_attention = _unsupported
+    facade.npu_fusion_attention = npu_fusion_attention
     register_api_bindings(
         facade, "torch_npu",
-        ("npu_rms_norm", "npu_rotary_mul", "npu_swiglu"), Fidelity.APPROXIMATE,
-        "The same ACL tensor graphs torch.npu publishes.")
-    register_api_bindings(
-        facade, "torch_npu", ("npu_fusion_attention",), Fidelity.UNIMPLEMENTED,
-        "Fused NPU attention is not implemented by this device facade.")
+        ("npu_rms_norm", "npu_rotary_mul", "npu_swiglu",
+         "npu_fusion_attention"), Fidelity.APPROXIMATE,
+        "Runs supported BSND and TND attention as ACL SDPA graphs; this does "
+        "not expose CANN fused-kernel workspaces or fused-kernel performance.")
     registry.publish("torch_npu", facade, bind_parent=False)
