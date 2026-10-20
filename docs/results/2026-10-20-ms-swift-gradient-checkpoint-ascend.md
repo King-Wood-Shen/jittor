@@ -35,7 +35,7 @@ The full `tests/structure` run in the shim image ended with `13 failed, 1499 pas
 
 Run scripts, raw audit records, and logs are retained outside the repository at:
 
-`/home/xinshen/_state/ms-swift-ascend/runs/options-gradient-checkpoint-20261020-r1/`
+`$HOME/_state/ms-swift-ascend/runs/options-gradient-checkpoint-20261020-r1/`
 
 Re-run the public comparison with the isolated environment and cache already encoded in `toggle.sbatch` in that directory. The script submits two independent SFT processes and writes `gc-off-<job>/events.json` and `gc-on-<job>/events.json`.
 
