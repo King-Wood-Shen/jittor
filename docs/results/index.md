@@ -156,7 +156,7 @@
 | [分布约束命名空间发布](2026-10-15-distribution-constraint-publication.md) | 原生属性与工厂发布已修；CPU/CUDA 边界检查对拍通过 | 2026-10-15 |
 | [训练注册表分母补齐](2026-10-15-training-registry-denominators.md) | 补 ms-swift/verl 训练轴与 vLLM/Omni 分母、SCM wheel 源码身份校验；枚举不授予数值覆盖 | 2026-10-15 |
 | [ms-swift checkpoint 生命周期与 L3 容量](2026-10-15-ms-swift-artifact-lifecycle.md) | 已测重复副本的清理与 storage v2 验证；完整 L3 峰值仍按具体 profile 预检 | 2026-10-15 |
-| [ms-swift CUDA 推理与优化开关矩阵](2026-10-19-ms-swift-cuda-inference-axis.md) | 当前树 TransformersEngine 对拍、cache 开关核验及外部引擎执行归属 | 2026-10-19 |
+| [ms-swift CUDA 推理与优化开关矩阵](2026-10-19-ms-swift-cuda-inference-axis.md) | TransformersEngine greedy/采样/adapter/cache 与同步后 SDPA CUDA；外部引擎及投机解码未执行 | 2026-10-20 |
 | [CUDA SDPA 掩码覆盖](2026-10-14-cuda-sdpa-mask-coverage.md) | 180 个真实 CUDA 场景对拍；融合路径扩展，边界保持显式 | 2026-10-14 |
 | [图重放保留预算](2026-10-14-graph-replay-retain-budget.md) | 动态预算约束已缓存的 replay；默认预算保留，CPU/CUDA 实测 | 2026-10-14 |
 | [下游独立 oracle 与训练 scorecard](2026-10-14-downstream-oracle-scorecards.md) | 四库 CPU/CUDA 代表场景已验；LoRA/component 范围限定，未授予 L4/L5 | 2026-10-14 |

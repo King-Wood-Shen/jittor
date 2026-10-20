@@ -1,8 +1,9 @@
 # ms-swift CUDA 推理与优化开关矩阵
 
-- 状态：首轮六场景矩阵与合并后代表场景复验完成；Swift 入口 cache-off 未触发，不授予整个 ms-swift、外部推理引擎或投机解码的 Jittor 内核覆盖。
-- 日期：2026-10-19。
+- 状态：首轮六场景矩阵、同步后 greedy 复验及 SDPA 公开入口 CUDA 补测完成；Swift 入口 cache-off 未触发，不授予整个 ms-swift、外部推理引擎或投机解码的 Jittor 内核覆盖。
+- 日期：2026-10-19；补测：2026-10-20。
 - 首轮同步基线：`origin/2.0-refactor` `3577b70b4ca72296c8e49cbf37ebb51fe3c76497`；六场景完整矩阵 HEAD 为 `f6fe012b1a17a7ab9377c196a7836ea9df7afb5f`。
+- 本轮恢复同步：`origin/2.0-refactor` `d0fd6f577b6b025f0e2eecc08962f89a3ff7bb64`；同步后 HEAD `6e947cd727c35ac9151e80ffcb50f2868c8d4b94`。
 - 上游源码：外置 ms-swift checkout `88d727951203256baa564c643c651b6f8d90fd7e`；验证不修改该 checkout。
 - 维护者：ms-swift CUDA 推理适配。
 - 复查条件：Jittor HEAD、ms-swift/Transformers/PEFT 版本、生成配置、模型权重、adapter 权重或引擎分派变化。
@@ -26,7 +27,7 @@ Slurm job `105611`（RTX 4090，完成/exit 0）执行，原生 PyTorch 与 Jitt
 | vLLM | Swift 建立 `vllm.LLMEngine` 或 `AsyncLLMEngine` 并向该实例提交请求 | 源码确认控制层分派；本作业无真实引擎内核验证 |
 | SGLang | Swift 建立 `sglang.Engine`，调用其 `async_generate` | 源码确认控制层分派；本作业无真实引擎内核验证 |
 | LMDeploy | Swift 调用 `lmdeploy.pipeline`，由其 backend 执行 | 源码确认控制层分派；本作业无真实引擎内核验证 |
-| speculative decoding | Swift 把 `speculative_config` 交给 vLLM，或把 speculative 参数交给 SGLang `ServerArgs` | 只有参数转发审计；没有证明 draft/target 计算进入 JTorch，故不做 JTorch 速度或输出授级 |
+| speculative decoding | Swift 把 `speculative_config` 交给 vLLM，或把 speculative 参数交给 SGLang `ServerArgs` | ms-swift 源码有该公开引擎参数，但当前隔离环境未安装 vLLM、SGLang 或 LMDeploy；未安装、未下载、未执行，不授予 JTorch 计算覆盖 |
 
 ms-swift 的 `RequestConfig` 没有 `use_cache` 参数。其 `prepare_generation_config` 生成新的 `GenerationConfig` 时只转发部分字段；这次即使把引擎的配置和模型配置设为 false，准备后的配置及实际模型调用仍为 true。原生 PyTorch 与 shim 呈现同一现象，归属在 Swift/Transformers 生成配置契约，不应以 token 相同冒称关闭缓存的路径已通过。
 
@@ -51,3 +52,36 @@ Slurm job `105900` 原生 PyTorch 侧和 job `105928` 修正探针导入顺序�
 Slurm job `105905` 在合并树上通过 CPU core：native `98 passed, 41 skipped, 1 xfailed`；Torch `224 passed, 1 skipped`；合计 `322 passed, 42 skipped, 1 xfailed`。完整结构门禁首次的两个报告登记失败已修复；复验通过布局与生成 manifest 检查。计算节点安装钉定的 `asv==0.6.6` 时代理连接被拒绝（日志 `asv-install.log`），所以结构复跑仅排除该 ASV CLI 测试，其余为 `1511 passed, 8 skipped, 1 deselected, 1058 subtests passed`。另有 4 项 environment skips：两个测试解释器未安装 jittor、两个未安装 pytest-xdist；详情见 `structure-postsync-noasv.log`。未排除 ASV 的完整结构门禁仍待可联网的维护环境补跑。
 
 首轮六场景矩阵数据仍绑定首轮 HEAD `f6fe012b1`；当前合并树另有一条 greedy CUDA 复验，不能把后续矩阵格扩写成完整当前树覆盖。
+
+本轮同步后仓库布局检查通过。Torch shim 结构门禁执行为 `1513 passed, 6 skipped, 1 failed,
+1066 subtests passed`；唯一失败为 `test_asv_entrypoints.py::TestAsvEntryPoints::test_source_config_is_executable_without_nox_path_rewriting`，
+子进程解释器缺少 `asv`（`No module named asv`）。本地 Python 与已用隔离环境均未预装 ASV；此前
+`asv==0.6.6` 安装日志记录代理拒绝连接，且当前不重试安装。另 4 个环境 skip 分别来自测试解释器
+未安装 jittor 与 pytest-xdist；其余测试通过。此门禁结果绑定本报告补测后的仓库状态，不能据此声称
+完整结构门禁全绿。
+
+## 2026-10-20 同步后优化开关补测
+
+本轮同步后 HEAD 为 `6e947cd727c35ac9151e80ffcb50f2868c8d4b94`，远端基线为
+`d0fd6f577b6b025f0e2eecc08962f89a3ff7bb64`。复用同一个 Qwen2-0.5B 本地模型，不复制或下载权重；
+模型文件 SHA-256 仍为 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`。
+ms-swift 源码 SHA 为 `88d727951203256baa564c643c651b6f8d90fd7e`，其
+`transformers_engine.py` SHA-256 为 `02c63b0488bbd817725b73ba27a103b421fe9127ff5e098ace58fd0979b32efb`。
+依赖身份为 Torch `2.6.0`（安装 RECORD SHA-256
+`7b34dbec0f00ca04925fc326ddd73a2ec7ae6409a488bab37eab856143daa147`）、Transformers
+`4.57.6`（`8e7e1cb85024919785ff2f6ff4d0d38c21524addfaf55ea39eb78056c5d7ddef`）、PEFT
+`0.17.1`（`239bb3fba644163d4306d04c5381826e72c6af84ef07d3a62004ecea58d56d68`）。ms-swift
+从以上固定 git checkout 导入，版本 `4.6.0.dev0`。原始探针与 NVML 采样记录未版本化，位于
+`$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261020-inference-postsync/`。
+
+| 新增项 | 公开入口与模型 | CUDA 观测与输出 | fallback / NVML 峰值 |
+| --- | --- | --- | --- |
+| Swift SDPA attention | `TransformersEngine(attn_impl='sdpa').infer(InferRequest, RequestConfig)`；Qwen2-0.5B；RTX 4090，CUDA 设备 6 | 配置回读为 `sdpa`；实际 `forward` 输入依次 `[1,25]`, `[1,1]`, `[1,1]`，均为 `cuda:0`；`use_cache=true`；输出 token `[785,6722,315]`，与既有 eager greedy 前 3 token 相同 | `use_cuda=1`、fallback 增量 0；`nvidia-smi`/NVML 设备峰值 2486 MiB（基线 1 MiB） |
+
+本补测只新增 SDPA 格，不重复既有 greedy、sampling、batch、adapter 加载/合并或 cache-off 探针。计时未作验收。
+首轮和合并后历史场景的原始记录没有 NVML 采样，故这些场景的 NVML 峰值标为“未采集”，不从
+Slurm CPU 内存字段或 allocator 数据推算。ms-swift 源码确认 speculative 参数只传给 vLLM/SGLang
+引擎；当前 vLLM、SGLang、LMDeploy 均未安装。对应源码文件 SHA-256 分别为 vLLM
+`51244ca497c5338dfca3f3480615333f2506b3b6c137e33f7d126f33fa9254cd`、SGLang
+`9f4fbd470c8a62a086abfbc6ffe1f5c8eb31843b52604100a90c47860dcb2db0`。未尝试安装依赖，故没有
+外部推理引擎或 speculative CUDA 结果。
