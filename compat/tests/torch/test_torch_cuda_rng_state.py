@@ -63,6 +63,31 @@ def _cuda_rng_seed_only(func):
     return inner
 
 
+def _acl_rng(func):
+    @wraps(func)
+    def inner(*args, **kwargs):
+        if not getattr(jt.compiler, "has_acl", 0):
+            pytest.skip("no ACL device")
+        with jt.flag_scope(use_acl=1):
+            return func(*args, **kwargs)
+    return inner
+
+
+@_acl_rng
+def test_cuda_rng_state_round_trips_native_acl_stream():
+    # Transformers saves the accelerator stream under torch.cuda even when the
+    # shim's physical device is ACL. The packed state must restore the exact
+    # ACL counter, not merely reseed the stream.
+    torch.npu.manual_seed(1234)
+    jt.random((10,)).sync()
+    state = torch.cuda.get_rng_state(0)
+    expected = jt.random((8,)).numpy().copy()
+
+    torch.cuda.set_rng_state(state, 0)
+    np.testing.assert_array_equal(jt.random((8,)).numpy(), expected)
+    assert state.numpy().tobytes().startswith(b"JTACL_RNG_1")
+
+
 @_cuda_rng
 def test_state_round_trips_for_uniform():
     torch.cuda.manual_seed(1234)
