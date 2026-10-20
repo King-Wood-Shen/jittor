@@ -108,9 +108,71 @@ def test_torch_npu_primitives_match_their_definitions():
     assert torch.allclose(torch_npu.npu_swiglu(paired),
                           gate * torch.sigmoid(gate) * value, atol=1e-5)
 
-    # Fused attention is refused, not quietly replaced with an unfused stand-in.
-    with pytest.raises(NotImplementedError):
-        torch_npu.npu_fusion_attention()
+
+@pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
+                    reason="requires a selected ACL device")
+def test_torch_npu_fusion_attention_bsnd_acl_graph_forward_backward():
+    import torch_npu
+
+    assert _on_acl(), "JITTOR_TEST_DEVICES=npu but ACL is not active"
+    batch, sequence, heads, dim = 1, 5, 2, 8
+    q = torch.randn((batch, sequence, heads, dim), dtype=torch.bfloat16,
+                    device="npu", requires_grad=True)
+    k = torch.randn((batch, sequence, heads, dim), dtype=torch.bfloat16,
+                    device="npu", requires_grad=True)
+    v = torch.randn((batch, sequence, heads, dim), dtype=torch.bfloat16,
+                    device="npu", requires_grad=True)
+    blocked = torch.triu(torch.ones((sequence, sequence), dtype=torch.bool,
+                                    device="npu"), diagonal=1)
+
+    output = torch_npu.npu_fusion_attention(
+        q, k, v, heads, "BSND", atten_mask=blocked, scale=dim ** -0.5,
+        sparse_mode=3)[0]
+    allowed = ~blocked
+    expected = torch.nn.functional.scaled_dot_product_attention(
+        q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
+        attn_mask=allowed, scale=dim ** -0.5)
+    expected = expected.transpose(1, 2)
+    torch.npu.synchronize()
+    assert output.shape == q.shape
+    assert output.dtype == q.dtype
+    assert torch.allclose(output, expected, atol=2e-2, rtol=2e-2)
+    output.float().sum().backward()
+    torch.npu.synchronize()
+    assert all(tensor.grad is not None
+               and bool(torch.isfinite(tensor.grad).all().item())
+               for tensor in (q, k, v))
+
+    # TND is the variable-length layout emitted by padding-free packing. Check
+    # separate packed segments against the same per-segment SDPA definition.
+    qt = torch.randn((5, heads, dim), dtype=torch.bfloat16,
+                     device="npu", requires_grad=True)
+    kt = torch.randn((5, heads, dim), dtype=torch.bfloat16,
+                     device="npu", requires_grad=True)
+    vt = torch.randn((5, heads, dim), dtype=torch.bfloat16,
+                     device="npu", requires_grad=True)
+    blocked_t = torch.triu(torch.ones((5, 5), dtype=torch.bool,
+                                      device="npu"), diagonal=1)
+    output_t = torch_npu.npu_fusion_attention(
+        qt, kt, vt, heads, "TND", atten_mask=blocked_t, scale=dim ** -0.5,
+        actual_seq_qlen=(2, 5), actual_seq_kvlen=(2, 5), sparse_mode=3)[0]
+    expected_t = torch.cat([
+        torch.nn.functional.scaled_dot_product_attention(
+            qt[start:end].unsqueeze(0).transpose(1, 2),
+            kt[start:end].unsqueeze(0).transpose(1, 2),
+            vt[start:end].unsqueeze(0).transpose(1, 2),
+            attn_mask=~blocked_t[:end-start, :end-start],
+            scale=dim ** -0.5).transpose(1, 2).squeeze(0)
+        for start, end in ((0, 2), (2, 5))
+    ])
+    torch.npu.synchronize()
+    assert output_t.shape == qt.shape
+    assert torch.allclose(output_t, expected_t, atol=2e-2, rtol=2e-2)
+    output_t.float().sum().backward()
+    torch.npu.synchronize()
+    assert all(tensor.grad is not None
+               and bool(torch.isfinite(tensor.grad).all().item())
+               for tensor in (qt, kt, vt))
 
 
 @pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
