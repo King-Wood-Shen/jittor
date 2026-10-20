@@ -99,5 +99,12 @@ def setup(app):
     spec.loader.exec_module(module)
 
     metadata = module.setup(app)
+    link_path = Path(__file__).with_name("_repo_links.py")
+    link_spec = spec_from_file_location("_jittor_repo_links", str(link_path))
+    if link_spec is None or link_spec.loader is None:
+        raise RuntimeError("cannot load repository link adapter: {}".format(link_path))
+    link_module = module_from_spec(link_spec)
+    link_spec.loader.exec_module(link_module)
+    link_module.setup(app)
     app.connect("autodoc-process-docstring", _sanitize_autodoc_docstring)
     return metadata
