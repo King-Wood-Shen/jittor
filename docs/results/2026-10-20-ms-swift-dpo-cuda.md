@@ -31,3 +31,10 @@ sentinel 与 manifest 保存在实验区
 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261020-dpo-cuda-fix2/`；回归日志在
 `$JITTOR_LAB_ROOT/_state/ms-swift-cuda/20261020-dpo-inplace-cuda-test/`。首轮失败栈保留于
 `20261020-dpo-cuda/logs/shim.log`。本次未运行 CPU 全量或 smoke 门禁。
+
+环境绑定：ms-swift commit `88d727951203256baa564c643c651b6f8d90fd7e`，Qwen2-0.5B 权重
+SHA256 `9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad`，固定偏好数据
+SHA256 `f2f99ab3ae84aa4f10a7e7690d302e6668ac831ac8f24e740d7ca62f00103e10`。设备为
+`cscg-qh04` 的 NVIDIA GeForce RTX 4090，UUID
+`GPU-98ae29e5-fa7c-45fd-34d1-fe31214339a4`。代码对应提交
+`ea376aa68`（训练态自动重放保护）和 `8b53d5391`（未分配目标回退与 CUDA 回归）。
