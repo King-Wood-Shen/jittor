@@ -6,6 +6,7 @@
 // ***************************************************************
 #pragma once
 #include "core/op.h"
+#include "core/var.h"
 
 namespace jittor {
 

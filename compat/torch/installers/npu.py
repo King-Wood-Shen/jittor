@@ -104,6 +104,18 @@ def is_bf16_supported():
     return True
 
 
+def manual_seed(seed):
+    _require_acl()
+    from .core import _normalize_seed
+    jt.core.rng_manual_seed("acl", _normalize_seed(seed), current_device())
+
+
+def manual_seed_all(seed):
+    _require_acl()
+    from .core import _normalize_seed
+    jt.core.rng_manual_seed_all("acl", _normalize_seed(seed))
+
+
 def npu_rms_norm(input, weight, epsilon=1e-6):
     """``torch_npu.npu_rms_norm``, as an ACL tensor graph.
 
@@ -147,7 +159,8 @@ _REFUSED = (
 
 _SUPPORTED = ("is_available", "device_count", "current_device", "set_device",
               "device", "synchronize", "empty_cache", "is_bf16_supported",
-              "npu_rms_norm", "npu_rotary_mul", "npu_swiglu")
+              "manual_seed", "manual_seed_all", "npu_rms_norm",
+              "npu_rotary_mul", "npu_swiglu")
 
 
 def install(ctx):
@@ -161,13 +174,31 @@ def install(ctx):
     registry.publish("torch.npu", npu, replace=True)
     target.npu = npu
 
+    from .cuda.api import (
+        _api_cuda_get_rng_state, _api_cuda_get_rng_state_all,
+        _api_cuda_set_rng_state, _api_cuda_set_rng_state_all,
+    )
+    random = types.ModuleType("torch.npu.random")
+    random.get_rng_state = _api_cuda_get_rng_state
+    random.get_rng_state_all = _api_cuda_get_rng_state_all
+    random.set_rng_state = _api_cuda_set_rng_state
+    random.set_rng_state_all = _api_cuda_set_rng_state_all
+    npu.random = random
+    registry.publish("torch.npu.random", random, bind_parent=False)
+
     register_api_bindings(
         npu, "torch.npu",
         ("is_available", "device_count", "current_device", "set_device",
-         "device", "is_bf16_supported"),
+         "device", "is_bf16_supported", "manual_seed", "manual_seed_all"),
         Fidelity.EXACT,
         "Native ACL discovery and selection; the index accepts an int, a "
-        "string, a torch.device or None, as torch's does.")
+        "string, a torch.device or None, as torch's does. Seed APIs reset "
+        "the native ACL stream generators.")
+    register_api_bindings(
+        random, "torch.npu.random",
+        ("get_rng_state", "get_rng_state_all", "set_rng_state", "set_rng_state_all"),
+        Fidelity.EXACT,
+        "Serializes and restores native ACL stream counter states as CPU byte tensors.")
     register_api_bindings(
         npu, "torch.npu", ("synchronize", "empty_cache"), Fidelity.APPROXIMATE,
         "Submits Jittor's pending work and waits for every device it "

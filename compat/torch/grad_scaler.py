@@ -194,6 +194,10 @@ class _CpuGradScaler(_LegacyDeviceGradScaler):
     _device_name = "cpu"
 
 
+class _NpuGradScaler(_LegacyDeviceGradScaler):
+    _device_name = "npu"
+
+
 #: Historical private name; ``jittor.torch_compat._GradScaler`` is pickled by
 #: checked-in payloads and re-exported from :mod:`jittor.compat.torch`.
 _GradScaler = GradScaler
@@ -212,6 +216,8 @@ _GRAD_SCALER_FIDELITY = (
      "Legacy cuda-pinned subclass of torch.amp.GradScaler (init_scale first)"),
     (("torch.cpu.amp.GradScaler",), _CpuGradScaler, Fidelity.APPROXIMATE,
      "Legacy cpu-pinned subclass of torch.amp.GradScaler (init_scale first)"),
+    (("torch.npu.amp.GradScaler",), _NpuGradScaler, Fidelity.APPROXIMATE,
+     "Legacy npu-pinned subclass of torch.amp.GradScaler (init_scale first)"),
 )
 
 for _apis, _implementation, _level, _detail in _GRAD_SCALER_FIDELITY:
