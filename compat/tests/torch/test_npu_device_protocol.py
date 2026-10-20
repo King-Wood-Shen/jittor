@@ -120,3 +120,48 @@ def test_unsupported_npu_apis_refuse_instead_of_reporting_zero():
                  "get_device_properties", "current_stream", "mem_get_info"):
         with pytest.raises(NotImplementedError):
             getattr(torch.npu, name)()
+
+
+@pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
+                    reason="requires a selected ACL device")
+def test_npu_manual_seed_apis_reset_acl_generators():
+    assert _on_acl(), "JITTOR_TEST_DEVICES=npu but ACL is not active"
+    seed = (1 << 32) + 29
+    torch.npu.manual_seed_all(seed)
+    first = torch.rand((16,), device="npu")
+    torch.npu.manual_seed_all(seed)
+    second = torch.rand((16,), device="npu")
+    torch.npu.synchronize()
+    assert torch.equal(first, second)
+
+    torch.npu.manual_seed(seed + 1)
+    third = torch.rand((16,), device="npu")
+    torch.npu.manual_seed(seed + 1)
+    fourth = torch.rand((16,), device="npu")
+    torch.npu.synchronize()
+    assert torch.equal(third, fourth)
+
+    torch.npu.manual_seed_all(seed + 2)
+    torch.rand((5,), device="npu")
+    state = torch.npu.random.get_rng_state()
+    expected = torch.rand((16,), device="npu")
+    torch.npu.random.set_rng_state(state)
+    restored = torch.rand((16,), device="npu")
+    torch.npu.synchronize()
+    assert torch.equal(expected, restored)
+
+
+@pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
+                    reason="requires a selected ACL device")
+def test_npu_fp16_autocast_matmul_same_dtype_inputs():
+    assert _on_acl(), "JITTOR_TEST_DEVICES=npu but ACL is not active"
+    inputs = torch.ones((2, 4), dtype=torch.float32, device="npu",
+                        requires_grad=True)
+    weight = torch.eye(4, dtype=torch.float32, device="npu",
+                       requires_grad=True)
+    with torch.autocast("npu", dtype=torch.float16):
+        output = torch.nn.functional.linear(inputs, weight)
+    assert output.dtype == torch.float16
+    output.float().sum().backward()
+    torch.npu.synchronize()
+    assert inputs.grad.dtype == weight.grad.dtype == torch.float32
