@@ -46,7 +46,6 @@ jobs:
     runs-on: ${{ needs.baseline.outputs.windows_runner }}
     timeout-minutes: 45
     env:
-      JITTOR_HOME: ${{ runner.temp }}/windows-msvc/home
       JITTOR_TORCH_SHIM: '0'
       JT_BACKEND: cpu
       JT_USE_CUDA: '0'
@@ -66,6 +65,12 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ needs.baseline.outputs.python_version }}
+      - name: Prepare runtime home outside the checkout
+        shell: pwsh
+        run: |
+          $homePath = Join-Path $env:RUNNER_TEMP 'windows-msvc/home'
+          New-Item -ItemType Directory -Force -Path $homePath | Out-Null
+          "JITTOR_HOME=$homePath" >> $env:GITHUB_ENV
       - name: Install pinned build tools
         run: python -m pip install -r requirements/release.txt
       - name: Build the actual wheel
