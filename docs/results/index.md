@@ -11,6 +11,7 @@
 ```{toctree}
 :maxdepth: 1
 
+2026-10-20-ms-swift-gradient-checkpoint-ascend
 2026-10-16-diffusers-maintained-cpu-nightly
 2026-10-16-h3-upstream-gradient-components
 2026-10-16-native-alias-lifecycle
@@ -127,6 +128,7 @@
 
 | 结论 | 状态 | 日期 |
 | --- | --- | --- |
+| [ms-swift gradient checkpointing 经 JTorch 在 Ascend 上](2026-10-20-ms-swift-gradient-checkpoint-ascend.md) | 公开开关实测触发层重算、梯度/RNG 对拍通过且无 fallback；tiny fixture 峰值显存上升，未证明省显存 | 2026-10-20 |
 | [Ascend 910B3：冷缓存启动、ACL 执行与 NPU 门禁](2026-08-28-ascend-910b-validation.md) | NPU 门禁 397 passed / 9 skipped；skip 对应的能力边界仍开放 | 2026-08-28，2026-09-01 复查 |
 | [Qwen3-0.6B 在 Ascend 910B3 上训练](2026-08-30-qwen3-ascend-training.md) | FP32 训练与 BF16 单步对齐接受；BF16 精确路径慢约 6%、训练轨迹未验收 | 2026-08-30，2026-09-02 |
 | [vLLM 在 Ascend 910B3 上经 Jittor 运行](2026-08-31-vllm-ascend-jittor-bootstrap.md) | 单请求 Qwen3-0.6B 正确且快 6.8%；外置 NPU 插件未入仓，多请求未测 | 2026-08-31，2026-09-02 |

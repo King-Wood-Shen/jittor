@@ -443,21 +443,148 @@ def _generate_state(base_seed, worker_id):
     return [rng.randrange(0, 2**32) for _ in range(4)]
 
 
-def _checkpoint(fn, *args, use_reentrant=None, **kwargs):
-    """Run fn directly: correct values, but no activation recompute.
+def _checkpoint_rng_state():
+    """Synchronize and capture the active generator used by a checkpointed layer."""
+    jt.sync_all(True)
+    if jt.flags.use_acl:
+        device = int(jt.current_device())
+        return ("acl", device, jt.core.rng_state("acl", device))
+    if jt.flags.use_cuda:
+        return ("cuda", _torch_ns().cuda.get_rng_state_all(), None)
+    return ("cpu", None, jt.core.rng_state("cpu"))
 
-    jittor has no gradient-checkpointing primitive, so the activation
-    memory this API exists to save is NOT saved and `use_reentrant`
-    has no meaning here. The result is numerically identical, which is
-    why this stays a pass-through rather than an error -- but the
-    memory guarantee the caller asked for is absent.
+
+def _restore_checkpoint_rng_state(state):
+    backend, device_or_states, payload = state
+    jt.sync_all(True)
+    if backend == "acl":
+        jt.core.set_rng_state("acl", payload, device_or_states)
+    elif backend == "cuda":
+        _torch_ns().cuda.set_rng_state_all(device_or_states)
+    else:
+        jt.core.set_rng_state("cpu", payload)
+
+
+class _CheckpointFunction(jt.Function):
+    """Drop a bound module's forward graph and reconstruct it during backward."""
+
+    def _run_call(self, *args, **kwargs):
+        # Function._run_call tapes differentiable arguments before execute().
+        # Keep the original Vars too: backward must recompute against those,
+        # since the tape placeholders are intentionally stop-grad Vars.
+        self.original_call_args = tuple(args)
+        return super()._run_call(*args, **kwargs)
+
+    def execute(self, fn, positional_count, keyword_names, parameter_count,
+                preserve_rng_state, *values):
+        keyword_count = len(keyword_names)
+        self.fn = fn
+        self.positional_count = int(positional_count)
+        self.keyword_names = tuple(keyword_names)
+        self.user_count = self.positional_count + keyword_count
+        self.parameter_count = int(parameter_count)
+        self.values = tuple(self.original_call_args[5:])
+        self.preserve_rng_state = bool(preserve_rng_state)
+        self.rng_before = _checkpoint_rng_state() if self.preserve_rng_state else None
+        positional = values[:self.positional_count]
+        keyword_values = values[self.positional_count:self.user_count]
+        call_kwargs = dict(zip(self.keyword_names, keyword_values))
+        with jt.no_grad():
+            outputs = fn(*positional, **call_kwargs)
+        if isinstance(outputs, jt.Var):
+            outputs.start_grad()
+            return outputs
+        if type(outputs) in (tuple, list) and all(
+                value is None or isinstance(value, jt.Var) for value in outputs):
+            for value in outputs:
+                if isinstance(value, jt.Var):
+                    value.start_grad()
+            return outputs
+        raise TypeError(
+            "torch.utils.checkpoint.checkpoint supports a Var or a flat tuple/list "
+            "of Vars and None in the Jittor shim")
+
+    def grad(self, *grad_outputs):
+        recompute_values = tuple(
+            value.detach().start_grad()
+            if isinstance(value, jt.Var) and not value.is_stop_grad() else value
+            for value in self.values
+        )
+        # Bound module parameters are read through the module object during
+        # recomputation, so the detached parameter replicas are temporarily
+        # installed on the module below.
+        positional = recompute_values[:self.positional_count]
+        keyword_values = recompute_values[self.positional_count:self.user_count]
+        call_kwargs = dict(zip(self.keyword_names, keyword_values))
+        module_parameters = recompute_values[self.user_count:]
+        module = getattr(getattr(self.fn, "func", self.fn), "__self__", None)
+        swapped_parameters = []
+        if module is not None and callable(getattr(module, "named_parameters", None)):
+            for (name, _), replacement in zip(module.named_parameters(), module_parameters):
+                owner = module
+                parts = name.split(".")
+                for part in parts[:-1]:
+                    owner = getattr(owner, part)
+                leaf = parts[-1]
+                previous = owner.__dict__[leaf]
+                swapped_parameters.append((owner, leaf, previous))
+                owner.__dict__[leaf] = replacement
+        restore_to = _checkpoint_rng_state() if self.preserve_rng_state else None
+        try:
+            if self.preserve_rng_state:
+                _restore_checkpoint_rng_state(self.rng_before)
+            with jt.enable_grad():
+                outputs = self.fn(*positional, **call_kwargs)
+                flat_outputs = list(outputs) if type(outputs) in (tuple, list) else [outputs]
+                terms = []
+                for output, grad_output in zip(flat_outputs, grad_outputs):
+                    if grad_output is not None and isinstance(output, jt.Var):
+                        terms.append((output * grad_output).sum())
+                if not terms:
+                    computed = []
+                    targets = []
+                else:
+                    total = terms[0]
+                    for term in terms[1:]:
+                        total = total + term
+                    candidates = list(positional) + list(keyword_values) + list(module_parameters)
+                    targets = []
+                    target_positions = []
+                    seen = set()
+                    for index, value in enumerate(candidates):
+                        if isinstance(value, jt.Var) and not value.is_stop_grad() and value.id not in seen:
+                            seen.add(value.id)
+                            targets.append(value)
+                            target_positions.append(index)
+                    computed = jt.grad(total, targets) if targets else []
+            result = [None] * len(self.values)
+            for position, gradient in zip(target_positions if terms else (), computed):
+                result[position] = gradient
+            return (None, None, None, None, None, *result)
+        finally:
+            for owner, leaf, previous in reversed(swapped_parameters):
+                owner.__dict__[leaf] = previous
+            if self.preserve_rng_state:
+                _restore_checkpoint_rng_state(restore_to)
+
+
+def _checkpoint(fn, *args, use_reentrant=None, preserve_rng_state=True, **kwargs):
+    """Recompute a bound module's forward under Jittor autograd during backward.
+
+    Transformers passes decoder-layer ``__call__`` methods here, so their
+    parameters are explicit Function inputs even though they are captured by
+    the bound method. Only flat tensor outputs are supported; unsupported output
+    structures fail loudly instead of silently dropping gradients.
     """
-    _stub_policy_data.degraded(
-        "torch.utils.checkpoint.checkpoint",
-        "the wrapped function is run directly, so activations are kept "
-        "and no memory is saved",
-        "use_reentrant has no effect on jittor.")
-    return fn(*args, **kwargs)
+    method = getattr(fn, "func", fn)
+    module = getattr(method, "__self__", None)
+    if module is None and callable(getattr(fn, "parameters", None)):
+        module = fn
+    parameter_values = tuple(module.parameters()) if module is not None and callable(
+        getattr(module, "parameters", None)) else ()
+    return _CheckpointFunction.apply(
+        fn, len(args), tuple(kwargs), len(parameter_values), bool(preserve_rng_state),
+        *args, *kwargs.values(), *parameter_values)
 
 
 def _default_convert(value):
@@ -504,7 +631,8 @@ for _name, _implementation in _DATA_APIS.items():
     )
 register_fidelity(
     "torch.utils.checkpoint.checkpoint", _checkpoint, Fidelity.APPROXIMATE,
-    "evaluates the function directly; no activation recomputation or memory saving",
+    "recomputes flat tensor outputs during backward, preserves generator state, "
+    "and rejects nested output structures",
 )
 register_fidelity(
     "torchdata.stateful_dataloader.StatefulDataLoader", StatefulDataLoader,
@@ -561,7 +689,12 @@ def install(ctx):
         g.utils.data = _modules["torch.utils.data"]
     if "torch.utils.checkpoint" not in _modules:
         _ckpt = _types2.ModuleType("torch.utils.checkpoint")
-        _ckpt.checkpoint = _checkpoint
         _modules["torch.utils.checkpoint"] = _ckpt
-        g.utils.checkpoint = _ckpt
+    else:
+        _ckpt = _modules["torch.utils.checkpoint"]
+    # The checkpoint module may have been imported before this installer runs.
+    # Always replace its public entrypoint so the shim cannot leave a stale
+    # upstream or pass-through function installed.
+    _ckpt.checkpoint = _checkpoint
+    g.utils.checkpoint = _ckpt
     _install_torchdata_stateful_dataloader(g, ctx.registry)
