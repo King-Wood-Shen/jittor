@@ -105,15 +105,19 @@ def is_bf16_supported():
 
 
 def manual_seed(seed):
+    """Seed the current native ACL RNG stream without changing CPU state."""
     _require_acl()
     from .core import _normalize_seed
-    jt.core.rng_manual_seed("acl", _normalize_seed(seed), current_device())
+    value = _normalize_seed(seed, integer=True)
+    jt.core.rng_manual_seed("acl", value, current_device())
 
 
 def manual_seed_all(seed):
+    """Seed every visible native ACL RNG stream."""
     _require_acl()
     from .core import _normalize_seed
-    jt.core.rng_manual_seed_all("acl", _normalize_seed(seed))
+    value = _normalize_seed(seed, integer=True)
+    jt.core.rng_manual_seed_all("acl", value)
 
 
 def npu_rms_norm(input, weight, epsilon=1e-6):
