@@ -100,6 +100,10 @@ def _all_gather_shards(local_shard):
     # CPU -- and demanding NCCL there turns a no-op into a hard failure.
     if _world_size() <= 1:
         return local_shard
+    if os.environ.get("JT_HCCL_WORLD_SIZE"):
+        from jittor import distributed
+        if distributed.get_backend() == "hccl":
+            return distributed.all_gather(local_shard)
     if not jt.flags.use_cuda:
         from jittor import distributed
         if distributed.get_backend() == "mpi":
@@ -109,7 +113,7 @@ def _all_gather_shards(local_shard):
         return ops.nccl_all_gather(local_shard)
     if callable(getattr(local_shard, "mpi_all_gather", None)):
         return local_shard.mpi_all_gather()
-    raise RuntimeError("Jittor NCCL all_gather is not available; launch with jittor.distributed.launch and use_nccl=1")
+    raise RuntimeError("Jittor distributed all_gather is not available for the active backend")
 
 
 def _reduce_scatter_padded(full_grad):
