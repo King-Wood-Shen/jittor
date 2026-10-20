@@ -320,6 +320,8 @@ OPTIONAL_NATIVE_FLASH_HDIM256_TESTS = (
 NPU_TESTS = (
     "tests/backends/acl/test_acl.py",
     "tests/backends/acl/test_acl_torch_compat.py",
+    "compat/tests/torch/test_npu_device_protocol.py::test_npu_class_forward_precedes_generic_rms_norm_fastpath",
+    "compat/tests/torch/test_npu_device_protocol.py::test_bf16_single_token_sdpa_acl_hook_uses_flash_score_for_matching_heads",
     "compat/tests/torch/test_adaptive_avg_pool2d.py",
     "compat/tests/torch/test_extreme_reduction_scalar.py",
     "tests/ops/test_adaptive_pool_output_size.py",
