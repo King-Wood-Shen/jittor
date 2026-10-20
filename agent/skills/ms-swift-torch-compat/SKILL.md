@@ -268,6 +268,14 @@ transformers 4.56.2** 即跑通。原始报告见
 checkpoint 峰值按各自已核验结果的固定 profile 解释；
 不得把旧运行的步骤、模型或设备范围合并扩大。
 
+### SimPO CUDA 新进程恢复（2026-10-20）
+
+[固定 Qwen2-0.5B 单卡 SimPO profile 报告](../../../docs/results/2026-10-20-ms-swift-simpo-cuda-resume.md)
+记录真实公开 `swift rlhf --rlhf_type simpo` 的 step 1 保存及独立新进程恢复至 step 3。该次
+运行绑定 Jittor SHA、ms-swift SHA、模型/数据哈希、单卡 RTX 4090、loss 轨迹、8 条零 fallback
+runtime 记录和 50 ms NVML-backed 设备峰值采样。结论仅适用于报告中的固定 profile；不授予 CPO、
+其他 RLHF 算法、其他数据游标或分布式覆盖。
+
 新运行的持久化和 worker 临时目录必须遵循
 [`ms-swift-artifact-storage`](../../../docs/notes/ms-swift-artifact-storage.md)：从 Slurm worker
 调用 `tools/ms_swift_storage_worker.sh`，预声明保留 checkpoint 完整文件契约与最大并发容量，
