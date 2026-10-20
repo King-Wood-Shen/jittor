@@ -212,6 +212,12 @@ def _copy_detached_storage(self, value):
             or self.dtype != value.dtype):
         return False
     if self.numel():
+        # A lazy target has no backing storage or detached storage aliases to
+        # preserve. Let `_ip` replace its Var graph in that case; `_copy_into`
+        # requires an allocated destination and cannot materialize one during
+        # graph capture.
+        if not self._mem_ptr_now:
+            return False
         # Resolve pending readers (including clone snapshots) before changing
         # bytes. _copy_into owns placement, stream ordering and dense copies.
         _owner.jt.sync_all()
@@ -540,18 +546,6 @@ def _is_basic_index(index):
 
 
 def _torch_getitem(self, slices):
-    # PyTorch accepts NumPy integer/bool arrays as advanced indices.
-    # Convert them before the native fast path or the dispatcher sees them.
-    def normalize(index):
-        if isinstance(index, _owner.np.ndarray) and index.ndim:
-            if index.dtype.kind not in ("b", "i", "u"):
-                return index
-            return _owner.jt.array(index, dtype=str(index.dtype))
-        if isinstance(index, tuple):
-            return tuple(normalize(item) for item in index)
-        return index
-
-    slices = normalize(slices)
     # A basic index, natively (`src/bindings/pyjt/py_compat_fast.h`).
     fast = _owner.jt.core._fast_getitem(self, slices)
     if fast is not NotImplemented:
@@ -971,6 +965,16 @@ def _pin_memory(self, device=None):
     return out
 
 
+def _share_memory_(self):
+    """Return this tensor for the single-process/threaded DataLoader fallback.
+
+    Jittor does not expose a multiprocessing shared-memory allocator.  The
+    CUDA shim's DataLoader uses threads for workers, so the tensor is already
+    visible to every worker and no copy is needed.
+    """
+    return self
+
+
 def _as_byte_view(var):
     """A contiguous uint8 view of a contiguous tensor's own bytes.
 
@@ -1355,6 +1359,18 @@ def _promoting_binary(self, other, opname, reflected):
     if isinstance(other, (complex, _owner.np.complexfloating)):
         other = _complex_scalar_var(other)
     if isinstance(other, _NativeVar):
+        # Jittor may leave a lazy result unmaterialized while a device-less
+        # factory has already materialized its input on the host.  The two
+        # Vars can therefore report the same logical backend while the native
+        # binary op still rejects their physical residency.  Torch operators
+        # accept the downstream tensor pair in this shim; migrate the host
+        # operand to the device operand before dispatch, matching _torch_setitem.
+        self_cpu = _var_is_cpu_resident(self)
+        other_cpu = _var_is_cpu_resident(other)
+        if self_cpu and not other_cpu:
+            self = _make_cuda_resident(self)
+        elif other_cpu and not self_cpu:
+            other = _make_cuda_resident(other)
         da, db = _own_dtype_name(self, native_api), _own_dtype_name(other, native_api)
         if da == db and not da.startswith("uint"):
             return _binary_native(opname, self, other, native_api)

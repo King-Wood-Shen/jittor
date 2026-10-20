@@ -39,6 +39,15 @@ class _Net(nn.Module):
         return {"out": _Output(sample=y), "both": (h, torch.cat([y, y], 1))}
 
 
+class _FreshArange(nn.Module):
+    def forward(self, x, offset):
+        # Transformers' causal-mask helper updates a freshly-created arange
+        # while an inference graph is being captured.
+        positions = torch.arange(x.shape[-1], device=x.device, dtype=torch.int64)
+        positions += offset
+        return x + positions.to(x.dtype)
+
+
 class _Case:
     """The tests, run once per device by the classes below."""
 
@@ -177,6 +186,19 @@ class _Case:
                  "no usable CUDA in this build")
 class TestCompileReplayCuda(_Case, unittest.TestCase):
     device = "cuda"
+
+    def test_capture_materializes_a_fresh_inplace_target(self):
+        model = _FreshArange().to(self.device).eval()
+        compiled = torch.compile(model, mode="reduce-overhead")
+        x = torch.zeros(1, 4, device=self.device)
+        offsets = [torch.tensor(i, device=self.device, dtype=torch.int64)
+                   for i in (2, 5, 9)]
+        with torch.no_grad():
+            got = [compiled(x, offset).cpu().numpy() for offset in offsets]
+        for value, offset in zip(got, (2, 5, 9)):
+            np.testing.assert_array_equal(value, np.arange(4, dtype=np.float32)[None, :] + offset)
+        self.assertIsNone(compiled._replay.refused)
+        self.assertGreaterEqual(compiled._replay.stats["replayed"], 2)
 
     def test_the_step_is_recorded_as_one_launch(self):
         feeds = self._feeds(10)
