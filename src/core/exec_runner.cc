@@ -19,6 +19,7 @@
 #include "runtime/launch_diagnostics.h"
 #include "ops/op_register.h"
 #include "ops/composite/array_op.h"
+#include "ops/composite/fetch_op.h"
 #include "ops/composite/tape_op.h"
 #include "core/exec_runner.h"
 #include "core/executor.h"
@@ -879,10 +880,15 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
                 var->set_flag(VarFlags::_kept);
             continue;
         }
-        const auto requested_backend = op->requested_backend();
-        const auto execution_backend = op->execution_backend();
+        // `requested_backend()` and `execution_backend()`, from one read of
+        // the placement: each would walk it again, and so would every lookup
+        // of the implementation below.
+        const auto placement = op->graph_placement();
+        const auto requested_backend = placement.explicit_backend
+            ? placement.device.backend : execution_target_backend();
+        const auto execution_backend = op->execution_backend_for(requested_backend);
         ExecutionBackendScope operation_backend_scope(requested_backend);
-        TensorPlacementScope placement_scope(op->graph_placement());
+        TensorPlacementScope placement_scope(placement);
         Float32PrecisionScope precision_scope(op->float32_precision);
         LaunchOriginScope origin_scope(op->launch_origin);
         int execution_device = 0;
@@ -985,9 +991,9 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
             memory_profiler.check();
         trace_op.allocated();
         LOGvvv << "Run" << op << "inputs:" << op->inputs() << "outputs:" << op->outputs();
-        op->prepare_execution(jkl);
+        op->prepare_execution_on(jkl, execution_backend);
         prepared_jit_key.assign(jkl.to_cstring(), jkl.size);
-        bool is_cuda = op->executes_on_accelerator();
+        bool is_cuda = execution_backend != BackendId::Cpu;
         if (PREDICT_BRANCH_NOT_TAKEN(graph_capture_recording) && !is_cuda
                 && !graph_capture_launches_nothing(op))
             graph_capture_saw_host_work = true;
@@ -1012,6 +1018,7 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
                 sync_times++;
             }
             for (auto& edge : op->_inputs) {
+                if (op->flag(OpFlags::_no_input_storage)) break;
                 // A control edge orders two ops and carries no data: what it
                 // comes from may have no memory of its own (fused away).
                 if (edge.reverse().index < 0) continue;
@@ -1071,7 +1078,7 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
         // _JT_SEH_START2;
         if (execution_backend != BackendId::Cpu)
             record_active_launch(backend_stream({execution_backend, execution_device}, BackendStreamKind::Compute));
-        op->execute_prepared(jkl);
+        op->execute_prepared_on(jkl, execution_backend);
         // _JT_SEH_END2;
         #ifdef HAS_ACCELERATOR
         // migrate to gpu
@@ -1187,7 +1194,18 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
     if (device_sync && !runtime_use_cuda())
         backend_ops(BackendId::Cpu).synchronize(0);
     #ifdef HAS_ACCELERATOR
-    if (device_sync && (runtime_use_cuda() || touched_devices)) {
+    uint64 wait_devices = touched_devices;
+    if (device_sync) {
+        uint64 fetch_devices = pending_fetch_device_mask();
+        // Preserve the implicit current-device wait of an empty batch when
+        // adding fetch's copy device makes the mask nonempty. Compute handoff
+        // still records only devices this batch actually launched on.
+        if (fetch_devices && !wait_devices && runtime_use_cuda()
+                && entry_device >= 0 && entry_device < 64)
+            wait_devices |= 1ull << entry_device;
+        wait_devices |= fetch_devices;
+    }
+    if (device_sync && (runtime_use_cuda() || wait_devices)) {
         exe.last_is_cuda = false;
         sync_times++;
         try {
@@ -1198,7 +1216,7 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
             // entry lock (see run_sync) keeps every other thread out of the
             // executor for the duration.
             DeviceWaitScope wait;
-            sync_devices(touched_devices);
+            sync_devices(wait_devices);
         } catch (const std::exception& e) {
             // Not red_color, for the same reason as the op-level catch above.
             if (V_ON(1)) display_memory_info(__FILELINE__, false, false);
