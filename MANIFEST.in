@@ -473,6 +473,13 @@ include docs/results/2026-10-16-sgd-execution-options.md
 include docs/results/2026-10-16-transformers-main-source-training.md
 include docs/results/2026-10-16-transformers-maintained-cpu-nightly.md
 include docs/results/2026-10-16-verl-maintained-cpu-nightly.md
+include docs/results/2026-10-19-ms-swift-ascend-algorithm-training.md
+include docs/results/2026-10-20-ms-swift-ascend-attention.md
+include docs/results/2026-10-20-ms-swift-ascend-fp16.md
+include docs/results/2026-10-20-ms-swift-ascend-options.md
+include docs/results/2026-10-21-ms-swift-ascend-inference.md
+include docs/results/2026-10-21-ms-swift-ascend-integration.md
+include docs/results/2026-10-21-ms-swift-ascend-world2.md
 include docs/results/index.md
 include docs/tutorials/index.md
 include examples/README.md

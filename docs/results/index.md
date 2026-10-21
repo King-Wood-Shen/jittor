@@ -11,6 +11,14 @@
 ```{toctree}
 :maxdepth: 1
 
+2026-10-21-ms-swift-ascend-integration
+2026-10-21-ms-swift-ascend-inference
+2026-10-21-ms-swift-ascend-world2
+2026-10-20-ms-swift-ascend-options
+2026-10-20-ms-swift-ascend-attention
+2026-10-20-ms-swift-ascend-fp16
+2026-10-19-ms-swift-ascend-algorithm-training
+
 2026-10-16-diffusers-maintained-cpu-nightly
 2026-10-16-h3-upstream-gradient-components
 2026-10-16-native-alias-lifecycle
@@ -127,6 +135,13 @@
 
 | 结论 | 状态 | 日期 |
 | --- | --- | --- |
+| [Ascend ms-swift / JTorch 整合复验](2026-10-21-ms-swift-ascend-integration.md) | 最新官方基线集成；记录当前 SHA 的 NPU 定向回归与 packing 复验，失败项不授级 | 2026-10-21 |
+| [Ascend ms-swift TransformersEngine 推理](2026-10-21-ms-swift-ascend-inference.md) | 单卡四请求真实生成与 KV cache 设备驻留；不含数值 parity 或性能验收 | 2026-10-21 |
+| [Ascend ms-swift 单机双卡 BF16 SFT](2026-10-21-ms-swift-ascend-world2.md) | HCCL 双卡公开 SFT 两步通过，严格 fallback 为 0 | 2026-10-21 |
+| [ms-swift 训练开关：SDPA/eager 与 RNG 续训](2026-10-20-ms-swift-ascend-options.md) | 在 `d64855b` 源码通过；该 SHA packing 阻塞，激活重计算不纳入当前集成 | 2026-10-20 |
+| [Ascend ms-swift attention graph 与 packing SFT](2026-10-20-ms-swift-ascend-attention.md) | 另一源码 SHA 上 BSND/TND 与 packing 20 步通过；不与 options 阻塞结论混并 | 2026-10-20 |
+| [Ascend ms-swift FP16 公开 SFT 与恢复](2026-10-20-ms-swift-ascend-fp16.md) | 单卡 FP16 AMP、checkpoint/RNG 恢复与原生 Torch NPU 数值对照通过 | 2026-10-20 |
+| [Ascend ms-swift RLHF 算法训练对照](2026-10-19-ms-swift-ascend-algorithm-training.md) | RM 小夹具受限通过；GKD 零 loss 未通过，PPO 设备分配阻塞，GRPO 不授数值等价 | 2026-10-19 |
 | [Ascend 910B3：冷缓存启动、ACL 执行与 NPU 门禁](2026-08-28-ascend-910b-validation.md) | NPU 门禁 397 passed / 9 skipped；skip 对应的能力边界仍开放 | 2026-08-28，2026-09-01 复查 |
 | [Qwen3-0.6B 在 Ascend 910B3 上训练](2026-08-30-qwen3-ascend-training.md) | FP32 训练与 BF16 单步对齐接受；BF16 精确路径慢约 6%、训练轨迹未验收 | 2026-08-30，2026-09-02 |
 | [vLLM 在 Ascend 910B3 上经 Jittor 运行](2026-08-31-vllm-ascend-jittor-bootstrap.md) | 单请求 Qwen3-0.6B 正确且快 6.8%；外置 NPU 插件未入仓，多请求未测 | 2026-08-31，2026-09-02 |

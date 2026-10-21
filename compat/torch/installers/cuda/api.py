@@ -1248,9 +1248,6 @@ def _api_cuda_memory__set_allocator_settings(*a, **k):
     return None
 
 
-_ACL_RNG_STATE_MAGIC = b"JTACL_RNG\0"
-
-
 #: The CUDA RNG state, as a seed and a position.
 #:
 #: `get_rng_state` used to return the constant `[0]` and `set_rng_state` used
@@ -1272,33 +1269,6 @@ _ACL_RNG_STATE_MAGIC = b"JTACL_RNG\0"
 #:
 #: The bytes are jittor's own format, not torch's CUDA state bytes: save them,
 #: hand them back, do not parse them, and do not feed torch's to this.
-def _acl_rng_state_pack(payload):
-    """Wrap native ACL's portable stream-state string in a CPU ByteTensor."""
-    import numpy as _np
-    owner = get_install_context(jt).target_namespace
-    blob = _ACL_RNG_STATE_MAGIC + str(payload).encode("utf-8")
-    return owner.tensor(_np.frombuffer(blob, dtype=_np.uint8).copy(),
-                        dtype=owner.uint8, device="cpu")
-
-
-def _acl_rng_state_unpack(state):
-    from jittor._core.dtypes import dtype_name
-    if not isinstance(state, jt.Var) or dtype_name(state.dtype) != "uint8":
-        raise TypeError("ACL RNG state must be a CPU ByteTensor")
-    if len(state.shape) != 1 or state.device.type != "cpu":
-        raise TypeError("ACL RNG state must be a one-dimensional CPU ByteTensor")
-    raw = state.numpy().tobytes()
-    if not raw.startswith(_ACL_RNG_STATE_MAGIC):
-        raise ValueError("not a Jittor ACL RNG state")
-    try:
-        payload = raw[len(_ACL_RNG_STATE_MAGIC):].decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise ValueError("invalid Jittor ACL RNG state encoding") from exc
-    if not payload:
-        raise ValueError("invalid empty Jittor ACL RNG state")
-    return payload
-
-
 _RNG_STATE_MAGIC = b"JTCURAND"
 _RNG_STATE_VERSION = 2
 
