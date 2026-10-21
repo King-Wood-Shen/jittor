@@ -33,9 +33,10 @@ def _checkpoint_tensor(value, reference, *, preserve_dtype=False):
     from ..torch.context import get_install_context
 
     g = get_install_context(jt).target_namespace
-    backend, device = jt.core.dispatch_context([reference])
-    target = "{}:{}".format(backend, device) if backend == "cuda" else backend
-    return g.tensor(value, dtype=value.dtype if preserve_dtype else reference.dtype, device=target).detach()
+    # The Torch factory accepts frontend device names (e.g. npu:0), while
+    # dispatch_context returns internal backend names such as acl.
+    return g.tensor(value, dtype=value.dtype if preserve_dtype else reference.dtype,
+                    device=reference.device).detach()
 
 
 def _get_full_state_dict(module):
