@@ -172,7 +172,7 @@ def arg_reduce_acl(input, op, dim, keepdims=False):
         # int64 preserves every int32 value exactly across the reduction.
         indices, values = ArgReduceACL(jt.ops.arg_reduce)(input.cast("int64"), op, dim, keepdims)
         return indices, values.cast("int32")
-    if dtype not in ("float16", "float32", "int64"):
+    if dtype not in ("float16", "bfloat16", "float32", "int64"):
         return None
     return ArgReduceACL(jt.ops.arg_reduce)(input, op, dim, keepdims)
 
