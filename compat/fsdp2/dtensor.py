@@ -9,12 +9,19 @@ from . import common
 from ..diagnostics import EXPECTED, swallowed
 
 
+def _default_device_type():
+    # has_cuda is the legacy accelerator-availability flag on ACL builds too.
+    if not getattr(jt, "has_cuda", 0):
+        return "cpu"
+    return "npu" if getattr(jt.compiler, "has_acl", 0) else "cuda"
+
+
 class DeviceMesh:
     """A rank matrix whose axes own real native process groups."""
 
     def __init__(self, device_type=None, mesh=None, *, mesh_dim_names=None,
                  _init_backend=True, **kwargs):
-        self.device_type = device_type or ("cuda" if getattr(jt, "has_cuda", 0) else "cpu")
+        self.device_type = device_type or _default_device_type()
         if not isinstance(self.device_type, str):
             self.device_type = getattr(self.device_type, "type", "cpu")
         if hasattr(mesh, "numpy"):
