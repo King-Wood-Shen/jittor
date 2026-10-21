@@ -191,10 +191,15 @@ def test_replay_exception_restores_parameter_identity_and_rng(native_device):
     np.testing.assert_array_equal(before, after)
 
 
-def test_nonreentrant_is_explicitly_unsupported(native_device):
+def test_nonreentrant_records_forward_once(native_device):
     x = torch.ones(2, device=native_device, requires_grad=True)
-    with pytest.raises(NotImplementedError, match="non-reentrant"):
-        torch.utils.checkpoint.checkpoint(lambda value: value.square(), x, use_reentrant=False)
+    calls = []
+    def forward(value):
+        calls.append(torch.is_grad_enabled())
+        return value.square()
+    result = torch.utils.checkpoint.checkpoint(forward, x, use_reentrant=False)
+    np.testing.assert_array_equal(jt.grad(result.sum(), x).numpy(), [2., 2.])
+    assert calls == [True]
 
 
 def test_identity_output_does_not_freeze_captured_parameter(native_device):

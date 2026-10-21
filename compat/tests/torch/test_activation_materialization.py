@@ -6,29 +6,14 @@ import textwrap
 import jittor as jt
 import numpy as np
 import pytest
+from _helpers.checkpoint_cuda import accelerator, snapshot, curand_position as _curand_position
 import torch
 from jittor._runtime.fallback import forbid_backend_fallbacks
-
-
-@pytest.fixture(autouse=True)
-def accelerator():
-    if os.environ.get("JITTOR_TEST_DEVICES", "cpu").split(",")[0] != "cuda":
-        pytest.skip("backend: CUDA materialization contracts")
-    if not torch.cuda.is_available():
-        pytest.fail("materialization acceptance requires a real CUDA device")
-    before = jt.core.backend_fallback_count()
-    with jt.flag_scope(use_cuda=1, auto_flush_ops=0, auto_graph_replay=0), forbid_backend_fallbacks():
-        yield
-        jt.sync_all(True)
-    assert jt.core.backend_fallback_count() == before
 
 
 def materialize(*values):
     return jt.core._materialize_remat_outputs(list(values))
 
-
-def snapshot(value):
-    return value.detach().cpu().numpy().copy()
 
 
 def lazy_exp(value):
@@ -813,11 +798,6 @@ def _physical_snapshot(value):
     destination._copy_into(value, False)
     return snapshot(destination)
 
-
-def _curand_position():
-    backend = jt.compile_extern.get_library("curand", load=True)
-    return (int(backend.curand_generator_seed(0)),
-            int(backend.curand_generator_offset(0)))
 
 
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
