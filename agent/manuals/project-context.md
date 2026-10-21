@@ -81,11 +81,17 @@ changes: [2.0 migration notes](../../docs/releases/2.0.md).
 ## CUDA ms-swift continuation
 
 The [source-scoped integration validation](../../docs/results/2026-10-21-ms-swift-cuda-integration.md)
-records the official `e4e2625ab` base and source PR node `15d4455f8`, including
-real reentrant two-rank model recovery and measured memory reduction. This is
+records the official `e4e2625ab` base and source PR node `c56b4c2bc`, including
+real reentrant two-rank model recovery and measured memory reduction at
+`15d4455f8`. This is
 not completion of the eleven-mode adaptation matrix. Non-reentrant checkpoint
 ownership/RNG and FSDP activation paths remain open under KI-COMPAT-016; legacy
 RNG recovery and nondefault fetch completion have separate committed evidence.
+CUDA optimizer/view/capture storage and launch/full-reduction fixes are
+independently verified at `d68b8973f` / `c56b4c2bc`. Compiled forward callable
+external autograd
+and no-grad-to-grad transitions remain open under KI-COMPAT-018. Historical
+GKD recovery peak binding has been recovered without retraining.
 
 ## Before running work
 

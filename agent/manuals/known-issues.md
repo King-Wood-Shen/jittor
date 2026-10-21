@@ -2121,31 +2121,30 @@ workaround.
 - Exit condition: complex128 is a supported frontend dtype end to end (or the
   core refuses it again by design), and the case XPASSes and loses its marker.
 
-## KI-COMPAT-015: portable Torch SGD updates leave detached parameter aliases stale
+## KI-COMPAT-015: portable optimizer updates left retained parameter aliases stale
 
-- Severity: High (silent stale values in retained parameter-storage aliases).
-- Status: Open; CPU reproduced 2026-10-16 on the SGD execution-option working tree.
-- Owner: native optimizers / Torch compatibility storage semantics.
-- Symptom: after `p = torch.tensor([1., 2.], requires_grad=True)` and
-  `alias = p.detach()`, backward through `(p * torch.tensor([.25, .5])).sum()`
-  followed by `torch.optim.SGD([p], lr=.125).step()` changes `p` to
-  `[.96875, 1.9375]` but leaves `alias` at `[1., 2.]`. The parameter's physical
-  allocation changes. Genuine Torch preserves the allocation and updates both.
-- Cause: the portable native update uses `_update_preserve_dtype`, which calls
-  `target.update(value)` and rebinds the holder instead of copying into its
-  existing allocation. This is separate from checkpoint loading and option parsing.
-- Workaround: avoid retaining parameter-storage aliases across portable SGD
-  updates; recreate detached aliases after each step.
-- Evidence: four CPU option combinations reproduce the stale alias; all four
-  corresponding independent Torch probes preserve it. Raw candidate/genuine
-  `*-alias-v2.json` and scripts are unversioned under
-  `$JITTOR_LAB_ROOT/_state/sgd-execution-options/20261016/`; see
-  [SGD execution options](../../docs/results/2026-10-16-sgd-execution-options.md).
-  CUDA portable updates and other optimizer algorithms are not yet verified.
-- Exit condition: a frontend-owned native storage write preserves actual
-  allocations and aliases across CPU/CUDA SGD updates, including plain,
-  momentum and Nesterov paths, with genuine Torch controls. Preserve legacy
-  native optimizer defaults and published gradients.
+- Severity: High (readers could observe pre-update weights).
+- Status: Resolved on CUDA at `f562b73d3` and `d68b8973f`, reviewed 2026-10-22.
+  CPU backend acceptance was not rerun in this CUDA batch.
+- Owner: Torch compatibility / shared optimizer storage.
+- Cause and fix: native `target.update(value)` rebound the holder. A shared
+  frontend writer now updates existing storage under no-grad, while legacy
+  native optimizer defaults remain unchanged. Pending destination allocation,
+  strided inverse-view writeback and capture state commits preserve the same
+  storage and gradient history. Refused captures commit one completed step.
+- Evidence: independent two-rank CUDA baseline `15d4455f8`, Slurm113944,
+  produced correct global gradients and updated values but broke the retained
+  alias/pointer at step0. At `d68b8973f`, 113974 passes checkpoint off/on, three
+  SGD-momentum updates each, analytic global weight/local input gradients,
+  hooks, updated state and stable aliases on both ranks; zero fallback and
+  actual allocated peak7168 bytes per rank. Nine new storage/capture methods,
+  checkpoint30 and core359 pass. The initial view/optimizer harness mistakenly
+  included CPU parameterizations: raw334/101 mixed counts are retained;
+  collection-only113989 binds170/48 passing CUDA nodes without rerunning them.
+  Mixed-process peaks are not CUDA-subset-exclusive measurements.
+- Review when frontend storage, inverse views, optimizer state or capture
+  transactions change. Historical CPU observations and the earlier report
+  remain in [SGD execution options](../../docs/results/2026-10-16-sgd-execution-options.md).
 
 ## KI-DIST-001: FSDP2 flat sharding peaks above the unsharded model
 
@@ -2344,3 +2343,29 @@ workaround.
   No serialization polling loop, CPU compute fallback or algorithm-specific
   workaround is used. Private rematerialization callback isolation is a
   separate protocol under KI-COMPAT-016.
+
+## KI-COMPAT-018: compiled forward callables lose external backward gradients
+
+- Severity: High (missing input and parameter gradients).
+- Status: Open at `c56b4c2bc`, confirmed on CUDA 2026-10-22.
+- Owner: Torch compiler compatibility / capture admission (algorithms role).
+- Symptom: a pure or bound forward callable compiled with replay modes returns
+  detached results after capture. Independent Slurm114011: three no-grad calls
+  warm/capture/replay, then a grad-enabled call still returns
+  `requires_grad=False`; both input and parameter gradients are None.
+- Cause: StepCapture is designed to replay an entire completed training step;
+  a forward callable requiring later autograd is not such a step. Its input
+  signature also omits runtime grad mode. A first-capture check alone must not
+  allow a no-grad capture to cross into grad-enabled execution.
+- Workaround: avoid replay modes for non-module forward callables that need
+  external backward. Default compile execution and the module wrapper's
+  separate grad/no-grad dispatch retain their existing scopes.
+- Evidence: `c56b4c2bc`, 114011, exact dyadic2x2 forward values followed by
+  missing analytic input/parameter gradients; fallback0, actual allocated
+  peak3072 bytes, FAILED exit1 preserved. Initial114008 failed during import
+  before device execution and is retained as a harness failure only. Worker
+  113975 separately confirms the grad-enabled-first bound/function case.
+- Exit condition: shared Torch capture admission and grad-context guards pass
+  external-backward, no-grad-to-grad, whole-step optimizer transaction and
+  checkpoint recompute interactions on real CUDA, without changing numerical
+  budgets or disabling valid whole-step capture.

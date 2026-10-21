@@ -2,9 +2,9 @@
 
 **Status:** the source-scoped CUDA mechanisms and public reentrant two-rank
 profile below are verified; the complete ms-swift adaptation matrix remains
-unfinished. **Date:** 2026-10-21. **Official base:**
+unfinished. **Date:** 2026-10-22. **Official base:**
 `e4e2625abf538c737364b71d14cf60a87cd1d290` (`origin/2.0-refactor`).
-**Source PR node:** `15d4455f82f1e80e9772dee2457665a69ebdfd7a`.
+**Source PR node:** `c56b4c2bcd0e13ef3757450521424599020b5465`.
 **Maintainer:** ms-swift CUDA/JTorch integration. **Review when:** the official
 base or a recorded gradient, storage, checkpoint, device or RNG contract changes.
 
@@ -18,10 +18,13 @@ standard FSDP checkpoint facade. No Swift/TRL source was patched and no
 algorithm-specific workaround was added. Worker functional units were selected
 individually from committed revisions; dirty worker source was not copied.
 
-Runtime code at the PR node is byte-identical to `7e0551708`; the final commit
-only removes two stale CUDA attention expected-failure classifications. Existing
-strict test bodies, numerical budgets and NPU entries are unchanged. The literal
-CPU-versus-CUDA numerical cases were not rerun or claimed as passing.
+The source PR also contains separately selected shared optimizer/storage/capture
+repairs (`f562b73d3`, `d68b8973f`), CUDA level-zero launch width (`d79938e54`)
+and pending-producer full-reduction fusion (`c56b4c2bc`). Each functional unit
+has its own commit and retained validation scope. The earlier `15d4455f8`
+metadata-only attention classification change preserves strict test bodies,
+numerical budgets and NPU entries. Literal CPU-versus-CUDA numerical cases were
+not rerun or claimed as passing.
 
 CUDA execution and compilation ran on Slurm compute nodes with RTX 4090 / SM89,
 Python 3.11.15 and CUDA 12.2.140. First compilation was serialized, rank caches
@@ -38,6 +41,29 @@ fingerprints were recorded. No timing or throughput is an acceptance criterion.
 | Checkpoint scheduling, reentrant contracts and FSDP facade | `7e0551708`, 113667: 30 direct passed, no skips; includes captured parameters, mutation guards, AMP, state hooks and real updates | 18944 bytes; zero fallback |
 | Checkpoint with causal/dropout SDPA | `7e0551708`: two SGD-momentum updates change 192 elements; forward calls 2 off / 4 on; output, input/parameter gradients, momentum and subsequent RNG match | 13312 bytes; zero fallback |
 | Two-rank DDP/FSDP persistence | `7e0551708`, 113667: both ranks restore model/SGD state and CPU/CUDA/Python/NumPy RNG after effective perturbation, then complete steps 2-to-4; loss 0.0510→0.0408; DDP 20 or FSDP 10 local elements updated per rank | 7168–11264 bytes across the labelled cases; device-wide NVML samples also retained |
+
+At `d68b8973f`, independent113974 passes the divergent-input two-rank oracle:
+checkpoint off/on each makes three SGD-momentum updates; global weight and local
+input gradients, momentum, updated parameters, hooks and retained aliases/pointers
+match an independent analytic reference. Actual allocated peak is7168 bytes per
+rank, fallback0. The unchanged baseline15 fails the alias/pointer check at step0
+in113944 after its gradient and numeric update checks pass. New storage/capture9,
+checkpoint30, dropout-SDPA two-update interaction and two-GPU core359 pass.
+
+The initial view/optimizer harness accidentally ran explicit CPU parameterizations.
+Raw334/101 mixed passing counts and the selection error remain visible;
+collection-only113989 confirms170/48 passing CUDA nodes, with no test rerun.
+Their mixed-process allocator peaks are not presented as CUDA-only subset peaks.
+
+At `c56b4c2bc`, independent114001 passes19 CUDA launch/reduction methods and18
+subtests, plus one separately labelled host dispatch-decline metadata check.
+The CPU reduction and three CPU-classified legacy codegen nodes are deselected.
+The original allocation upper bound, unchanged analytic gradient budgets and
+repeatability checks pass. Fallback0; native process allocated peak67158016 bytes
+is the suite high-water, not the optimized broadcast case's isolated peak.
+Storage/capture9, CUDAoptimizer48, checkpoint30, dropout-SDPA two real updates and
+single-GPU core356 pass;10 policy skips and2 pre-existing xfails remain.
+Worker isolated37376-byte allocation evidence keeps its original worker SHA.
 
 The FSDP hook reference was checked with genuine Torch2.6 CUDA: sharded
 parameter hooks are absent, while module pre/post and input hooks fire. The
@@ -99,13 +125,24 @@ a requirement for strict stepwise native-training parity or a cross-framework
 memory comparison. Historical official-base loss differences are not attributed
 to checkpointing without evidence.
 
+Historical GKD new-process recovery at `a34679ee9`, Slurm23642, has a retained
+unrounded public Swift `memory=4.1201171875`GiB. The committed chain from
+`state.max_memory` through `torch.cuda.max_memory_reserved` to the native
+per-device reserved high-water counter binds4423942144 bytes to the six
+resumed updates2-to-8. This is reserved pool high-water observed during training;
+its reset origin is not reconstructed and it is not live-allocated or NVML
+occupancy. The same-source forced-RNG single-update probe23646 remains separate.
+Source and log hashes are retained; no GKD training was repeated and no current
+source result is inferred from this historical record.
+
 ## Gates and reproduction
 
 At `7e0551708` and at the final metadata candidate, structure checks report
 1516 passed, 6 skipped and 1066 passed subtests, with one pre-existing failure:
 `tests/structure/backends/rocm/test_rocm_library_provider.py::test_specs_resolve_only_native_source_and_quote_paths`.
 That assertion rejects an absolute source path containing `cuda`; this checkout
-parent contains that word. Slurm 113667 and113760 therefore retain exit 1.
+parent contains that word. Slurm113667,113760,113974 and114001 therefore retain exit1. The latter two
+independently report the same1516/6/1066 structure counts and known failure.
 Repository layout, generated manifests and diff checks pass. The unrelated ROCm
 check was not modified or skipped, and no blanket green gate is claimed.
 
@@ -138,8 +175,16 @@ materialization, region ownership, callback/lifetime isolation, per-producer RNG
 and FSDP/Python-hook behavior need separate verification. A warning, direct call
 or a True-mode result is not False-mode support.
 
+Compiled forward callables needing external backward also remain open under
+KI-COMPAT-018. At `c56b4c2bc`, independent114011 proves that no-grad capture
+replays detached output after grad mode is enabled: input/parameter gradients
+are None, fallback0 and actual allocated peak3072 bytes. The expected FAILED1
+and initial import-only harness failure114008 are retained. Algorithms owns the
+shared capture-admission/grad-context repair; successful codegen or checkpoint
+contracts do not close this defect.
+
 The complete eleven-mode training and variant matrix remains unfinished. CPU
 training, other accelerator backends and new inference coverage are not claimed.
 Current defects and review conditions are indexed in
 [known issues](../../agent/manuals/known-issues.md), including KI-COMPAT-016,
-KI-COMPAT-017 and KI-EXEC-016.
+KI-COMPAT-017, KI-COMPAT-018 and KI-EXEC-016.
