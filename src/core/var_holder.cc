@@ -34,6 +34,7 @@ namespace {
 struct VarDataOwner {
     PyObject* holder;
     Var* var;
+    Allocation allocation;
 };
 }
 
@@ -46,17 +47,31 @@ static void free_var_data_owner(PyObject* capsule) {
 }
 
 PyObject* new_var_data_owner(VarHolder* vh) {
-    auto owner = new VarDataOwner{GET_OBJ_FROM_RAW_PTR(vh), vh->var};
+    auto owner = std::unique_ptr<VarDataOwner>(
+        new VarDataOwner{GET_OBJ_FROM_RAW_PTR(vh), vh->var});
+    auto* var = owner->var;
+    // Keeping the Var alive is not enough: a later CUDA consumer can migrate
+    // it back to the device and release the host block exported by .data.
+    // Hold that exact allocation independently of the Var's current storage.
+    if (var->mem_ptr) {
+        CHECK(var->allocator->share_with(var->storage_span_bytes(),
+            var->allocation, var->storage_offset_bytes))
+            << "Cannot retain storage exported by Var.data";
+        owner->allocation.ptr = var->mem_ptr;
+        owner->allocation.allocation = var->allocation;
+        owner->allocation.size = var->storage_span_bytes();
+        owner->allocation.allocator = var->allocator;
+    }
     owner->var->own_both_liveness();
     Py_INCREF(owner->holder);
-    auto capsule = PyCapsule_New((void*)owner, "jittor.var_data",
+    auto capsule = PyCapsule_New((void*)owner.get(), "jittor.var_data",
         &free_var_data_owner);
     if (!capsule) {
         owner->var->release_both_liveness();
         Py_DECREF(owner->holder);
-        delete owner;
         return nullptr;
     }
+    owner.release();
     return capsule;
 }
 
@@ -994,7 +1009,10 @@ static VarPtr view_assignment_value(Var* base, const vector<VarViewStep>& steps,
         } else if (steps[i].kind == VarViewStep::Expand || steps[i].kind == VarViewStep::Reshape) {
             USER_CHECK(value->num == target->num)
                 << "Cannot write to an expanded view with overlapping storage";
-            updated = make_storage_reshape(value, NanoVector(target->shape));
+            // Inverting a later transpose may leave logical values strided.
+            // A writeback reshape may copy; it is not a storage-view request.
+            auto dense = contiguous_storage(value);
+            updated = make_storage_reshape(dense.ptr, NanoVector(target->shape));
         } else {
             updated = make_setitem(target, VarSlices(steps[i].slices), value, ns_void);
         }
