@@ -335,6 +335,8 @@ def _new_finish(v, device=None, requires_grad=False):
         if v.placement_backend < 0:
             _owner._set_use_cuda()
         v = _owner._make_cuda_resident(v, force=True, device=device)
+    # Factories create leaves; native fill/cast graphs must not supply history.
+    v = v.detach()
     if requires_grad:
         v.requires_grad_(True)
         _owner._torch_register_leaf(v)
