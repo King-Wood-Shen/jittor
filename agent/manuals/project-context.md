@@ -58,10 +58,10 @@ changes: [2.0 migration notes](../../docs/releases/2.0.md).
   device (KI-BACKEND-012), untested backend gradients (KI-BACKEND-013), and
   ROCm/NPU verification of shared semantics (KI-OPS-002, KI-SEMANTICS-003).
   Commands for hardware day are in [deferred-hardware.md](deferred-hardware.md).
-- **Silent numerics.** CUDA half max/min identity (KI-OPS-012), Python-float
-  narrowing against float64 (KI-DTYPE-003), factory tensors weak in promotion
-  (KI-DTYPE-004), cuDNN autotuning coupled to scheduling (KI-EXEC-003), SDPA CUDA
-  backward parity (KI-OPS-015).
+- **Silent numerics.** Python-float narrowing against float64 (KI-DTYPE-003),
+  factory tensors weak in promotion (KI-DTYPE-004), and cuDNN autotuning coupled
+  to scheduling (KI-EXEC-003). CUDA half extrema and SDPA math repairs are
+  source-scoped in the [CUDA integration validation](../../docs/results/2026-10-21-ms-swift-cuda-integration.md); literal CPU/CUDA parity was not rerun.
 - **Torch frontend gaps.** torchmetrics on CUDA (KI-COMPAT-010), RNN off cuDNN
   (KI-COMPAT-011), in-process shim metadata (KI-COMPAT-012), autocast Conv2d bias
   (KI-COMPAT-013), complex128 placeholder (KI-COMPAT-014).
@@ -77,6 +77,15 @@ changes: [2.0 migration notes](../../docs/releases/2.0.md).
   (KI-TEST-014).
 - **Research.** [Agent-operable optimization](../../docs/research/agentic-optimization.md)
   is a proposal only; no autonomous mutation path exists.
+
+## CUDA ms-swift continuation
+
+The [source-scoped integration validation](../../docs/results/2026-10-21-ms-swift-cuda-integration.md)
+records the official `e4e2625ab` base and source PR node `15d4455f8`, including
+real reentrant two-rank model recovery and measured memory reduction. This is
+not completion of the eleven-mode adaptation matrix. Non-reentrant checkpoint
+ownership/RNG and FSDP activation paths remain open under KI-COMPAT-016; legacy
+RNG recovery and nondefault fetch completion have separate committed evidence.
 
 ## Before running work
 

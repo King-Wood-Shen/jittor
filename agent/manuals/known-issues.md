@@ -1377,71 +1377,61 @@ workaround.
   **Name the input pattern when you measure**: monotone and random data differ by
   up to 4x on the same kernel.
 
-## KI-OPS-012: the CUDA half-precision max/min reduction folds from a finite literal
+## KI-OPS-012: CUDA half max/min reduction used finite identities
 
-- Severity: Critical (silent wrong value on finite input as well as infinities,
-  half dtypes only)
-- Status: Open on CUDA; reproduced by inspection, unverified on a device. The CPU
-  half is fixed.
-- Owner: reduction operator maintainers
-- Symptom: the CUDA reduction identity for float16/bfloat16 is a finite literal,
-  so `max([-inf, -inf])` cannot answer `-inf`, and `max([-65504, -65504])`
-  (float16's lowest finite value) answers a value that is not in the input; `min`
-  mirrors it. Integer and float32/float64 reductions are unaffected.
-- Cause: the CUDA map in [`fp16_op_type.cc`](../../src/type/fp16_op_type.cc) sets
-  `init_maximum`/`init_minimum` to `-65000.0f`/`-1e38` (and the mirror). It
-  should use `-CUDART_INF_F`/`CUDART_INF_F` for both half types, which means
-  reaching `type/cuda_limits.h`; that header is pushed only by `parallel_pass`,
-  not by the half post-pass, so the change must bring the include with it.
-- Workaround: reduce half tensors in float32 on CUDA when the identity matters.
-- Evidence: [`test_minmax_reduction_identity.py`](../../tests/ops/test_minmax_reduction_identity.py):
-  the CPU class passes; the CUDA class carries the same body as a strict
-  expected failure.
-- Exit condition: the CUDA class's strict expected failure XPASSes on a device
-  (i.e. the CUDA rows answer from an infinity) and the marker is removed.
+- Severity: Critical (silent wrong extrema for half dtypes).
+- Status: Resolved for CUDA float16/bfloat16 at `67df86f3a`, reviewed 2026-10-21.
+- Owner: reduction operator maintainers.
+- Cause and fix: the CUDA half post-pass used finite literals instead of
+  infinity identities. Reuse the shared numeric min/max helpers and include
+  CUDA limits within the existing CUDA, non-ACL boundary.
+- Evidence: five native methods and four subtests pass on CUDA; public
+  float16/bfloat16 extrema, dtype and unique-input backward checks pass with
+  zero fallback. Actual allocated peaks are 2048 and 5632 bytes. The original
+  post-pytest observer count error remains recorded separately; the passing
+  tensor cases were not rerun to fix that observer.
+- Scope and review: see the [CUDA integration validation](../../docs/results/2026-10-21-ms-swift-cuda-integration.md).
+  Recheck when half identities, generated namespaces or device includes change.
+  This does not certify another accelerator backend.
 
-## KI-OPS-014: a query row whose every key carries `finfo.min` gets float32 attention gradients as if each probability were 1
+## KI-OPS-014: finite-minimum attention masks reconstructed wrong probabilities
 
-- Severity: Low (the forward is right; no workload in the benchmark reaches it)
-- Status: Open; found 2026-10-01
-- Owner: CUDA fused attention maintainers
-- Symptom: with `finfo(float32).min` added to every key of a row, the float32
-  fused attention backward is off by the row length (2 x 3 x 64 x 64 case:
-  relative error 16, 6.6 and 1.8 for `dq`, `dk`, `dv` against float64). The
-  output is the uniform average it should be. PyTorch's efficient-attention
-  kernel is also wrong on these inputs (26% on output and `dq`). Transformers
-  does not produce such rows on its SDPA path (`_unmask_unattended`); a mask
-  built by hand can.
-- Cause: `backends/cuda/kernels/nn/fused_attention_f32_cuda.py` stores the
-  forward's log-sum-exp and the backward recomputes each probability as
-  `exp(score - lse)`. Every score in such a row *is* `finfo.min`, and so is
-  `lse = max + log(l)` (the `log(l)` is absorbed), so each probability comes back
-  as 1 instead of `1/l`.
-- Workaround: unmask fully masked rows before attention, as Transformers does.
-- Evidence: `test_a_dense_additive_mask` with `mask[1, :, 7] = finfo.min`.
-- Exit condition: store the row maximum and `1/l` separately (or `lse` relative
-  to the maximum) so the backward never subtracts two equal huge numbers, and
-  add the fully masked row to the test.
+- Severity: Silent wrong CUDA float32 attention gradients on a fully
+  finite-minimum additive-mask row.
+- Status: CUDA math resolved by `43890c4e8` (worker `b522d54bc`), independently
+  verified with subsequent attention units at `7e0551708` on 2026-10-21.
+- Owner: CUDA fused attention maintainers.
+- Cause and fix: max plus log(sum_exp) rounds back to max at `finfo.min`, so
+  exp(score minus lse) reconstructs 1 instead of 1/L. Preserve the row maximum
+  and inverse sum separately; public output and mask semantics are unchanged.
+- Evidence: the full-row guard retains its original float64 reference and
+  tolerances. The CUDA attention suite passes with dropout, masks, GQA, layouts
+  and the linear-storage guard. Subsequent `d8dd5cea8` also fixes a retired
+  weakref-cache owner; native/public SDPA subprocesses exit without ignored
+  exceptions. See the [source-scoped validation](../../docs/results/2026-10-21-ms-swift-cuda-integration.md).
+- Review when mask semantics, private auxiliary statistics or cache ownership
+  changes. Auxiliary storage remains O(query rows), not a score matrix.
 
-## KI-OPS-015: the CUDA backward of `scaled_dot_product_attention` misses the device-parity per-element budget
+## KI-OPS-015: CUDA attention backward missed the per-element gradient budget
 
-- Severity: Medium (a parity gate case cannot pass; the gradients agree to
-  about 0.7% per element)
-- Status: Open; reproduced 2026-10-12 on RTX 4090 / CUDA 12.2 in every CUDA run
-  (`nox -s cuda` included). Both cases run as strict expected failures through
-  `_KNOWN_DEVICE_ISSUES` in `tests/backends/parity/test_device_parity.py`.
-- Owner: attention / CUDA kernel maintainers
-- Symptom: `scaled_dot_product_attention BACKWARD (input 0) per-element divergence
-  cpu vs cuda (max rel 6.80e-03)` against `GRAD_PE_TOL` 5e-3 (6.49e-03 for the
-  causal variant). The forward and the net-scaled backward error pass.
-- Cause: not isolated. Suspected a different accumulation order in the softmax
-  backward; whether 0.7% on a sub-peak coordinate is legitimate reordering or a
-  real defect has not been decided.
-- Workaround: none needed for typical training.
-- Evidence: `tests/backends/parity/test_device_parity.py::TestDeviceParity::test_scaled_dot_product_attention`
-  and `::test_scaled_dot_product_attention_causal` (torch mode, CUDA).
-- Exit condition: both cases pass (a fixed kernel, or a budget justified for
-  this operator) and the `_KNOWN_DEVICE_ISSUES` entry is removed.
+- Severity: Medium (small gradient coordinates were wrong in near-one-hot rows).
+- Status: CUDA math repaired by `4c722fee0` (worker `e1fbbe59b`); ordinary
+  strict parity classification restored by `15d4455f8`, reviewed 2026-10-21.
+- Owner: attention / CUDA kernel maintainers.
+- Cause and fix: backward scaled the completed QK dot while forward rounded Q
+  scaling first, and dot(dO, rounded output) lost small Q/K derivatives. Match
+  the score operation order and reconstruct row delta from dP and probabilities,
+  with O(query rows) double auxiliary storage and unchanged error budgets.
+- Evidence: five original native and five public Torch CUDA samples pass the
+  original net/per-element thresholds against their float64 analytic reference,
+  with exact 2D generic / 4D fused routing and stable retained views. Fallback
+  is zero; actual allocated peaks are 10752/11264 bytes. The full CUDA attention
+  suite passes. See the [validation report](../../docs/results/2026-10-21-ms-swift-cuda-integration.md).
+- Scope and review: the two stale `unittest.expectedFailure` entries were
+  removed so future CI runs the existing strict bodies normally. Literal
+  CPU-versus-CUDA execution was not rerun in this CUDA-only batch; no current
+  CPU oracle pass is claimed. Recheck score arithmetic, dropout, row delta and
+  cross-device evidence when these contracts change.
 
 ## KI-SEMANTICS-003: floating-comparison NaN semantics not verified on every backend
 
@@ -2252,28 +2242,32 @@ workaround.
   `python/jittor` and `backends/` are covered.
 
 
-## KI-COMPAT-016: activation checkpointing executes directly without recomputation
+## KI-COMPAT-016: non-reentrant activation checkpointing remains unsupported
 
-- Severity: Limitation (the public switch does not save activations)
-- Status: Open; reviewed 2026-10-21 at `9534be690cf894bf6d6902afbc0d3b24166a0b1c`
-- Owner: autograd / Torch compatibility
-- Symptom: a public Swift gradient-checkpointing request reaches the Torch
-  checkpoint API, but it does not discard and recompute the forward activations.
-- Cause: `compat/torch/installers/data.py::_checkpoint` explicitly warns and
-  calls the function directly. A core recomputation primitive with captured
-  parameter gradients and RNG replay is still missing.
-- Workaround: disable gradient checkpointing and FSDP activation checkpointing;
-  budget memory for the ordinary forward/backward graph. A warning and valid
-  loss do not establish recomputation or a memory reduction.
-- Evidence: the current `_checkpoint` implementation; the ms-swift optimization
-  audit retained in unversioned batch state `sol61-20261021`. Earlier enable
-  trace failures, cancelled jobs and warning-based support labels are not
-  successful recomputation evidence. No additional algorithm-private retry was
-  used to mask this missing core capability.
-- Exit condition: implement the shared core primitive, verify actual CUDA
-  recomputation, finite correct parameter gradients and RNG replay, and measure
-  device peaks for the same on/off profile. Review when checkpoint semantics or
-  the autograd graph boundary changes.
+- Severity: Limitation (the default False mode lacks a complete native
+  rematerialization protocol).
+- Status: Partially resolved on CUDA, reviewed 2026-10-21. Explicit reentrant
+  mode has real recomputation; `use_reentrant=False` remains unsupported and
+  is not silently mapped to True.
+- Owner: native autograd / Torch compatibility.
+- Cause and fix: the old facade called forward directly. The shared reentrant
+  engine now runs forward without retained autograd activations, captures
+  implicit parameters, and replays backward with boundary/version, RNG and AMP
+  checks. Generic module state hooks and the standard FSDP wrapper preserve
+  canonical checkpoint keys. Gradient-only inputs remain lazy in planning.
+- Evidence: `7e0551708` independently passes direct CUDA contracts plus
+  gradient/SGD-momentum/hook/RNG interactions and fresh-process DDP/FSDP state
+  recovery. At `15d4455f8`, public Swift Qwen2-0.5B LoRA FP32 SDPA on two GPUs
+  completes checkpoint 2-to-4 recovery with four real updates and declining
+  loss, zero fallback, real no-grad/grad replay and a 39.535% reduction in the
+  measured training allocator peak against the matched off branch. Whole-device
+  NVML samples are retained separately. Exact scope, commits and peaks are in
+  the [validation report](../../docs/results/2026-10-21-ms-swift-cuda-integration.md).
+- Remaining: public DDP defaults and the Accelerate FSDP activation wrapper use
+  non-reentrant False. Native materialization, ownership and per-producer RNG
+  work are prerequisites, not complete False support. FSDP unshard/Python hooks
+  require their own acceptance. Recheck when the graph boundary, lifetime,
+  hooks, RNG, mutable state or accelerator memory behavior changes.
 
 ## KI-EXEC-015: CUDA readback views can outlive their host allocation
 
@@ -2307,27 +2301,46 @@ workaround.
   resolution does not close activation recomputation or the remaining public
   training/recovery matrix.
 
-## KI-COMPAT-017: legacy CPU RNG snapshots fail public CUDA checkpoint recovery
+## KI-COMPAT-017: legacy CPU RNG snapshots failed public CUDA checkpoint recovery
 
-- Severity: High (resume stops before the next optimizer update)
-- Status: Open; observed 2026-10-21 at
-  `5da3acffb078096b640dcc8563536984c6c3f9f6`; the relevant parser is unchanged
-  on official `9da9be98b` and the integration source.
-- Owner: native RNG state / Torch compatibility
-- Symptom: public GRPO resume from the retained checkpoint of `2401d4330`
-  rejects its CPU RNG payload before a parameter update. Slurm112585 retains
-  the failed public-entry trace; it is not successful training evidence.
-- Cause: the old payload is `JTCPU1 seed engine`, while
-  `src/runtime/rng_state.cc::parse_state` requires the versioned
-  `JITTOR_RNG_1` backend/device/seed/offset/engine header. Rejecting the old
-  header prevents lossless restoration even when its engine state is usable.
-- Workaround: none established. Replacing the state with an initial seed or
-  omitting RNG restoration does not satisfy checkpoint recovery.
-- Exit condition: add narrowly validated backward-compatible decoding, preserve
-  the encoded CPU stream and CUDA generator independence, retain strict
-  malformed/backend-mismatch checks, and validate the affected public CUDA
-  recovery with real updates, explained loss and actual peak memory. Keep
-  source and evidence attribution separate from historical accepted training.
-- Review when RNG wire formats or checkpoint restoration changes. The shared
-  parser repair belongs to the algorithms role; checkpoint rematerialization
-  owns its separate RNG save/replay interface.
+- Severity: High (resume stopped before the next optimizer update).
+- Status: Resolved for the retained `JTCPU1` format, reviewed 2026-10-21;
+  parser integration `ac37a9997`, required random_ unit `8820c2a11`.
+- Owner: native RNG state / Torch compatibility.
+- Cause and fix: the parser rejected the old signed-32-bit seed and complete
+  host-engine payload. Accept that exact CPU/device-0 encoding with sign
+  extension, while retaining backend/device/overflow/trailing-data checks and
+  atomic failure. Current CUDA encoding is unchanged. The separately selected
+  random_ mechanism preserves the requested device and integer distribution.
+- Evidence: independent CUDA-ambient RNG contracts and seven legacy subtests
+  pass with zero fallback and an actual allocated peak of 3072 bytes. Worker
+  `a5d60ca35` resumes the retained public GRPO checkpoint 2-to-4 with 336 finite
+  CUDA adapter gradients and real updates, effective four-domain RNG restore,
+  exact remaining batches, zero fallback and actual NVML peak 2950 MiB.
+  These results retain their respective original source nodes.
+- Scope and review: host RNG metadata is a component of CUDA recovery, not a
+  CPU training claim. Recheck wire formats, native random_ and restoration.
+
+## KI-EXEC-016: nondefault-device fetch callbacks outlived synchronous return
+
+- Severity: High (rank-1 checkpoint serialization could fail despite finished
+  CUDA tensors).
+- Status: Resolved at `ae3537c93`, independently revalidated at `7e0551708` on
+  official `e4e2625ab`, reviewed 2026-10-21.
+- Owner: executor / asynchronous readback.
+- Cause and fix: fetch stages data and its host callback on device 0's copy
+  stream, but an empty or rank-1-only plan waited only its current/touched
+  compute device. Include pending fetch copy devices in the final synchronous
+  wait, preserve the previous implicit current-device wait, and keep compute
+  handoff tracking separate.
+- Evidence: the unchanged source-1 counterfactual required a later explicit
+  copy-device wait. Both new real two-GPU guards pass after the repair, with
+  source residency/current device preserved and zero fallback. Fresh-process
+  DDP/FSDP model, optimizer and four-domain RNG recovery passes on both ranks;
+  allocator and device-wide NVML peaks are retained. Public model recovery is
+  separately verified at `15d4455f8`. See the
+  [validation report](../../docs/results/2026-10-21-ms-swift-cuda-integration.md).
+- Review when copy streams, callback queues, executor waits or placement changes.
+  No serialization polling loop, CPU compute fallback or algorithm-specific
+  workaround is used. Private rematerialization callback isolation is a
+  separate protocol under KI-COMPAT-016.
