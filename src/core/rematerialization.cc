@@ -179,6 +179,12 @@ uint64 rematerialization_construction_owner() {
         ? state->recording.back()->id : 0;
 }
 
+bool rematerialization_preserves_rng() {
+    auto* state = owner_state;
+    return state && state->recording.size() > state->visible_from
+        && state->recording.back()->preserve_rng_state;
+}
+
 bool rematerialization_has_recording_owner() {
     return rematerialization_construction_owner() != 0;
 }

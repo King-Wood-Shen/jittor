@@ -10,6 +10,7 @@ struct Var;
 // Construction provenance belongs to the calling thread, not a global flag.
 EXTERN_LIB uint64 rematerialization_construction_owner();
 EXTERN_LIB bool rematerialization_has_recording_owner();
+EXTERN_LIB bool rematerialization_preserves_rng();
 EXTERN_LIB void rematerialization_mark_kept(Var* value);
 
 // Must be nested inside ExecutorEntryScope and span the complete submission.

@@ -804,3 +804,177 @@ def test_owner_transfers_later_explicit_retention(close_before_manual, policy, f
         lease.close()
         lease.release()
         value._release_kept()
+
+
+def _physical_snapshot(value):
+    # Copy already-completed bytes without asking a kept producer to run again.
+    destination = torch.empty_like(value)
+    destination.sync(True, False)
+    destination._copy_into(value, False)
+    return snapshot(destination)
+
+
+def _curand_position():
+    backend = jt.compile_extern.get_library("curand", load=True)
+    return (int(backend.curand_generator_seed(0)),
+            int(backend.curand_generator_offset(0)))
+
+
+@pytest.mark.parametrize("dtype", ["float32", "float64"])
+@pytest.mark.parametrize("kind", ["uniform", "normal"])
+@pytest.mark.parametrize("count", [0, 1, 5, 6])
+def test_owner_default_cuda_rng_replays_actual_execution(dtype, kind, count):
+    torch.manual_seed(1234)
+    foreign = jt.rand((7,))
+    lease = jt.core._RematerializationLease(True)
+    try:
+        value = jt.random((count,), dtype, kind)
+        # Issue order differs from execution order; capture must be late.
+        jt.sync([foreign], True, False)
+        start = _curand_position()
+        ready, = materialize(value)
+        first = snapshot(ready)
+        cost = count if kind == "uniform" else (count + 1) // 2
+        assert _curand_position() == (start[0], start[1] + cost)
+        lease.close()
+        outside = jt.rand((11,))
+        jt.sync([outside], True, False)
+        after_outside = _curand_position()
+        jt.sync([value], True, False)
+        np.testing.assert_array_equal(_physical_snapshot(value), first)
+        assert _curand_position() == after_outside
+        assert jt.core.device_pool_stats(0)[2] > 0
+    finally:
+        lease.close()
+        lease.release()
+
+
+def test_owner_cuda_rng_false_and_uncaptured_keep_legacy_stream():
+    torch.manual_seed(1234)
+    for captured in [False, True]:
+        lease = jt.core._RematerializationLease(False) if captured else None
+        value = jt.rand((16,))
+        try:
+            with jt.flag_scope(keep_graph=2 if lease is None else 0):
+                jt.sync([value], True, False)
+            first = _physical_snapshot(value)
+            initial = _curand_position()
+            if lease is not None:
+                lease.close()
+            jt.sync([value], True, False)
+            second = _physical_snapshot(value)
+            assert not np.array_equal(first, second)
+            assert _curand_position() == (initial[0], initial[1] + 16)
+        finally:
+            if lease is not None:
+                lease.close()
+                lease.release()
+            else:
+                value._release_kept()
+
+
+def test_owner_default_dropout_gradient_preserves_outside_rng():
+    torch.manual_seed(1234)
+    x = torch.tensor([.2, .4, .6, .8], device="cuda", requires_grad=True)
+    weight = torch.nn.Parameter(torch.tensor([2., 3., 4., 5.], device="cuda"))
+    jt.sync([x, weight], True, False)
+    lease = jt.core._RematerializationLease(True)
+    try:
+        activation = torch.nn.functional.dropout(x * weight, p=.5, training=True)
+        original = activation.sum()
+        forward, ready = materialize(activation, original)
+        values = snapshot(forward)
+        xx = np.array([.2, .4, .6, .8])
+        ww = np.array([2., 3., 4., 5.])
+        scaled_mask = values / (xx * ww)
+        np.testing.assert_allclose(scaled_mask, np.rint(scaled_mask), atol=1e-6)
+        lease.close()
+        outside = jt.rand((11,))
+        jt.sync([outside], True, False)
+        position = _curand_position()
+        lease.release()
+        dx, dw = jt.grad(original, [x, weight])
+        np.testing.assert_allclose(snapshot(dx), ww * scaled_mask, rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(snapshot(dw), xx * scaled_mask, rtol=1e-5, atol=1e-6)
+        assert _curand_position() == position
+        np.testing.assert_allclose(snapshot(ready), values.sum(), rtol=1e-5)
+    finally:
+        lease.close()
+        lease.release()
+
+
+def test_owner_cpu_rng_state_replay_feeds_real_cuda_gradient():
+    torch.manual_seed(1234)
+    x = torch.ones(16, device="cuda", requires_grad=True)
+    x.sync(True, False)
+    lease = jt.core._RematerializationLease(True)
+    try:
+        host = torch.rand(16, device="cpu")
+        gpu = host.to("cuda")
+        original = (x * gpu).sum()
+        gpu_ready, ready = materialize(gpu, original)
+        expected = snapshot(gpu_ready)
+        lease.close()
+        outside = torch.rand(7, device="cpu").to("cuda")
+        jt.sync([outside], True, False)
+        position = jt.core.rng_state("cpu")
+        jt.sync([host], True, False)
+        np.testing.assert_array_equal(_physical_snapshot(host), expected)
+        assert jt.core.rng_state("cpu") == position
+        lease.release()
+        dx = jt.grad(original, x)
+        np.testing.assert_allclose(snapshot(dx), expected, rtol=1e-6)
+        np.testing.assert_allclose(snapshot(ready), expected.sum(), rtol=1e-6)
+        assert jt.core.rng_state("cpu") == position
+        assert jt.core.device_pool_stats(0)[2] > 0
+    finally:
+        lease.close()
+        lease.release()
+
+
+def test_owner_inner_false_overrides_parent_rng_preservation():
+    torch.manual_seed(1234)
+    outer = jt.core._RematerializationLease(True)
+    child = None
+    try:
+        first_value = jt.rand((16,))
+        child = jt.core._RematerializationLease(False)
+        second_value = jt.rand((16,))
+        first_ready, second_ready = materialize(first_value, second_value)
+        first = snapshot(first_ready)
+        second = snapshot(second_ready)
+        child.close()
+        outer.close()
+        outside = jt.rand((11,))
+        jt.sync([outside], True, False)
+        position = _curand_position()
+        jt.sync([first_value, second_value], True, False)
+        np.testing.assert_array_equal(_physical_snapshot(first_value), first)
+        assert not np.array_equal(_physical_snapshot(second_value), second)
+        assert _curand_position() == (position[0], position[1] + 16)
+    finally:
+        if child is not None:
+            child.close()
+            child.release()
+        outer.close()
+        outer.release()
+
+
+def test_owner_explicit_cuda_generator_keeps_its_issue_order_contract():
+    torch.manual_seed(1234)
+    generator = torch.Generator(device="cuda").manual_seed(19)
+    position = _curand_position()
+    lease = jt.core._RematerializationLease(True)
+    try:
+        value = torch.rand(16, device="cuda", generator=generator)
+        issued = snapshot(generator.get_state())
+        ready, = materialize(value)
+        first = snapshot(ready)
+        lease.close()
+        jt.sync([value], True, False)
+        np.testing.assert_array_equal(_physical_snapshot(value), first)
+        np.testing.assert_array_equal(snapshot(generator.get_state()), issued)
+        assert _curand_position() == position
+    finally:
+        lease.close()
+        lease.release()
