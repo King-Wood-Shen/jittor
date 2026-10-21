@@ -225,14 +225,6 @@ def npu_fusion_attention(
     if input_layout not in ("BSND", "TND"):
         raise NotImplementedError(
             "Jittor ACL npu_fusion_attention currently supports BSND and TND")
-    if any(value is not None for value in (pse, padding_mask, prefix)):
-        raise NotImplementedError(
-            "Jittor ACL npu_fusion_attention does not support pse, padding masks, or prefix")
-    if (int(pre_tockens) != 2147483647
-            or int(next_tockens) != 2147483647 or int(inner_precise) != 0
-            or not gen_mask_parallel or sync or softmax_layout):
-        raise NotImplementedError(
-            "Jittor ACL npu_fusion_attention supports only full-window default settings")
     keep_prob = float(keep_prob)
     if not 0.0 < keep_prob <= 1.0:
         raise ValueError("keep_prob must be in (0, 1]")

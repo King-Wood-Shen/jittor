@@ -1404,8 +1404,8 @@ def _curand(required=True):
 
 
 def cuda_rng_state_is_supported():
-    """Whether this build can save and restore the CUDA RNG position."""
-    if _is_acl_build():
+    """Whether this build can save and restore its accelerator RNG position."""
+    if _acl_rng_backend():
         return True
     return _curand(required=False) is not None
 
@@ -1442,13 +1442,12 @@ def _rng_device_index(device):
 
 def _api_cuda_get_rng_state(device=None, *a, **k):
     if _acl_rng_backend():
+        jt.sync_all(True)
         return _acl_rng_state_pack(jt.core.rng_state("acl", _cuda_device_index(device)))
     # Everything queued has to have happened, or the offset describes a
     # position the device has not reached: the saved state would then be ahead
     # of the data the checkpoint was taken with.
     jt.sync_all(True)
-    if _is_acl_build():
-        return _acl_rng_state_pack(_rng_device_index(device))
     backend = _curand()
     index = _rng_device_index(device)
     return _rng_state_pack(backend.curand_generator_seed(index),
@@ -1457,13 +1456,12 @@ def _api_cuda_get_rng_state(device=None, *a, **k):
 
 def _api_cuda_get_rng_state_all(*a, **k):
     if _acl_rng_backend():
+        jt.sync_all(True)
         return [_acl_rng_state_pack(state) for state in jt.core.rng_states("acl")]
     count = device_count()
     if not count:
         return []
     jt.sync_all(True)
-    if _is_acl_build():
-        return [_acl_rng_state_pack(i) for i in range(count)]
     backend = _curand()
     return [_rng_state_pack(backend.curand_generator_seed(i), backend.curand_generator_offset(i))
             for i in range(count)]
