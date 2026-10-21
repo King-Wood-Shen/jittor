@@ -1345,16 +1345,15 @@ def _rng_state_unpack(state):
 _ACL_RNG_STATE_MAGIC = b"JTACL_RNG_1"
 
 
-def _acl_rng_state_pack(device):
+def _acl_rng_state_pack(payload):
     """Pack the native ACL counter snapshot for Trainer's CUDA RNG slot.
 
     The Torch shim exposes ACL tensors through the CUDA compatibility surface
     to Transformers. Preserve the ACL stream's exact native seed and counter;
     a seed-only CUDA-shaped state would silently break checkpoint continuation.
     """
-    import jittor as _jt
     import numpy as _np
-    payload = _jt.core.rng_state("acl", int(device)).encode("ascii")
+    payload = str(payload).encode("ascii")
     owner = get_install_context(jt).target_namespace
     data = _ACL_RNG_STATE_MAGIC + payload
     return owner.tensor(_np.frombuffer(data, dtype=_np.uint8).copy(),
