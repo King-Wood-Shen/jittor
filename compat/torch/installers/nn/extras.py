@@ -232,6 +232,8 @@ def _install_nn_extras(nn, registry=None):
 
     _clip_grad._get_total_norm = _get_total_norm
     _clip_grad._clip_grads_with_norm_ = _clip_grads_with_norm_
+    _clip_grad.get_total_norm = _u.get_total_norm = _get_total_norm
+    _clip_grad.clip_grads_with_norm_ = _u.clip_grads_with_norm_ = _clip_grads_with_norm_
     _clip_grad.clip_grad_norm_ = getattr(_u, "clip_grad_norm_", None)
     _clip_grad.clip_grad_value_ = getattr(_u, "clip_grad_value_", None)
     _modules["torch.nn.utils.clip_grad"] = _clip_grad
