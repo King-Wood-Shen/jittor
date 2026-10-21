@@ -274,6 +274,7 @@ def test_npu_class_forward_precedes_generic_rms_norm_fastpath():
 def test_bf16_single_token_sdpa_acl_hook_uses_flash_score_for_matching_heads():
     assert _on_acl(), "JITTOR_TEST_DEVICES=npu but ACL is not active"
     from unittest import mock
+    import numpy as np
     from backends.acl.kernels.ops import flashattention_op as acl_sdpa
 
     rng = np.random.RandomState(5102)
