@@ -34,6 +34,7 @@ namespace {
 struct VarDataOwner {
     PyObject* holder;
     Var* var;
+    Allocation allocation;
 };
 }
 
@@ -46,17 +47,31 @@ static void free_var_data_owner(PyObject* capsule) {
 }
 
 PyObject* new_var_data_owner(VarHolder* vh) {
-    auto owner = new VarDataOwner{GET_OBJ_FROM_RAW_PTR(vh), vh->var};
+    auto owner = std::unique_ptr<VarDataOwner>(
+        new VarDataOwner{GET_OBJ_FROM_RAW_PTR(vh), vh->var});
+    auto* var = owner->var;
+    // Keeping the Var alive is not enough: a later CUDA consumer can migrate
+    // it back to the device and release the host block exported by .data.
+    // Hold that exact allocation independently of the Var's current storage.
+    if (var->mem_ptr) {
+        CHECK(var->allocator->share_with(var->storage_span_bytes(),
+            var->allocation, var->storage_offset_bytes))
+            << "Cannot retain storage exported by Var.data";
+        owner->allocation.ptr = var->mem_ptr;
+        owner->allocation.allocation = var->allocation;
+        owner->allocation.size = var->storage_span_bytes();
+        owner->allocation.allocator = var->allocator;
+    }
     owner->var->own_both_liveness();
     Py_INCREF(owner->holder);
-    auto capsule = PyCapsule_New((void*)owner, "jittor.var_data",
+    auto capsule = PyCapsule_New((void*)owner.get(), "jittor.var_data",
         &free_var_data_owner);
     if (!capsule) {
         owner->var->release_both_liveness();
         Py_DECREF(owner->holder);
-        delete owner;
         return nullptr;
     }
+    owner.release();
     return capsule;
 }
 
@@ -1588,7 +1603,15 @@ ItemData VarHolder::item() {
         // A blocking backend host copy waits for its producer stream.
         sync(false, false);
         var->set_flag(VarFlags::_execution_failed, 0);
-        if (save_mem || _HAS_ACCELERATOR)
+        // An element that shares its storage is read where it lies, below.
+        // Moving it to the host moves its whole storage group -- for a view
+        // `x[0:1]`, all of `x` -- and the next kernel to read `x` moved it
+        // back, with a blocking copy either way: 18.9 us an `x[0:1].item()`
+        // against 7.7 on 1.3, whose managed memory made the move a no-op.
+        // A var of its own still moves: that is the element alone, and every
+        // later read of it is then a host copy rather than a readback.
+        bool in_place = var->share_next && var->mem_ptr && var->allocator->is_cuda();
+        if (save_mem || (_HAS_ACCELERATOR && !in_place))
             migrate_to_cpu(var, runtime_executor().allocator);
     }
     #ifdef HAS_ACCELERATOR
