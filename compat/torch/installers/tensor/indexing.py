@@ -66,6 +66,11 @@ def addcmul(input, tensor1, tensor2, value=1):
     return input + value * (tensor1 * tensor2)
 
 
+def addcmul_(input, tensor1, tensor2, value=1):
+    """Update ``input`` in place with ``value * (tensor1 * tensor2)``."""
+    return input.add_(tensor1 * tensor2, alpha=value)
+
+
 def addcdiv(input, tensor1, tensor2, value=1):
     """Return ``input + value * (tensor1 / tensor2)``."""
     from importlib import import_module as _import_module

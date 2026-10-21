@@ -7,19 +7,16 @@ answered False and ``device_count()`` answered 0 on a machine with eight
 what Transformers, ms-swift and DeepSpeed all do -- was told there was no NPU
 and went to the host.
 
-What is published here is discovery, selection, synchronization, exact ACL RNG
-state, plus the three ``torch_npu`` primitives a Torch model reaches for
-directly. It is not the torch_npu extension: streams and memory statistics
-have their own contracts and are left refusing rather than answered with a
-zero.
+What is published here is discovery, selection and synchronization, plus the
+selected ``torch_npu`` APIs a Torch model reaches for directly. It is not
+the torch_npu extension: streams, RNG state and the memory statistics have
+their own contracts and are left refusing rather than answered with a zero.
 """
 import contextlib
 import types
 
-import numpy as np
 import jittor as jt
 
-from ..context import get_install_context
 from ..fidelity import Fidelity, register_api_bindings
 from ..types import device as TorchDevice
 
@@ -108,84 +105,15 @@ def is_bf16_supported():
 
 
 def manual_seed(seed):
-    """Seed the current native ACL RNG stream without changing CPU state."""
     _require_acl()
     from .core import _normalize_seed
-    value = _normalize_seed(seed, integer=True)
-    jt.core.rng_manual_seed("acl", value, current_device())
+    jt.core.rng_manual_seed("acl", _normalize_seed(seed), current_device())
 
 
 def manual_seed_all(seed):
-    """Seed every visible native ACL RNG stream."""
     _require_acl()
     from .core import _normalize_seed
-    value = _normalize_seed(seed, integer=True)
-    jt.core.rng_manual_seed_all("acl", value)
-
-
-_RNG_STATE_MAGIC = b"JTACL_RNG_1"
-
-
-def _pack_rng_state(device):
-    payload = jt.core.rng_state("acl", int(device)).encode("ascii")
-    owner = get_install_context(jt).target_namespace
-    data = _RNG_STATE_MAGIC + payload
-    return owner.tensor(np.frombuffer(data, dtype=np.uint8).copy(),
-                        dtype=owner.uint8, device="cpu")
-
-
-def _unpack_rng_state(state):
-    from jittor._core.dtypes import dtype_name
-    if not isinstance(state, jt.Var) or dtype_name(state.dtype) != "uint8":
-        raise TypeError("NPU RNG state must be a CPU ByteTensor")
-    if len(state.shape) != 1 or state.device.type != "cpu":
-        raise TypeError("NPU RNG state must be a one-dimensional CPU ByteTensor")
-    raw = state.numpy().tobytes()
-    if not raw.startswith(_RNG_STATE_MAGIC):
-        raise ValueError("not a Jittor ACL RNG state")
-    try:
-        return raw[len(_RNG_STATE_MAGIC):].decode("ascii")
-    except UnicodeDecodeError as exc:
-        raise ValueError("invalid Jittor ACL RNG state encoding") from exc
-
-
-def _random_get_rng_state(device=None):
-    index = _index(device)
-    jt.sync_all(True)
-    return _pack_rng_state(index)
-
-
-def _random_get_rng_state_all():
-    _require_acl()
-    jt.sync_all(True)
-    return [_pack_rng_state(index) for index in range(device_count())]
-
-
-def _random_set_rng_state(state, device=None):
-    payload = _unpack_rng_state(state)
-    index = _index(device)
-    jt.sync_all(True)
-    jt.core.set_rng_state("acl", payload, index)
-
-
-def _random_set_rng_state_all(states):
-    payloads = [_unpack_rng_state(state) for state in states]
-    if len(payloads) != device_count():
-        raise ValueError("NPU RNG state count must match visible devices")
-    jt.sync_all(True)
-    jt.core.set_rng_states("acl", payloads)
-
-
-def _random_initial_seed():
-    return int(jt.core.rng_initial_seed("acl", current_device()))
-
-
-def _random_manual_seed(seed):
-    return manual_seed(seed)
-
-
-def _random_manual_seed_all(seed):
-    return manual_seed_all(seed)
+    jt.core.rng_manual_seed_all("acl", _normalize_seed(seed))
 
 
 def npu_rms_norm(input, weight, epsilon=1e-6):
@@ -212,97 +140,120 @@ def npu_swiglu(input, dim=-1):
     return (gate * jt.sigmoid(gate)) * value
 
 
-def npu_fusion_attention(query, key, value, head_num, input_layout="BSND",
-                         pse=None, padding_mask=None, atten_mask=None, scale=1.0,
-                         keep_prob=1.0, pre_tockens=2147483647,
-                         next_tockens=2147483647, inner_precise=0,
-                         seed=0, offset=0, *, actual_seq_qlen=None,
-                         actual_seq_kvlen=None, sparse_mode=0, **kwargs):
-    """Torch NPU attention semantics using JTorch SDPA tensor operations.
+def npu_fusion_attention(
+    query, key, value, head_num, input_layout, pse=None, padding_mask=None,
+    atten_mask=None, scale=1.0, keep_prob=1.0,
+    pre_tockens=2147483647, next_tokens=2147483647, inner_precise=0,
+    prefix=None, actual_seq_qlen=None, actual_seq_kvlen=None, sparse_mode=0,
+    gen_mask_parallel=True, sync=False, softmax_layout="",
+):
+    """Run the BSND and TND layouts used by Transformers' NPU FA wrapper.
 
-    This compatibility implementation supports the layouts used by
-    Transformers' Ascend FlashAttention adapter. It preserves causal and
-    variable-length boundaries, but does not use a fused CANN kernel.
+    Jittor evaluates the attention graph on ACL; this does not claim to call
+    CANN's fused operator. Unsupported fused-attention features fail loudly.
     """
     _require_acl()
-    import torch
-    import torch.nn.functional as F
-
-    if kwargs:
-        raise TypeError("unsupported npu_fusion_attention options: {}".format(
-            ", ".join(sorted(kwargs))))
-    if pse is not None:
-        raise NotImplementedError("npu_fusion_attention pse is not supported")
-    if padding_mask is not None:
-        raise NotImplementedError("npu_fusion_attention padding_mask is not supported")
-    if atten_mask is not None and int(sparse_mode) not in (2, 3):
-        raise NotImplementedError(
-            "npu_fusion_attention only supports the NPU causal mask modes")
-    if not 0.0 <= float(keep_prob) <= 1.0:
-        raise ValueError("keep_prob must be between zero and one")
-    if float(keep_prob) != 1.0 or int(seed) != 0 or int(offset) != 0:
-        raise NotImplementedError(
-            "npu_fusion_attention seeded dropout is not supported")
-    if int(pre_tockens) != 2147483647 or int(next_tockens) != 2147483647 \
-            or int(inner_precise) != 0:
-        raise NotImplementedError(
-            "npu_fusion_attention local windows and inner_precise are not supported")
     if input_layout not in ("BSND", "TND"):
-        raise NotImplementedError("npu_fusion_attention layout {} is not supported".format(
-            input_layout))
-    if int(sparse_mode) not in (0, 2, 3):
-        raise NotImplementedError("npu_fusion_attention sparse_mode {} is not supported".format(
-            sparse_mode))
+        raise NotImplementedError(
+            "Jittor ACL npu_fusion_attention currently supports BSND and TND")
+    if any(value is not None for value in (pse, padding_mask, prefix)):
+        raise NotImplementedError(
+            "Jittor ACL npu_fusion_attention does not support pse, padding masks, or prefix")
+    if (int(pre_tockens) != 2147483647
+            or int(next_tokens) != 2147483647 or int(inner_precise) != 0
+            or not gen_mask_parallel or sync or softmax_layout):
+        raise NotImplementedError(
+            "Jittor ACL npu_fusion_attention supports only full-window default settings")
+    keep_prob = float(keep_prob)
+    if not 0.0 < keep_prob <= 1.0:
+        raise ValueError("keep_prob must be in (0, 1]")
+    sparse_mode = int(sparse_mode)
+    if sparse_mode not in (0, 2, 3):
+        raise NotImplementedError("unsupported npu_fusion_attention sparse_mode")
 
-    def attend(q, k, v):
-        if q.shape[1] != int(head_num) or k.shape[1] != int(head_num) \
-                or v.shape[1] != int(head_num):
-            raise ValueError("head_num does not match the attention tensor layout")
-        q_len, kv_len = int(q.shape[0]), int(k.shape[0])
-        qh = q.permute(1, 0, 2).unsqueeze(0)
-        kh = k.permute(1, 0, 2).unsqueeze(0)
-        vh = v.permute(1, 0, 2).unsqueeze(0)
-        causal = int(sparse_mode) in (2, 3)
-        options = {"dropout_p": 1.0 - float(keep_prob),
-                   "is_causal": causal and q_len == kv_len,
-                   "scale": float(scale)}
-        if causal and q_len != kv_len:
-            q_pos = torch.arange(q_len, device=q.device)
-            if int(sparse_mode) == 3:
-                q_pos = q_pos + (kv_len - q_len)
-            k_pos = torch.arange(kv_len, device=q.device)
-            options["attn_mask"] = k_pos.unsqueeze(0) <= q_pos.unsqueeze(1)
-            options["is_causal"] = False
-        out = F.scaled_dot_product_attention(qh, kh, vh, **options)
-        return out.squeeze(0).permute(1, 0, 2)
+    rank = 4 if input_layout == "BSND" else 3
+    if any(len(tensor.shape) != rank for tensor in (query, key, value)):
+        raise ValueError("query, key and value must match the selected attention layout")
+    query_heads, head_dim = int(query.shape[-2]), int(query.shape[-1])
+    key_heads, key_dim = int(key.shape[-2]), int(key.shape[-1])
+    if (tuple(key.shape) != tuple(value.shape) or head_dim != key_dim
+            or int(value.shape[-1]) != head_dim):
+        raise ValueError("query, key and value have incompatible attention shapes")
+    if input_layout == "BSND" and int(query.shape[0]) != int(key.shape[0]):
+        raise ValueError("query, key and value batch dimensions must match")
+    if int(head_num) != query_heads:
+        raise ValueError("head_num must equal the query head count")
+    if key_heads <= 0 or query_heads % key_heads:
+        raise ValueError("key/value heads must divide the query head count")
+    causal = sparse_mode in (2, 3)
+
+    def _mask_for(length_q, length_k):
+        if atten_mask is None:
+            return None
+        if str(atten_mask.dtype).lower().rsplit(".", 1)[-1] not in ("bool", "bool_"):
+            raise NotImplementedError(
+                "Jittor ACL npu_fusion_attention currently requires a boolean mask")
+        # torch_npu masks mark blocked positions; SDPA masks mark positions
+        # which participate. Each TND segment starts at local position zero.
+        return ~atten_mask[..., :length_q, :length_k]
+
+    from .nn.attention import scaled_dot_product_attention
+
+    def _run_one(q, k, v, mask):
+        if input_layout == "BSND":
+            q_sdpa, k_sdpa, v_sdpa = (
+                tensor.transpose(1, 2) for tensor in (q, k, v))
+        else:
+            q_sdpa, k_sdpa, v_sdpa = (
+                tensor.unsqueeze(0).transpose(1, 2) for tensor in (q, k, v))
+        output = scaled_dot_product_attention(
+            q_sdpa, k_sdpa, v_sdpa, attn_mask=mask,
+            dropout_p=1.0 - keep_prob, is_causal=causal and mask is None,
+            scale=float(scale), enable_gqa=key_heads != query_heads)
+        if input_layout == "BSND":
+            return output.transpose(1, 2)
+        return output.transpose(1, 2).squeeze(0)
 
     if input_layout == "BSND":
-        if len(query.shape) != 4 or len(key.shape) != 4 or len(value.shape) != 4:
-            raise ValueError("BSND attention expects rank-four tensors")
-        outputs = [attend(query[i], key[i], value[i])
-                   for i in range(int(query.shape[0]))]
-        output = torch.stack(outputs, dim=0)
-        return output, None, None, None
+        length_q, length_k = int(query.shape[1]), int(key.shape[1])
+        if causal and length_q != length_k:
+            raise NotImplementedError(
+                "causal attention requires equal query and key lengths")
+        output = _run_one(query, key, value, _mask_for(length_q, length_k))
+    else:
+        def _ends(values, total, name):
+            if values is None:
+                raise ValueError("TND attention requires %s cumulative lengths" % name)
+            ends = tuple(int(end) for end in values)
+            previous = 0
+            for end in ends:
+                if end <= previous or end > total:
+                    raise ValueError("%s must be strictly increasing cumulative lengths" % name)
+                previous = end
+            if not ends or ends[-1] != total:
+                raise ValueError("%s must end at the corresponding token count" % name)
+            return ends
 
-    if len(query.shape) != 3 or len(key.shape) != 3 or len(value.shape) != 3:
-        raise ValueError("TND attention expects rank-three tensors")
-    if actual_seq_qlen is None or actual_seq_kvlen is None:
-        raise ValueError("TND attention requires actual_seq_qlen and actual_seq_kvlen")
-    q_ends = [int(x) for x in actual_seq_qlen]
-    kv_ends = [int(x) for x in actual_seq_kvlen]
-    if len(q_ends) != len(kv_ends) or not q_ends or q_ends[-1] != query.shape[0] \
-            or kv_ends[-1] != key.shape[0] or value.shape[0] != key.shape[0] \
-            or any(a <= b for a, b in zip(q_ends, [0] + q_ends[:-1])) \
-            or any(a <= b for a, b in zip(kv_ends, [0] + kv_ends[:-1])):
-        raise ValueError("TND sequence boundaries must be increasing cumulative ends")
-    outputs = []
-    q_start = kv_start = 0
-    for q_end, kv_end in zip(q_ends, kv_ends):
-        outputs.append(attend(query[q_start:q_end], key[kv_start:kv_end],
-                              value[kv_start:kv_end]))
-        q_start, kv_start = q_end, kv_end
-    output = torch.cat(outputs, dim=0)
-    return output, None, None, None
+        q_ends = _ends(actual_seq_qlen, int(query.shape[0]), "actual_seq_qlen")
+        k_ends = _ends(actual_seq_kvlen, int(key.shape[0]), "actual_seq_kvlen")
+        if len(q_ends) != len(k_ends):
+            raise ValueError("query and key cumulative lengths must have equal size")
+        outputs = []
+        q_start = k_start = 0
+        for q_end, k_end in zip(q_ends, k_ends):
+            length_q, length_k = q_end - q_start, k_end - k_start
+            if causal and length_q != length_k:
+                raise NotImplementedError(
+                    "causal TND attention requires equal query and key lengths")
+            outputs.append(_run_one(
+                query[q_start:q_end], key[k_start:k_end], value[k_start:k_end],
+                _mask_for(length_q, length_k)))
+            q_start, k_start = q_end, k_end
+        output = jt.concat(outputs, dim=0)
+
+    # Transformers consumes attention_out ([0]); the auxiliary fused-kernel
+    # workspaces are not materialized by this graph implementation.
+    return output, None, None, None, None, None, None
 
 
 def _unsupported(*args, **kw):
@@ -324,9 +275,8 @@ _REFUSED = (
 
 _SUPPORTED = ("is_available", "device_count", "current_device", "set_device",
               "device", "synchronize", "empty_cache", "is_bf16_supported",
-              "manual_seed", "manual_seed_all",
-              "npu_rms_norm", "npu_rotary_mul", "npu_swiglu",
-              "npu_fusion_attention")
+              "manual_seed", "manual_seed_all", "npu_rms_norm",
+              "npu_rotary_mul", "npu_swiglu")
 
 
 def install(ctx):
@@ -337,38 +287,34 @@ def install(ctx):
         setattr(npu, name, globals()[name])
     for name in _REFUSED:
         setattr(npu, name, _unsupported)
-    random_api = types.ModuleType("torch.npu.random")
-    random_api.get_rng_state = _random_get_rng_state
-    random_api.get_rng_state_all = _random_get_rng_state_all
-    random_api.set_rng_state = _random_set_rng_state
-    random_api.set_rng_state_all = _random_set_rng_state_all
-    random_api.initial_seed = _random_initial_seed
-    random_api.manual_seed = _random_manual_seed
-    random_api.manual_seed_all = _random_manual_seed_all
-    npu.random = random_api
-    registry.publish("torch.npu.random", random_api, bind_parent=False, replace=True)
     registry.publish("torch.npu", npu, replace=True)
     target.npu = npu
+
+    from .cuda.api import (
+        _api_cuda_get_rng_state, _api_cuda_get_rng_state_all,
+        _api_cuda_set_rng_state, _api_cuda_set_rng_state_all,
+    )
+    random = types.ModuleType("torch.npu.random")
+    random.get_rng_state = _api_cuda_get_rng_state
+    random.get_rng_state_all = _api_cuda_get_rng_state_all
+    random.set_rng_state = _api_cuda_set_rng_state
+    random.set_rng_state_all = _api_cuda_set_rng_state_all
+    npu.random = random
+    registry.publish("torch.npu.random", random, bind_parent=False)
 
     register_api_bindings(
         npu, "torch.npu",
         ("is_available", "device_count", "current_device", "set_device",
-         "device", "is_bf16_supported"),
+         "device", "is_bf16_supported", "manual_seed", "manual_seed_all"),
         Fidelity.EXACT,
         "Native ACL discovery and selection; the index accepts an int, a "
-        "string, a torch.device or None, as torch's does.")
+        "string, a torch.device or None, as torch's does. Seed APIs reset "
+        "the native ACL stream generators.")
     register_api_bindings(
-        npu, "torch.npu", ("manual_seed", "manual_seed_all"), Fidelity.EXACT,
-        "Seeds the native ACL random streams, current device or all visible "
-        "devices respectively.")
-    register_api_bindings(
-        random_api, "torch.npu.random",
-        ("get_rng_state", "get_rng_state_all", "set_rng_state",
-         "set_rng_state_all", "initial_seed", "manual_seed",
-         "manual_seed_all"),
+        random, "torch.npu.random",
+        ("get_rng_state", "get_rng_state_all", "set_rng_state", "set_rng_state_all"),
         Fidelity.EXACT,
-        "Versioned byte snapshots preserve and restore native ACL seed and "
-        "counter state for the selected device or all visible devices.")
+        "Serializes and restores native ACL stream counter states as CPU byte tensors.")
     register_api_bindings(
         npu, "torch.npu", ("synchronize", "empty_cache"), Fidelity.APPROXIMATE,
         "Submits Jittor's pending work and waits for every device it "
@@ -379,19 +325,14 @@ def install(ctx):
         "Executed as ACL tensor graphs rather than the fused CANN kernels; "
         "npu_rms_norm does not produce the auxiliary reciprocal-norm output.")
     register_api_bindings(
-        npu, "torch.npu", ("npu_fusion_attention",), Fidelity.APPROXIMATE,
-        "BSND and TND attention execute through JTorch SDPA with causal and "
-        "sequence-boundary semantics; no fused CANN kernel or fused-memory "
-        "benefit is provided.")
-    register_api_bindings(
         npu, "torch.npu", _REFUSED, Fidelity.UNIMPLEMENTED,
         "Refused rather than answered: no synthetic device metadata, memory "
         "peaks or streams.")
 
     if not _acl_build():
         return
-    # `import torch_npu` is what a Torch model does before calling primitives
-    # above. Publishing a facade is only safe where no real
+    # `import torch_npu` is what a Torch model does before calling any of the
+    # three primitives above. Publishing a facade is only safe where no real
     # one is loaded -- otherwise the native extension and this would both
     # claim the name and the model would get whichever imported last.
     if registry.get("torch_npu") is not None:
@@ -407,6 +348,8 @@ def install(ctx):
     facade.npu_fusion_attention = npu_fusion_attention
     register_api_bindings(
         facade, "torch_npu",
-        ("npu_rms_norm", "npu_rotary_mul", "npu_swiglu", "npu_fusion_attention"), Fidelity.APPROXIMATE,
-        "The same ACL tensor graphs torch.npu publishes.")
+        ("npu_rms_norm", "npu_rotary_mul", "npu_swiglu",
+         "npu_fusion_attention"), Fidelity.APPROXIMATE,
+        "Runs supported BSND and TND attention as ACL SDPA graphs; this does "
+        "not expose CANN fused-kernel workspaces or fused-kernel performance.")
     registry.publish("torch_npu", facade, bind_parent=False)

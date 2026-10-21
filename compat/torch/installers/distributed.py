@@ -1101,6 +1101,42 @@ def _install_distributed(g, registry=None):
     join_mod.JoinHook = JoinHook
     dist.algorithms.join = join_mod
 
+    # Transformers installs Accelerate's DistributedDataParallelKwargs for
+    # every distributed Trainer. Accelerate imports these optional hooks even
+    # when both comm_hook and comm_wrapper are NO, so publish the import surface
+    # while keeping unsupported hook execution explicit.
+    comm_hooks = _modules.get("torch.distributed.algorithms.ddp_comm_hooks")
+    if comm_hooks is None:
+        comm_hooks = _types.ModuleType(
+            "torch.distributed.algorithms.ddp_comm_hooks")
+        _modules[comm_hooks.__name__] = comm_hooks
+    comm_hooks.__path__ = getattr(comm_hooks, "__path__", [])
+    default_hooks = _modules.get(
+        "torch.distributed.algorithms.ddp_comm_hooks.default_hooks")
+    if default_hooks is None:
+        default_hooks = _types.ModuleType(
+            "torch.distributed.algorithms.ddp_comm_hooks.default_hooks")
+        _modules[default_hooks.__name__] = default_hooks
+    power_sgd = _modules.get(
+        "torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook")
+    if power_sgd is None:
+        power_sgd = _types.ModuleType(
+            "torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook")
+        _modules[power_sgd.__name__] = power_sgd
+
+    def _unsupported_ddp_comm_hook(*args, **kwargs):
+        raise NotImplementedError(
+            "Torch DDP communication hooks are not implemented by the Jittor shim")
+
+    for name in ("fp16_compress_hook", "bf16_compress_hook",
+                 "fp16_compress_wrapper", "bf16_compress_wrapper"):
+        setattr(default_hooks, name, _unsupported_ddp_comm_hook)
+    for name in ("powerSGD_hook", "batched_powerSGD_hook"):
+        setattr(power_sgd, name, _unsupported_ddp_comm_hook)
+    comm_hooks.default_hooks = default_hooks
+    comm_hooks.powerSGD_hook = power_sgd
+    dist.algorithms.ddp_comm_hooks = comm_hooks
+
     dist.device_mesh.DeviceMesh = getattr(dist.device_mesh, "DeviceMesh", _DeviceMesh)
     dist.device_mesh.init_device_mesh = getattr(dist.device_mesh, "init_device_mesh", _init_device_mesh)
     dist.DeviceMesh = getattr(dist, "DeviceMesh", _DeviceMesh)
@@ -1300,6 +1336,15 @@ def _install_distributed(g, registry=None):
     register_api_bindings(join_mod, "torch.distributed.algorithms.join",
         ("Join", "Joinable", "JoinHook"), Fidelity.UNIMPLEMENTED,
         "Import-compatible context and hooks do not implement uneven-input communication")
+    register_api_bindings(default_hooks,
+        "torch.distributed.algorithms.ddp_comm_hooks.default_hooks",
+        ("fp16_compress_hook", "bf16_compress_hook", "fp16_compress_wrapper",
+         "bf16_compress_wrapper"), Fidelity.UNIMPLEMENTED,
+        "Names satisfy optional Accelerate imports; invoking a communication hook raises NotImplementedError")
+    register_api_bindings(power_sgd,
+        "torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook",
+        ("powerSGD_hook", "batched_powerSGD_hook"), Fidelity.UNIMPLEMENTED,
+        "Names satisfy optional Accelerate imports; invoking a communication hook raises NotImplementedError")
     register_api_bindings(checkpoint, "torch.distributed.checkpoint",
         ("load_state_dict", "save_state_dict", "load", "save", "FileSystemReader", "FileSystemWriter"),
         Fidelity.UNIMPLEMENTED, "Checkpoint I/O follows the existing explicit unsupported policy")

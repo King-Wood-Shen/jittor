@@ -96,18 +96,20 @@ def _sync_adam_group_params(pg, *, replacements=()):
 def _torch_optimizer_kind(opt):
     """Which optimizer's state layout `opt` has.
 
-    Identity through the MRO, not a substring of the class name -- `SGDW`
-    and `MyAdamWrapper` used to match rules they do not implement. This
-    answer only describes *state layout* (which keys `state` and
-    `state_dict()` expose), so unlike the FSDP2 one it does not refuse a
-    subclass that overrides step(): such a subclass still keeps the base
-    class's state arrays. It falls back to the lowercased class name so an
-    unrecognised optimizer keeps its previous, harmless behaviour here.
+    Identity through the MRO, not a substring of the class name. External
+    optimizers often reuse names such as ``AdamW`` while implementing a
+    different update and state layout (for example Swift's GaLore AdamW).
+    Keep those on the generic per-parameter state path.
 
     See jittor/compat/optimizer_kinds.py.
     """
-    return (_optimizer_kinds.kind_of(opt)
-            or type(opt).__name__.lower())
+    kind = _optimizer_kinds.kind_of(opt)
+    if kind is not None:
+        return kind
+    cls = type(opt)
+    if cls.__module__ == "torch.optim":
+        return cls.__name__.lower()
+    return cls.__module__ + "." + cls.__name__
 
 
 class _ParamState(dict):
@@ -133,6 +135,21 @@ class _OptState:
                 if p is param:
                     return pg, i
         return None, None
+    def _external_state(self, param, create=True):
+        table = self._opt.__dict__.get("_torch_external_optimizer_state")
+        if table is None:
+            if not create:
+                return {}
+            table = {}
+            self._opt.__dict__["_torch_external_optimizer_state"] = table
+        entry = table.get(id(param))
+        if entry is not None and entry[0] is param:
+            return entry[1]
+        if not create:
+            return {}
+        values = {}
+        table[id(param)] = (param, values)
+        return values
     def _params(self):
         for pg in self._opt.param_groups:
             for p in pg.get("params", []):
@@ -140,6 +157,8 @@ class _OptState:
                 if self.get(p, marker) is not marker:
                     yield p
     def _reset_slot(self, pg, i):
+        param = pg.get("params", [])[i]
+        self._external_state(param).clear()
         _torch_param_steps(pg)[i] = 0
         if _torch_optimizer_kind(self._opt) == "sgd":
             _momentum_initialized_flags(pg)[i] = False
@@ -186,45 +205,46 @@ class _OptState:
             buffers[i] = value
             if kind == "sgd" and key == "momentum_buffer":
                 _momentum_initialized_flags(pg)[i] = True
+            return
+        self._external_state(param)[key] = value
     def get(self, param, default=None):
         pg, i = self._find(param)
         if pg is None:
             return default
         steps = _torch_param_steps(pg)
-        if int(steps[i]) <= 0:
-            return default
         kind = _torch_optimizer_kind(self._opt)
-        if kind in ("adam", "adamw") and "m" in pg and "values" in pg:
-            return _ParamState(self, param, {
-                "exp_avg": pg["m"][i],
-                "exp_avg_sq": pg["values"][i],
-                "step": float(steps[i])})
-        if kind == "sgd":
+        values = dict(self._external_state(param, create=False))
+        if int(steps[i]) > 0 and kind in ("adam", "adamw") and "m" in pg and "values" in pg:
+            values.update({"exp_avg": pg["m"][i],
+                           "exp_avg_sq": pg["values"][i],
+                           "step": float(steps[i])})
+        elif kind == "sgd" and int(steps[i]) > 0:
             # Present exactly while a buffer exists, like torch: independent
             # of the *current* momentum, so pausing momentum keeps it.
             if "values" in pg and _momentum_initialized_flags(pg)[i]:
-                return _ParamState(self, param, {
-                    "momentum_buffer": pg["values"][i]})
-            return default
-        if kind == "rmsprop" and "values" in pg:
-            return _ParamState(self, param, {
-                "square_avg": pg["values"][i],
-                "step": float(steps[i])})
-        if kind == "adan":
-            out = {"step": float(steps[i])}
+                values["momentum_buffer"] = pg["values"][i]
+        elif kind == "rmsprop" and int(steps[i]) > 0 and "values" in pg:
+            values.update({"square_avg": pg["values"][i],
+                           "step": float(steps[i])})
+        elif kind == "adan" and int(steps[i]) > 0:
+            values.setdefault("step", float(steps[i]))
             for source, target in (
                     ("m", "exp_avg"), ("v", "exp_avg_sq"),
                     ("d", "exp_avg_diff"),
                     ("pre_grad", "pre_grad")):
                 if source in pg and i < len(pg[source]):
-                    out[target] = pg[source][i]
-            return _ParamState(self, param, out)
-        return default
+                    values[target] = pg[source][i]
+        elif kind not in ("adam", "adamw", "sgd", "rmsprop", "adan") and int(steps[i]) > 0:
+            values.setdefault("step", float(steps[i]))
+        return _ParamState(self, param, values) if values else default
     def __getitem__(self, param):
         r = self.get(param, None)
-        if r is None:
+        if r is not None:
+            return r
+        pg, i = self._find(param)
+        if pg is None:
             raise KeyError(param)
-        return r
+        return _ParamState(self, param, self._external_state(param))
     def __setitem__(self, param, d):
         pg, i = self._find(param)
         if pg is None:
@@ -323,11 +343,13 @@ def _state_dict_torch(self):
         group["params"] = params
         param_groups.append(group)
     state = {}
+    external = _OptState(self)
     for pg in self.param_groups:
         steps = _torch_param_steps(pg)
         for i, p in enumerate(pg.get("params", [])):
             pid = param_ids.get(id(p))
-            if pid is None or int(steps[i]) <= 0:
+            extra = external._external_state(p, create=False)
+            if pid is None or (int(steps[i]) <= 0 and not extra):
                 continue
             entry = {}
             if kind in ("adam", "adamw"):
@@ -350,9 +372,10 @@ def _state_dict_torch(self):
                     values = pg.get(source)
                     if values is not None and i < len(values):
                         entry[target] = values[i]
+            entry.update(extra)
             if entry:
-                if kind != "sgd":
-                    entry["step"] = g.tensor(float(steps[i]), dtype=g.float32)
+                if kind != "sgd" and int(steps[i]) > 0:
+                    entry.setdefault("step", g.tensor(float(steps[i]), dtype=g.float32))
                 state[pid] = entry
     return {"state": state, "param_groups": param_groups}
 
@@ -414,6 +437,8 @@ def _load_state_dict_torch(self, state_dict):
         load_plan.append((dict(saved_pg), slots))
     # Apply only after the complete input has been validated. This keeps
     # malformed loads atomic instead of leaving half-reset moments.
+    external = _OptState(self)
+    self.__dict__["_torch_external_optimizer_state"] = {}
     for pg in self.param_groups:
         steps = _torch_param_steps(pg)
         for i in range(len(steps)):
@@ -455,6 +480,10 @@ def _load_state_dict_torch(self, state_dict):
                         ("pre_grad", "pre_grad")):
                     if target in st and source in pg and i < len(pg[source]):
                         pg[source][i] = st[target]
+            else:
+                param = pg.get("params", [])[i]
+                external._external_state(param).update(
+                    {key: value for key, value in st.items() if key != "step"})
             steps[i] = step
     self.n_step = max_step
     return None

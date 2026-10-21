@@ -112,6 +112,12 @@
 2026-10-15-cuda-extension-philox
 2026-10-15-flash-attention-training-oracles
 2026-10-16-flash-attention-installed-source-training
+2026-10-20-ms-swift-ascend-fp16
+2026-10-20-ms-swift-ascend-attention
+2026-10-20-ms-swift-ascend-galore
+2026-10-21-ms-swift-ascend-muonclip
+2026-10-21-ms-swift-ascend-world2
+2026-10-21-ms-swift-ascend-inference
 2026-10-16-accelerate-installed-source-protocols
 2026-10-16-accelerate-maintained-cpu-nightly
 2026-10-15-deepspeed-bfloat16-multirank
@@ -193,6 +199,11 @@
 | [Accelerate 新进程续训](2026-10-15-accelerate-fresh-process.md) | CPU/CUDA 新进程恢复、全状态与实际 CUDA FSDP2 通过；CPU 双 rank 上游路径实际为 DDP，配对不授通过 | 2026-10-15 |
 | [Accelerate 完整安装来源与续训](2026-10-16-accelerate-installed-source-protocols.md) | 新 CPU/CUDA 2,516 对数组与完整新进程恢复通过；共同 2 接纳、2 配对阻塞，真实 METADATA/RECORD 与原 wheel 绑定 | 2026-10-16 |
 | [FlashAttention 完整安装来源训练](2026-10-16-flash-attention-installed-source-training.md) | 原 12 CUDA 场景、48 worker 与 936 数值检查通过；共同 12 条因缺 CPU 对应实现阻塞，固定本地构建 artifact 拒绝同步载荷篡改 | 2026-10-16 |
+| [Ascend ms-swift attention 与 packing 公开训练](2026-10-20-ms-swift-ascend-attention.md) | BSND/TND ACL 图正反向与单卡公开 BF16 SFT（packing 开关两值）通过；不等同 CANN 融合算子或性能授级 | 2026-10-20 |
+| [Ascend ms-swift GaLore 公开训练](2026-10-20-ms-swift-ascend-galore.md) | 单卡 BF16 公开 GaLore SFT 六步、外部优化器状态/scheduler NPU 回归通过；其他算法、推理和双卡未验证 | 2026-10-20 |
+| [Ascend ms-swift MuonClip 公开训练](2026-10-21-ms-swift-ascend-muonclip.md) | 单卡 MuonClip BF16 SFT 六步通过；记录并触发低阈值 QK clipping；外部 Muon 与双卡未验证 | 2026-10-21 |
+| [Ascend ms-swift 单机双卡公开训练](2026-10-21-ms-swift-ascend-world2.md) | 双卡 BF16 Swift SFT 两步通过；HCCL、ACL strict fallback 0；自定义 DDP 通信 hook 未实现 | 2026-10-21 |
+| [Ascend ms-swift 公开推理](2026-10-21-ms-swift-ascend-inference.md) | Swift TransformersEngine 单卡推理 4 请求/16 token 通过；真实 logits/KV cache 驻留 NPU，fallback 0 | 2026-10-21 |
 
 | [PEFT / Swift 独立 CPU nightly](2026-10-15-maintained-ecosystem-nightly.md) | 完整依赖与来源校验、两维护门禁本地执行通过；未观测 GitHub scheduled run | 2026-10-15 |
 | [OpenMMLab 安装来源训练](2026-10-15-openmmlab-installed-source-training.md) | MMEngine/MMCV 四条限定 L3；462 数组、三种输入与三步真实 train_step，完整安装来源绑定 | 2026-10-15 |

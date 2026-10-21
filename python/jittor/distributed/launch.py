@@ -267,7 +267,14 @@ def _rank_environment(args, rank, backend, devices, rootinfo, master_addr, maste
             backend_local_rank = 0
     elif devices:
         device = _visible_devices_for_rank(rank, devices)
+        # Keep the CANN runtime and torch_npu visibility aliases in sync.
+        # The parent can expose the full allocation through ASCEND_VISIBLE_DEVICES;
+        # each child must see only its assigned card through both variables.
         env["ASCEND_RT_VISIBLE_DEVICES"] = device
+        env["ASCEND_VISIBLE_DEVICES"] = device
+        # The host shim re-sources its environment before exec. Preserve the
+        # rank mask there too, or that step restores the parent's full list.
+        env["MS_SWIFT_VISIBLE_DEVICES"] = device
         backend_local_rank = 0
     else:
         device = str(rank)
