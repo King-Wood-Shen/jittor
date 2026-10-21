@@ -220,13 +220,21 @@ class _UnbatchedSampler(_Sampler):
 
 
 class _IterableBatchSampler(_Sampler):
-    """Adapt an IterableDataset to the index-shaped loader iterator."""
-    def __init__(self, dataset):
+    """Batch values from an IterableDataset for the shared loader iterator."""
+    def __init__(self, dataset, batch_size=1, drop_last=False):
         self.dataset = dataset
+        self.batch_size = 1 if batch_size is None else int(batch_size)
+        self.drop_last = bool(drop_last)
 
     def __iter__(self):
+        batch = []
         for value in self.dataset:
-            yield [value]
+            batch.append(value)
+            if len(batch) == self.batch_size:
+                yield batch
+                batch = []
+        if batch and not self.drop_last:
+            yield batch
 
 
 class _DistributedSampler(_Sampler):
@@ -450,9 +458,9 @@ class _DataLoader:
             self.sampler = None
         else:
             self.sampler = sampler if sampler is not None else (
-                _IterableBatchSampler(dataset) if self._iterable_dataset else
+                _IterableBatchSampler(dataset, batch_size, drop_last) if self._iterable_dataset else
                 (_RandomSampler(dataset, generator=generator) if shuffle else _SequentialSampler(dataset)))
-            self.batch_sampler = (_IterableBatchSampler(dataset) if self._iterable_dataset else
+            self.batch_sampler = (_IterableBatchSampler(dataset, batch_size, drop_last) if self._iterable_dataset else
                                   (_UnbatchedSampler(self.sampler) if batch_size is None
                                   else _BatchSampler(self.sampler, batch_size, drop_last)))
         self._iterator = None
