@@ -348,7 +348,6 @@ include docs/notes/device-placement.md
 include docs/notes/float32-precision-policy.md
 include docs/notes/index.md
 include docs/notes/mixed-precision.md
-include docs/notes/ms-swift-artifact-storage.md
 include docs/notes/native-fsdp.md
 include docs/notes/native-sharded-checkpoint.md
 include docs/notes/native-tensor-parallel.md
@@ -423,7 +422,6 @@ include docs/results/2026-10-15-maintained-ecosystem-nightly.md
 include docs/results/2026-10-15-metric-state-and-tensordict-oracles.md
 include docs/results/2026-10-15-metrics-tensordict-scorecards.md
 include docs/results/2026-10-15-mpi-bfloat16-process-groups.md
-include docs/results/2026-10-15-ms-swift-artifact-lifecycle.md
 include docs/results/2026-10-15-native-fsdp.md
 include docs/results/2026-10-15-native-multihost-runner.md
 include docs/results/2026-10-15-native-multinode-control-plane.md
@@ -955,9 +953,6 @@ include tools/gate_conclusion_diff.py
 include tools/gate_conclusion_plugin.py
 include tools/lint/check_import_layering.py
 include tools/measure_core_test_balance.py
-include tools/ms_swift_artifact_storage.py
-include tools/ms_swift_storage_smoke.py
-include tools/ms_swift_storage_worker.sh
 include tools/probes/adversarial_device_sweep.py
 include tools/probes/equivalent_form_sweep.py
 include tools/probes/error_message_probe.py

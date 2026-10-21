@@ -10,7 +10,7 @@ Integrated selected, non-equivalent changes from these fetched personal branches
 - `fix/msw-cuda-parallel` — `4c15324d218acc5bbc7ccc663223236a27bb7a3b`
 - `fix/ms-swift-cuda-adaptation-20261020-sync` — `bdc4bc6dd2f3a3b698f76748375785c609843628`
 
-The selected changes cover CUDA cross-entropy target placement, lazy CUDA driver initialization for the Triton bridge, child-process Torch shim setup, TorchScript eager annotation, iterable DataLoader batching, artifact storage isolation/publication, and JTorch CUDA/shared semantics for gradients, indexing, reductions, factories, optimizers, DDP hooks, FSDP2 tied parameters/checkpoint state, and distributed object collectives. The `priority-optimizations.md` reference was included. CPU RNG and unrelated MPS/ROCm changes were excluded. Upstream history and per-branch commit differences were checked before selection; no equivalent implementation was present in the fetched official base.
+The selected changes cover CUDA cross-entropy target placement, lazy CUDA driver initialization for the Triton bridge, child-process Torch shim setup, TorchScript eager annotation, iterable DataLoader batching, and JTorch CUDA/shared semantics for gradients, indexing, reductions, factories, optimizers, DDP hooks, FSDP2 tied parameters/checkpoint state, and distributed object collectives. The `priority-optimizations.md` reference was included. CPU RNG and unrelated MPS/ROCm changes were excluded. Upstream history and per-branch commit differences were checked before selection; no equivalent implementation was present in the fetched official base.
 
 ## Verification
 
@@ -18,7 +18,7 @@ CUDA verification ran serially in Slurm job `111576` and follow-up jobs `111577`
 
 The CUDA probe exercised cross-entropy with CUDA logits and host labels, `eye(out)`, `fill_diagonal` gradients, `fliplr` gradients, `triu` index assignment, float16 logical reductions, out-of-bounds CUDA slicing and zero gradients, second derivatives through `backward(create_graph=True)`, and CUDA parameter updates with StepLR. All reported `use_cuda=true`; fallback delta was zero. A follow-up probe covered iterable batching, map-style `batch_size=None`, and `torch.jit.annotate` with CUDA operations, also with zero fallback. The new CUDA iterable DataLoader regression passed (1 test).
 
-Artifact storage tests passed (10 tests). The lazy Triton driver test passed (1 test). Affected structural/package/API checks passed (59 tests, 50 subtests). `bash tools/check_repo_layout.sh` and `git diff --check` passed.
+The lazy Triton driver test passed (1 test). Affected structural/package/API checks passed (59 tests, 50 subtests). `bash tools/check_repo_layout.sh` and `git diff --check` passed.
 
 The broad `tests/structure` run produced 1513 passed, 6 skipped, 1066 passed subtests, and one failure: `tests/structure/backends/rocm/test_rocm_library_provider.py::test_specs_resolve_only_native_source_and_quote_paths`. That assertion rejects any source path containing `cuda`; the checkout parent directory is named `ms-swift-cuda`, so it classifies the checkout path as a CUDA source. This is a path-dependent test false positive and remains unresolved here because changing the unrelated ROCm structure test is outside this integration scope. The affected structural subset listed above passed.
 
