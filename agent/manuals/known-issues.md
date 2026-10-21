@@ -2371,3 +2371,55 @@ workaround.
   external-backward, no-grad-to-grad, whole-step optimizer transaction and
   checkpoint recompute interactions on real CUDA, without changing numerical
   budgets or disabling valid whole-step capture.
+
+## KI-COMPAT-019: reading published captured gradients can update parameters
+
+- Severity: Critical (a read performs an extra optimizer update).
+- Status: Open at `af60eb185`, confirmed on real CUDA 2026-10-22.
+- Owner: shared Torch capture/gradient publication (algorithms role).
+- Evidence: Slurm114091/114102 retain eager controls and compiled SGD steps.
+  After two actual steps, reading `.grad` alone leaves parameters unchanged, but
+  `.grad.detach().cpu().numpy()` moves them from approximately1.95025/2.95025
+  to1.92575/2.92575, and reading the second gradient moves them again. No step
+  callable runs between the reads; graph replay count remains0. Pure gradient
+  values are also incorrect. Fallback0, actual peaks18432/11264bytes.
+- Root boundary: materializing the published gradient reaches a stateful kept
+  training graph. The exact ownership/publication repair remains open; strongly
+  executing a rematerialization helper is not a read-only solution.
+- Exit condition: original numeric-gradient and read-side-effect probes pass,
+  preserving correct pre-update gradients, real whole-step capture and updates.
+  No further baseline replay is needed before a distinct production fix.
+
+## KI-COMPAT-020: Torch save executes unrelated live graphs
+
+- Severity: High (a valid checkpoint save fails on an unrelated provider).
+- Status: Resolved at `7617793b3`, reviewed2026-10-22.
+- Owner: shared Torch portable serialization.
+- Cause/fix: `_snapshot_tensors` unconditionally called `sync_all`, even with no
+  tensors in the saved object. Materialize only reachable tensors with weak
+  synchronization disabled, batch-fetch host copies without moving sources,
+  and wait for pending copies using an empty-root device barrier.
+- Evidence: retained `8af2342ee` CUDA counterfactual114246 fails metadata-only
+  and good-tensor saves while a failed provider remains alive; the unchanged
+  probe passes after repair. Direct114274 covers five GPU0/1, wide-dtype,
+  lazy/nested and real-failure contracts, peak2560bytes per GPU plus2048 in the
+  isolated child, fallback0. Checkpoint30/core359 and six DDP/FSDP state/hooks/RNG
+  stages pass114273/114275 with allocator and NVML evidence. Only experiment
+  entrypoint omissions were corrected; raw failures remain recorded.
+- Review: reachable-object collection, fetch/callback queues, source residency
+  or synchronous waits change. This does not fix compiled-gradient publication.
+
+## KI-EXEC-017: failed providers are retried as implicit bystanders
+
+- Severity: High (unrelated recovery reads rethrow an earlier execution error).
+- Status: Resolved by worker`7f1f5586`, selected`66c62ed4a`, reviewed2026-10-22.
+- Owner: executor optional-root selection.
+- Cause/fix: optional `top_weak_sync` and `auto_flush` candidates included roots
+  already marked execution-failed. Exclude those optional roots; explicit
+  requests, actual data dependencies and explicit `sync_all` continue to fail.
+- Evidence: Slurm114283 passes51 CUDA direct contracts, zero skips/fallback,
+  parent allocated peak18944bytes and each new child2048bytes. Core356 passes
+  on one GPU with10 policy skips and2 pre-existing xfails. Structure1516 passes
+  with the sole retained ROCm path assertion failure; layout/manifest pass.
+- Review: execution-failure flags or weak/automatic root discovery changes.
+  Full non-reentrant rematerialization remains open under KI-COMPAT-016.

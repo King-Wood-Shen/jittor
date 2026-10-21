@@ -3,8 +3,8 @@
 **Status:** the source-scoped CUDA mechanisms and public reentrant two-rank
 profile below are verified; the complete ms-swift adaptation matrix remains
 unfinished. **Date:** 2026-10-22. **Official base:**
-`e4e2625abf538c737364b71d14cf60a87cd1d290` (`origin/2.0-refactor`).
-**Source PR node:** `c56b4c2bcd0e13ef3757450521424599020b5465`.
+`67cf9af564cdaf378d6292fa856714ad3de42628` (`origin/2.0-refactor`).
+**Source PR node:** `66c62ed4a0a4603bf6126332c09c341f93fc1d36`.
 **Maintainer:** ms-swift CUDA/JTorch integration. **Review when:** the official
 base or a recorded gradient, storage, checkpoint, device or RNG contract changes.
 
@@ -77,6 +77,55 @@ checks pass, with zero fallback and measured peaks 2048/5632 bytes. RNG evidence
 remains bound to `8820c2a11`: six CUDA-ambient methods and seven legacy subtests
 pass with zero fallback and peak 3072 bytes. Their historical results are not
 relabelled as a new full-matrix run.
+
+## Official sync and object-scoped execution continuation
+
+The official `67cf9af56` merge is independently checked at `8af2342ee` in
+Slurm114148: 21 official CUDA methods and44subtests, class predicates across four
+floating dtypes, public any/all across seven dtypes and retained integer truth
+all pass. Private16, GPU1 Copy0 fetch, storage9, optimizer48, checkpoint30,
+dropout-SDPA/CUB real SGD and all six two-rank DDP/FSDP hooks/persistence phases
+pass with zero fallback and actual native/NVML peaks. Two-GPU core359 passes.
+The original reentrant model profile remains evidence at `15d4455f8`.
+
+Private materialization prerequisites selected at `af60eb185` have16 direct
+contracts; their union with checkpoint30 covers the worker's41 plus five FSDP
+contracts. An initial count observer incorrectly expected41 from the16-case
+file; raw failure is retained and no passing tests were repeated. A separate
+real public sum/CUB optimizer interaction makes two updates to66049 elements.
+These prerequisites do not implement defaultFalse checkpointing.
+
+At `7617793b3`, Torch serialization snapshots execute only the saved object's
+tensor dependencies and drain pending fetch copies without adding global roots.
+The unchanged CUDA counterfactual fails both metadata and good-tensor saves at
+`8af2342ee` (114246), then passes at the repair (114273). Five direct guards
+(114274) preserve GPU0/1 residency, float64/int64 and lazy/nested values; explicit
+failed tensors and their real dependencies still raise. Actual parent peaks
+are2560bytes per GPU, with2048bytes in the isolated failure child, fallback0.
+Checkpoint30, dropout-SDPA SGD, core359 and all six DDP/FSDP distributed phases
+(114275) pass with allocator/NVML evidence. The original wrong top-level pytest
+path and omitted experiment helper failures are retained; only unexecuted
+stages were corrected and run. No source/tolerance adjustment was made.
+
+`66c62ed4a` selects only worker7f1's two optional-root failure filters: unrelated
+failed producers are excluded from implicit weak sync/auto_flush, while explicit
+roots, real dependencies and sync_all retain their failures. Its independent
+scope is51 direct CUDA contracts (private16, scheduling11, activation16, FSDP5,
+serialization3), single-GPU core356/10skips/2pre-existingxfails, and measured
+native peaks. Slurm114281/114283 final audit passes; actual parent peak18944bytes and the two
+implicit-failure child peaks2048bytes each, zero fallback. An incorrect count-hook
+argument prevented collection in114281; only that never-executed direct group was
+run after the harness correction. Original failure logs remain available.
+
+All recent structure gates retain the same pre-existing ROCm path assertion:
+1516passed,6skipped,1066subtests,1failure. Layout/manifest/diff checks pass.
+Historical eleven-mode/variant results are not relabelled as a new-SHA full pass.
+Compiled external-backward admission, live hidden trainability and gradient
+materialization side effects remain algorithms-owned. In retained af60 CUDA
+probes114091/114102, numeric reads of published gradients execute extra optimizer
+updates with no intervening step call; getter-only reads and eager controls do
+not. Actual peaks18432/11264bytes, fallback0; failures remain open. DefaultFalse
+owner/lease/RNG/frontend implementation remains options-owned.
 
 ## Public model checkpoint and recovery
 

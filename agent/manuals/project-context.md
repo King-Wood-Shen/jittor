@@ -81,7 +81,7 @@ changes: [2.0 migration notes](../../docs/releases/2.0.md).
 ## CUDA ms-swift continuation
 
 The [source-scoped integration validation](../../docs/results/2026-10-21-ms-swift-cuda-integration.md)
-records the official `e4e2625ab` base and source PR node `c56b4c2bc`, including
+records the official `67cf9af56` base and source PR node `66c62ed4a`, including
 real reentrant two-rank model recovery and measured memory reduction at
 `15d4455f8`. This is
 not completion of the eleven-mode adaptation matrix. Non-reentrant checkpoint
@@ -100,3 +100,9 @@ isolate the run per [environment](environment.md); search
 [known-issues.md](known-issues.md) and the [results index](../../docs/results/index.md)
 for existing evidence; reproduce minimally before editing. Update this page only
 when its current-state summary or a location changes.
+
+Object-scoped Torch save and implicit failed-provider isolation have independent
+CUDA evidence at `7617793b3` and `66c62ed4a`; explicit failed dependencies still
+raise. Compiled gradient numeric reads that execute extra optimizer updates and
+live trainability guards remain algorithms-owned open work (KI-COMPAT-018/019).
+The eleven-mode matrix retains source-specific historical evidence.
