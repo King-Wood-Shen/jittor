@@ -2275,32 +2275,59 @@ workaround.
   device peaks for the same on/off profile. Review when checkpoint semantics or
   the autograd graph boundary changes.
 
-## KI-EXEC-015: a sequence of native CUDA graphs can return another input's gradient
+## KI-EXEC-015: CUDA readback views can outlive their host allocation
 
-- Severity: High (incorrect gradient attribution in a deterministic sequence)
-- Status: Open; observed 2026-10-21 at `0f44abc29bf6bb55b754ff87acb970f35e5e3aa3`
-- Owner: executor / autograd
-- Symptom: `TestGrad.test_random_graph` reaches its final float64 graph
-  (`num_vars=50`, `num_ops=100`, seed 6) and returns `22.66397558` where the
-  numerical and analytic derivative is `4.50707929`. The returned value is the
-  analytic derivative of another input in that graph.
-- Cause: not established. Cross-graph state or cache reuse is suspected: the
-  isolated seed-6 graph, with or without its debug names, agrees with independent
-  forward-mode analytic differentiation to `7.1e-15`, but the original sequence
-  fails even when that test runs alone. These probes executed on CUDA with zero
-  fallback. An official-baseline device comparison has not been performed, so
-  the defect is not conclusively attributed to the baseline or this adaptation.
-- Workaround: none established. An isolated passing graph does not clear the
-  sequence failure or make the full CUDA core gate green.
-- Evidence: on a CUDA compute allocation, run
-  `JITTOR_TEST_DEVICES=cuda JITTOR_TORCH_SHIM=0 PYTHONPATH=python python -m pytest -q tests/autograd/test_grad.py::TestGrad::test_random_graph`.
-  The full CUDA core run recorded 127 native passes and this failure; the
-  warmed single-test reproduction also failed. Four distinct diagnostic cases
-  and their analytic reference remain in unversioned batch state
-  `sol61-20261021/core-gradient-audit/`. No tolerance or general CI rule was
-  relaxed. Bounded public launcher/FSDP results retain their own source and
-  acceptance scope.
-- Exit condition: establish and fix the cross-graph root cause, make the
-  original sequence agree with an independent derivative reference on CUDA
-  with zero fallback, and recheck affected autograd consumers. Review when
-  gradient attribution, graph liveness or executable cache reuse changes.
+- Severity: High (retained NumPy views can read reused storage)
+- Status: Resolved 2026-10-21; independently verified at
+  `a8014bf076d2181ba7a87d7fa9677bd5b4e585bf` on official baseline
+  `9da9be98bc543eacef07532471dd0fecc4205550`.
+- Owner: core storage / readback
+- Symptom: the original five-graph `TestGrad.test_random_graph` sequence reads
+  `22.66397558` instead of `4.50707929` from a retained gradient view. Immediate
+  reads have the correct derivative; a later CUDA consumer migrates the Var and
+  another readback reuses the exported host block. This was not a demonstrated
+  autograd target-mapping defect.
+- Cause and fix: the NumPy capsule retained the Var and its Python holder but
+  not the exact exported allocation. `VarDataOwner` now acquires an allocator
+  reference and releases it independently of the Var's later storage or holder
+  binding. No cache clearing, copied-result workaround or tolerance change is
+  used.
+- Evidence: the original sequence also fails on official `897d9cc61`, and all
+  three new migration/rebind/strided/independent-gradient guards fail there.
+  On the resolved source, Slurm112590 independently passes the original
+  sequence, those three guards and 17 affected CUDA indexing/item cases,
+  without skips and with fallback increment zero. Native allocated peaks of
+  the three processes are 76800, 4096 and 528896 bytes. These are mechanism
+  regression peaks, not model-training memory measurements.
+- Evidence scope: worker `5da3acffb` has 356 CUDA core passes and 1514 structure
+  passes on the earlier official baseline; those broad results are not promoted
+  to the newer combined source. Raw probes, analytic references and failures
+  remain in independent batch state `sol61-20261021`.
+- Review when exported-storage ownership or device migration changes. This
+  resolution does not close activation recomputation or the remaining public
+  training/recovery matrix.
+
+## KI-COMPAT-017: legacy CPU RNG snapshots fail public CUDA checkpoint recovery
+
+- Severity: High (resume stops before the next optimizer update)
+- Status: Open; observed 2026-10-21 at
+  `5da3acffb078096b640dcc8563536984c6c3f9f6`; the relevant parser is unchanged
+  on official `9da9be98b` and the integration source.
+- Owner: native RNG state / Torch compatibility
+- Symptom: public GRPO resume from the retained checkpoint of `2401d4330`
+  rejects its CPU RNG payload before a parameter update. Slurm112585 retains
+  the failed public-entry trace; it is not successful training evidence.
+- Cause: the old payload is `JTCPU1 seed engine`, while
+  `src/runtime/rng_state.cc::parse_state` requires the versioned
+  `JITTOR_RNG_1` backend/device/seed/offset/engine header. Rejecting the old
+  header prevents lossless restoration even when its engine state is usable.
+- Workaround: none established. Replacing the state with an initial seed or
+  omitting RNG restoration does not satisfy checkpoint recovery.
+- Exit condition: add narrowly validated backward-compatible decoding, preserve
+  the encoded CPU stream and CUDA generator independence, retain strict
+  malformed/backend-mismatch checks, and validate the affected public CUDA
+  recovery with real updates, explained loss and actual peak memory. Keep
+  source and evidence attribution separate from historical accepted training.
+- Review when RNG wire formats or checkpoint restoration changes. The shared
+  parser repair belongs to the algorithms role; checkpoint rematerialization
+  owns its separate RNG save/replay interface.
