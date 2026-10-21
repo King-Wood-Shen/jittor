@@ -211,7 +211,22 @@ def _copy_detached_storage(self, value):
     if (tuple(self.shape) != tuple(value.shape)
             or self.dtype != value.dtype):
         return False
+    from jittor._runtime import step_capture
+    if step_capture.active():
+        # The capture logs graph writes and commits them to the original
+        # storage at its boundary. Executing a store here would run part of
+        # the step before that transaction can accept or refuse the graph.
+        return False
     if self.numel():
+        # Establish the destination before a storage-preserving write. A
+        # pending view may already alias a materialized base; graph rebinding
+        # would lose that storage, its overlap guards and its gradient history.
+        if not self._mem_ptr_now:
+            self.sync(False, False)
+        if not self._mem_ptr_now:
+            # A deferred capture may still have no backing storage. Retain its
+            # graph write instead of calling the imperative primitive on null.
+            return False
         # Resolve pending readers (including clone snapshots) before changing
         # bytes. _copy_into owns placement, stream ordering and dense copies.
         _owner.jt.sync_all()
@@ -282,6 +297,13 @@ def _ip(self, value, preserve_storage=False):
         _context = get_install_context(_owner.jt)
         _context.state["tensor_native_api"]["_native_requires_grad"].__set__(target, False)
     return self
+
+
+def _optimizer_update(self, value):
+    # Optimizers write values without building an autograd edge. Reuse the
+    # same storage, pending-reader and version rules as public in-place ops.
+    with _owner.jt.no_grad():
+        return _ip(self, value, preserve_storage=True)
 
 
 def _copy_(self, other, non_blocking=False):
