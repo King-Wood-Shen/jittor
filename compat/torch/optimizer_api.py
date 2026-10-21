@@ -28,11 +28,12 @@ def _init(self, *a, **k):
     reg = get_tensor_state(jt).active_optimizers
     reg[:] = [r for r in reg if r() is not None and r() is not self]
     reg.append(_weakref.ref(self))
-    try:
-        for pg in self.param_groups:
-            pg.setdefault("lr", self.lr)
-    except EXPECTED as exc:
-        swallowed("torch/optimizers.py _init: for pg in self.param_groups:", exc)
+    if not getattr(self, "_torch_custom_optimizer_protocol", False):
+        try:
+            for pg in self.param_groups:
+                pg.setdefault("lr", self.lr)
+        except EXPECTED as exc:
+            swallowed("torch/optimizers.py _init: for pg in self.param_groups:", exc)
     # A gradient belongs to its Tensor, including when it was produced before
     # this optimizer existed. Keep the published objects themselves: clipping,
     # clearing and another optimizer must observe the same gradient storage.
@@ -106,6 +107,8 @@ def _torch_optimizer_kind(opt):
 
     See jittor/compat/optimizer_kinds.py.
     """
+    if getattr(opt, "_torch_custom_optimizer_protocol", False):
+        return "custom"
     return (_optimizer_kinds.kind_of(opt)
             or type(opt).__name__.lower())
 
@@ -262,6 +265,9 @@ class _OptState:
 
 
 def _state_dict_torch(self):
+    if getattr(self, "_torch_custom_optimizer_protocol", False):
+        from .optimizer_protocol import state_dict
+        return state_dict(self)
     _context = get_install_context(jt)
     g = _context.target_namespace
     kind = _torch_optimizer_kind(self)
@@ -358,6 +364,9 @@ def _state_dict_torch(self):
 
 
 def _load_state_dict_torch(self, state_dict):
+    if getattr(self, "_torch_custom_optimizer_protocol", False):
+        from .optimizer_protocol import load_state_dict
+        return load_state_dict(self, state_dict)
     _context = get_install_context(jt)
     _native_load_state_dict = _context.state["optimizer_native_api"]['_native_load_state_dict']
     if not isinstance(state_dict, Mapping) or "param_groups" not in state_dict:
@@ -590,6 +599,8 @@ def _lsd(self, state):
 
 
 def _state_getter(self):
+    if getattr(self, "_torch_custom_optimizer_protocol", False):
+        return self._torch_custom_optimizer_state
     return get_install_context(jt).target_namespace.optim.Optimizer._OptState(self)
 
 
