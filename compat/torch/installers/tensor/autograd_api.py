@@ -194,7 +194,7 @@ def _backward_impl(self, gradient=None, retain_graph=None, create_graph=False, *
     # graph anyway and the second-order backward it was asked for then
     # failed. In the common loss.backward() case both are false, so the
     # graph is still freed.
-    if self.requires_grad and not self._has_gradient_edge():
+    if not self._has_gradient_edge():
         raise RuntimeError("Tensor does not require grad and does not have a grad_fn")
     retain_graph = bool(create_graph) if retain_graph is None else bool(retain_graph)
     # torch's `gradient` is the vector of the vector-Jacobian product:
