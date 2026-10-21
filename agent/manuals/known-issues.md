@@ -2248,3 +2248,57 @@ workaround.
 - Exit condition: extend `files` one package at a time with real fixes (no
   `# type: ignore`, no relaxed configuration); delete the entry when
   `python/jittor` and `backends/` are covered.
+
+
+## KI-COMPAT-016: activation checkpointing executes directly without recomputation
+
+- Severity: Limitation (the public switch does not save activations)
+- Status: Open; reviewed 2026-10-21 at `9534be690cf894bf6d6902afbc0d3b24166a0b1c`
+- Owner: autograd / Torch compatibility
+- Symptom: a public Swift gradient-checkpointing request reaches the Torch
+  checkpoint API, but it does not discard and recompute the forward activations.
+- Cause: `compat/torch/installers/data.py::_checkpoint` explicitly warns and
+  calls the function directly. A core recomputation primitive with captured
+  parameter gradients and RNG replay is still missing.
+- Workaround: disable gradient checkpointing and FSDP activation checkpointing;
+  budget memory for the ordinary forward/backward graph. A warning and valid
+  loss do not establish recomputation or a memory reduction.
+- Evidence: the current `_checkpoint` implementation; the ms-swift optimization
+  audit retained in unversioned batch state `sol61-20261021`. Earlier enable
+  trace failures, cancelled jobs and warning-based support labels are not
+  successful recomputation evidence. No additional algorithm-private retry was
+  used to mask this missing core capability.
+- Exit condition: implement the shared core primitive, verify actual CUDA
+  recomputation, finite correct parameter gradients and RNG replay, and measure
+  device peaks for the same on/off profile. Review when checkpoint semantics or
+  the autograd graph boundary changes.
+
+## KI-EXEC-015: a sequence of native CUDA graphs can return another input's gradient
+
+- Severity: High (incorrect gradient attribution in a deterministic sequence)
+- Status: Open; observed 2026-10-21 at `0f44abc29bf6bb55b754ff87acb970f35e5e3aa3`
+- Owner: executor / autograd
+- Symptom: `TestGrad.test_random_graph` reaches its final float64 graph
+  (`num_vars=50`, `num_ops=100`, seed 6) and returns `22.66397558` where the
+  numerical and analytic derivative is `4.50707929`. The returned value is the
+  analytic derivative of another input in that graph.
+- Cause: not established. Cross-graph state or cache reuse is suspected: the
+  isolated seed-6 graph, with or without its debug names, agrees with independent
+  forward-mode analytic differentiation to `7.1e-15`, but the original sequence
+  fails even when that test runs alone. These probes executed on CUDA with zero
+  fallback. An official-baseline device comparison has not been performed, so
+  the defect is not conclusively attributed to the baseline or this adaptation.
+- Workaround: none established. An isolated passing graph does not clear the
+  sequence failure or make the full CUDA core gate green.
+- Evidence: on a CUDA compute allocation, run
+  `JITTOR_TEST_DEVICES=cuda JITTOR_TORCH_SHIM=0 PYTHONPATH=python python -m pytest -q tests/autograd/test_grad.py::TestGrad::test_random_graph`.
+  The full CUDA core run recorded 127 native passes and this failure; the
+  warmed single-test reproduction also failed. Four distinct diagnostic cases
+  and their analytic reference remain in unversioned batch state
+  `sol61-20261021/core-gradient-audit/`. No tolerance or general CI rule was
+  relaxed. Bounded public launcher/FSDP results retain their own source and
+  acceptance scope.
+- Exit condition: establish and fix the cross-graph root cause, make the
+  original sequence agree with an independent derivative reference on CUDA
+  with zero fallback, and recheck affected autograd consumers. Review when
+  gradient attribution, graph liveness or executable cache reuse changes.
