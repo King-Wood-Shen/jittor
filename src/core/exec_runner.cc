@@ -877,8 +877,12 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
         // and a host-side constant would otherwise go through the host path,
         // migration and all, which a device recording cannot contain.
         if (keep_graph && constants_already_placed(op, is_fused_op, fused_op)) {
-            for (Var* var : op->outputs())
-                var->set_flag(VarFlags::_kept);
+            for (Var* var : op->outputs()) rematerialization_mark_kept(var);
+            if (is_fused_op) {
+                vector<Var*> outputs;
+                for (Var* var : op->outputs()) outputs.push_back(var);
+                finish_fused_outputs(outputs);
+            } else finish_unfused(op, outputs_bk);
             continue;
         }
         // `requested_backend()` and `execution_backend()`, from one read of
@@ -1118,10 +1122,8 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
         }
         if (is_fused_op) {
             propergate_needed_flags(fused_op);
-            if (keep_graph) {
-                for (Var* var : op->outputs()) var->set_flag(VarFlags::_kept);
-                continue;
-            }
+            if (keep_graph)
+                for (Var* var : op->outputs()) rematerialization_mark_kept(var);
             vector<Var*> outputs;
             for (Var* var : op->outputs()) outputs.push_back(var);
             finish_fused_outputs(outputs);
@@ -1130,11 +1132,8 @@ void run_exec_plan(Executor& exe, ExecPlan& plan, FusedOp& fused_op,
         // Leave everything alive and re-runnable; see the `keep_graph` flag
         // and the `_kept` bit it sets, which is what makes a kept graph
         // survive a batch that runs without the flag.
-        if (keep_graph) {
-            for (Var* var : op->outputs())
-                var->set_flag(VarFlags::_kept);
-            continue;
-        }
+        if (keep_graph)
+            for (Var* var : op->outputs()) rematerialization_mark_kept(var);
         finish_unfused(op, outputs_bk);
         } catch (const std::exception& e) {
             // Never with red_color: that mode throws its own "memory is
