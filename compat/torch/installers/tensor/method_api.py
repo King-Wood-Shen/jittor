@@ -1670,6 +1670,31 @@ def _api_add(self, o, alpha=1):
     return _ip(self, self + o * alpha, preserve_storage=True)
 
 
+def _scaled_add_inplace(self, term, value):
+    from numbers import Number
+    from ..core import can_cast
+
+    if not isinstance(value, Number):
+        raise TypeError("value must be a number")
+    result = self + term * value
+    if tuple(result.shape) != tuple(self.shape):
+        raise RuntimeError("in-place output shape cannot expand to the broadcast shape")
+    if not can_cast(result.dtype, self.dtype):
+        raise RuntimeError("result type cannot be cast to the in-place destination dtype")
+    result = _cast_if_needed(result, _jittor_dtype_name(self.dtype))
+    return _ip(self, result, preserve_storage=True)
+
+
+def _api_addcmul(self, tensor1, tensor2, *, value=1):
+    self._check_inplace_autograd()
+    return _scaled_add_inplace(self, tensor1 * tensor2, value)
+
+
+def _api_addcdiv(self, tensor1, tensor2, *, value=1):
+    self._check_inplace_autograd()
+    return _scaled_add_inplace(self, tensor1 / tensor2, value)
+
+
 def _api_sub(self, o, alpha=1):
     return _ip(self, self - o * alpha, preserve_storage=True)
 

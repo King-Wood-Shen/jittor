@@ -8,6 +8,8 @@ from .method_api import (
     _api_fill_diagonal,
     _api_zero,
     _api_add,
+    _api_addcmul,
+    _api_addcdiv,
     _api_sub,
     _api_mul,
     _api_div,
@@ -233,6 +235,8 @@ def _install_tensor_methods(g, Var, _DTYPE_OBJS=None):
     Var.fill_diagonal_ = _api_fill_diagonal
     Var.zero_ = _api_zero
     Var.add_ = _api_add
+    Var.addcmul_ = _api_addcmul
+    Var.addcdiv_ = _api_addcdiv
     Var.sub_ = _api_sub
     Var.mul_ = _api_mul
     Var.div_ = _api_div
@@ -661,5 +665,5 @@ def _install_tensor_methods(g, Var, _DTYPE_OBJS=None):
             setattr(Var, name, implementation)
 
     register_api_bindings(Var, 'torch.Tensor',
-        ('T', '__iadd__', '__isub__', '__imul__', '__itruediv__', '__deepcopy__', '__getitem__', '__hash__', '__invert__', '__ne__', '__reduce__', '__reduce_ex__', '__setitem__', 'add_', 'addmm', 'argwhere', 'as_strided', 'backward', 'baddbmm', 'clamp', 'clamp_', 'clip', 'clip_', 'contiguous', 'copy_', 'cpu', 'cuda', 'cumprod', 'cumsum', 'data', 'data_ptr', 'detach', 'device', 'div_', 'dtype', 'element_size', 'fill_', 'fill_diagonal_', 'get_device', 'grad', 'grad_fn', 'is_complex', 'is_contiguous', 'is_cpu', 'is_cuda', 'is_floating_point', 'is_leaf', 'is_meta', 'is_mps', 'is_nested', 'is_pinned', 'is_signed', 'is_xpu', 'mT', 'mul_', 'narrow', 'ne', 'nelement', 'new_empty', 'new_full', 'new_ones', 'new_tensor', 'new_zeros', 'nonzero', 'norm', 'normal_', 'numpy', 'pin_memory', 'random_', 'requires_grad', 'requires_grad_', 'retain_grad', 'retains_grad', 'set_', 'squeeze', 'storage', 'storage_offset', 'stride', 'sub_', 'tile', 'to', 'tolist', 'type', 'uniform_', 'untyped_storage', 'where', 'zero_') + tuple(_BINARY_APIS.keys() | _CAST_APIS.keys() | _UNARY_INPLACE_APIS.keys()),
+        ('T', '__iadd__', '__isub__', '__imul__', '__itruediv__', '__deepcopy__', '__getitem__', '__hash__', '__invert__', '__ne__', '__reduce__', '__reduce_ex__', '__setitem__', 'add_', 'addcmul_', 'addcdiv_', 'addmm', 'argwhere', 'as_strided', 'backward', 'baddbmm', 'clamp', 'clamp_', 'clip', 'clip_', 'contiguous', 'copy_', 'cpu', 'cuda', 'cumprod', 'cumsum', 'data', 'data_ptr', 'detach', 'device', 'div_', 'dtype', 'element_size', 'fill_', 'fill_diagonal_', 'get_device', 'grad', 'grad_fn', 'is_complex', 'is_contiguous', 'is_cpu', 'is_cuda', 'is_floating_point', 'is_leaf', 'is_meta', 'is_mps', 'is_nested', 'is_pinned', 'is_signed', 'is_xpu', 'mT', 'mul_', 'narrow', 'ne', 'nelement', 'new_empty', 'new_full', 'new_ones', 'new_tensor', 'new_zeros', 'nonzero', 'norm', 'normal_', 'numpy', 'pin_memory', 'random_', 'requires_grad', 'requires_grad_', 'retain_grad', 'retains_grad', 'set_', 'squeeze', 'storage', 'storage_offset', 'stride', 'sub_', 'tile', 'to', 'tolist', 'type', 'uniform_', 'untyped_storage', 'where', 'zero_') + tuple(_BINARY_APIS.keys() | _CAST_APIS.keys() | _UNARY_INPLACE_APIS.keys()),
         Fidelity.APPROXIMATE, 'Tensor operations share the native Var/Op graph and explicit frontend state; unsupported layouts, device capabilities, and retained compatibility approximations remain restricted')
