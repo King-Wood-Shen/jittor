@@ -1695,6 +1695,32 @@ def _api_addcdiv(self, tensor1, tensor2, *, value=1):
     return _scaled_add_inplace(self, tensor1 / tensor2, value)
 
 
+def _api_lerp_inplace(self, end, weight):
+    from numbers import Number
+    from ..core import can_cast
+    from ..numerical.elementwise import lerp
+
+    self._check_inplace_autograd()
+    if not isinstance(end, _NativeVar):
+        raise TypeError("lerp end must be a Tensor")
+    if not (self.is_floating_point() or self.is_complex()):
+        raise RuntimeError("lerp requires floating point or complex tensors")
+    if end.dtype != self.dtype:
+        raise RuntimeError("lerp end must have the same dtype as the destination")
+    if isinstance(weight, _NativeVar):
+        if weight.dtype != self.dtype:
+            raise RuntimeError("lerp weight must have the same dtype as the destination")
+    elif not isinstance(weight, Number):
+        raise TypeError("lerp weight must be a number or Tensor")
+    result = lerp(self, end, weight)
+    if tuple(result.shape) != tuple(self.shape):
+        raise RuntimeError("in-place output shape cannot expand to the broadcast shape")
+    if not can_cast(result.dtype, self.dtype):
+        raise RuntimeError("result type cannot be cast to the in-place destination dtype")
+    result = _cast_if_needed(result, _jittor_dtype_name(self.dtype))
+    return _ip(self, result, preserve_storage=True)
+
+
 def _api_sub(self, o, alpha=1):
     return _ip(self, self - o * alpha, preserve_storage=True)
 
