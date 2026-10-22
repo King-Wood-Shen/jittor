@@ -124,6 +124,9 @@ void Executor::auto_flush() {
     for (auto holder : runtime_holder_state().holders()) {
         auto var = holder->var;
         if (var->_outputs.size() || var->is_finished()) continue;
+        // Recovery work must not implicitly retry a failed, unrelated graph.
+        // Explicit roots and their data dependencies still run normally.
+        if (var->flag(VarFlags::_execution_failed)) continue;
         // The third place a kept graph must not be picked up as a
         // bystander (see `top_weak_sync` and `sync_all`), and the easiest
         // to miss: this fires in the middle of the NEXT call's
@@ -280,6 +283,8 @@ static void top_weak_sync(vector<Var*>& vars) {
         if (epoch.marked(v)) continue;
         if (v->_outputs.size()) continue;
         if (v->is_finished()) continue;
+        // A failed root belongs to its explicit caller, not this batch.
+        if (v->flag(VarFlags::_execution_failed)) continue;
         // A kept graph is run on purpose, by whoever kept it, and never as a
         // bystander of somebody else's sync. Widening a batch with one costs a
         // full re-execution of a graph nobody asked for -- traced on a
@@ -297,6 +302,11 @@ static void top_weak_sync(vector<Var*>& vars) {
         // still collects any unfinished input of what was actually requested,
         // kept or not.
         if (v->flag(VarFlags::_kept)) continue;
+        // A custom backward can hold an input tape only for its gradient.
+        // Like auto_flush, weak sync must not turn that saved holder into a
+        // forward data request. Explicit roots and real input edges still run.
+        Op* producer = v->input();
+        if (producer && producer->flag(OpFlags::_must_stay_pending)) continue;
         vars.push_back(v);
     }
 }
@@ -348,6 +358,7 @@ static bool has_dynamic_inputs(const vector<Var*>& roots) {
     while (!stack.empty()) {
         Op* op = stack.back();
         stack.pop_back();
+        if (op->flag(OpFlags::_no_input_storage)) continue;
         for (auto* input : op->inputs()) {
             if (input->num < 0) return true;
             if (!input->is_finished() && input->input() && !epoch.marked(input->input())) {
@@ -379,12 +390,14 @@ static void resolve_dynamic_inputs(Executor& executor, const vector<Var*>& roots
         }
         if (!seen.insert(op).second) continue;
         pending.emplace_back(op, true);
+        if (op->flag(OpFlags::_no_input_storage)) continue;
         for (auto* input : op->inputs())
             if (!input->is_finished() && input->input())
                 pending.emplace_back(input->input(), false);
     }
     bool changed = false;
     for (auto* op : ordered) {
+        if (op->flag(OpFlags::_no_input_storage)) continue;
         for (auto* input : op->inputs()) {
             if (input->num >= 0) continue;
             executor.run_sync({input}, false, false);

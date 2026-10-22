@@ -678,6 +678,8 @@ include src/core/op.cc
 include src/core/op.h
 include src/core/parallel_compiler.cc
 include src/core/parallel_compiler.h
+include src/core/rematerialization.cc
+include src/core/rematerialization.h
 include src/core/types.h
 include src/core/var.cc
 include src/core/var.h
@@ -850,6 +852,7 @@ include src/runtime/profiler/step_trace.h
 include src/runtime/profiler/vtop.cc
 include src/runtime/random_generator.cc
 include src/runtime/random_generator.h
+include src/runtime/rematerialization_scope.h
 include src/runtime/ring_buffer.cc
 include src/runtime/ring_buffer.h
 include src/runtime/rng_state.cc
@@ -902,6 +905,7 @@ include src/type/cuda_limits.h
 include src/type/floor_divide_compute.h
 include src/type/fp16_compute.h
 include src/type/fp16_op_type.cc
+include src/type/fp_class_compute.h
 include src/type/intrin.h
 include src/type/minmax_compute.h
 include src/type/nano_string.cc

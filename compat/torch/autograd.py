@@ -5,6 +5,7 @@ Function input/output bookkeeping belongs to each native one-shot call context.
 """
 import contextlib
 from contextvars import ContextVar
+from typing import Optional
 import threading
 from collections import deque
 import jittor as jt
@@ -18,7 +19,7 @@ from ..diagnostics import EXPECTED, swallowed
 
 # Keep the Torch create_graph mode visible to custom Function backward calls.
 # Native jt.grad behavior remains unchanged outside a Torch autograd call.
-_backward_create_graph = ContextVar("torch_backward_create_graph", default=None)
+_backward_create_graph: ContextVar[Optional[bool]] = ContextVar("torch_backward_create_graph", default=None)
 
 
 @contextlib.contextmanager
