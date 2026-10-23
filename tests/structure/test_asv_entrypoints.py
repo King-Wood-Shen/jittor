@@ -256,10 +256,12 @@ class TestAsvEntryPoints(unittest.TestCase):
                 parameters = [parameter_values(item) for item in params.elts]
                 for values in itertools.product(*parameters):
                     by_name = dict(zip(names, values))
+                    # ASV serializes each parameter with repr, so strings in
+                    # real benchmark IDs include quotes: ``('jittor', 'cpu', ...)``.
                     benchmark = "%s.%s.time_run(%s)" % (
                         module,
                         cls.name,
-                        ", ".join(map(str, values)),
+                        ", ".join(map(repr, values)),
                     )
                     eligible = (
                         by_name["device"] == "cpu" and by_name.get("backend", "jittor") == "jittor"
