@@ -92,6 +92,8 @@ def test_checkpoint_recomputes_and_matches_input_and_parameter_gradients():
         assert jt.core.backend_fallback_count() == 0
 
 
+@pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
+                    reason="requires a selected ACL device")
 def test_checkpoint_preserves_acl_dropout_rng_state():
     from jittor._runtime.fallback import forbid_backend_fallbacks
     import jittor as jt
