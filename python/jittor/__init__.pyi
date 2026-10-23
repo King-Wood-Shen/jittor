@@ -4638,7 +4638,7 @@ def reindex_reduce(y: Var, op: str, shape: Tuple[_builtins.int, ...], indexes: L
 	                "i3", # Cid
 	            ])'''
 	...
-def copy(x: Var)-> Var:
+def copy(x: Var, preserve_format: bool = False)-> Var:
  ...
 @overload
 def reindex(x: Var, shape: Tuple[_builtins.int, ...], indexes: List[str], overflow_value: _builtins.float=0, overflow_conditions: List[str]=[], extras: List[Var]=[])-> Var:
@@ -8106,7 +8106,7 @@ class Var:
 		                "i3", # Cid
 		            ])'''
 		...
-	def copy(self)-> Var: ...
+	def copy(self, preserve_format: bool = False)-> Var: ...
 	@overload
 	def reindex(self, shape: Tuple[_builtins.int, ...], indexes: List[str], overflow_value: _builtins.float=0, overflow_conditions: List[str]=[], extras: List[Var]=[])-> Var:
 		'''Document:
