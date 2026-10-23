@@ -124,3 +124,30 @@ def test_checkpoint_preserves_acl_dropout_rng_state():
         assert checked.forward_calls == 2
         assert rng_after_backward == rng_after_forward
         assert jt.core.backend_fallback_count() == 0
+
+
+@pytest.mark.skipif(
+    os.environ.get("JITTOR_TEST_DEVICES") != "npu", reason="requires a selected ACL device"
+)
+def test_acl_sharded_checkpoint_accepts_torch_dtype_alias(tmp_path):
+    import jittor as jt
+    from jittor._runtime.fallback import forbid_backend_fallbacks
+    from jittor.distributed import checkpoint
+
+    from jittor.serialization.sharded import TensorShard
+
+    with jt.flag_scope(use_cuda=1, use_acl=1), forbid_backend_fallbacks():
+        value = torch.tensor([0.25, -0.5, 0.75, 1.0], device="npu")
+        assert str(value.dtype).startswith("torch.")
+        assert jt.core.dispatch_context([value])[0] == "acl"
+        shard = TensorShard(value, tuple(value.shape), 0)
+        checkpoint_path = tmp_path / "checkpoint"
+        checkpoint.save({"weight": shard}, checkpoint_path)
+        restored = checkpoint.load(
+            checkpoint_path,
+            tensor_shards={
+                "/weight": TensorShard(torch.zeros_like(value), tuple(value.shape), 0)
+            },
+        )["weight"]
+        torch.testing.assert_close(restored.tensor, value)
+        assert jt.core.backend_fallback_count() == 0

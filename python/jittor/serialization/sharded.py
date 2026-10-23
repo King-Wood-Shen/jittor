@@ -365,7 +365,12 @@ def restore_tree(directory, manifest, global_rank, tensor_shards=None):
                 raise CheckpointError("requested TensorShard global shape mismatch at " + path)
             if isinstance(target.tensor, jt.Var) != spec["native"]:
                 raise CheckpointError("requested TensorShard native/NumPy type mismatch at " + path)
-            target_dtype = str(target.tensor.dtype)
+            if isinstance(target.tensor, jt.Var):
+                from jittor._core.dtypes import dtype_name
+
+                target_dtype = dtype_name(target.tensor.dtype)
+            else:
+                target_dtype = str(target.tensor.dtype)
             if target_dtype != spec["dtype"]:
                 raise CheckpointError("requested TensorShard dtype mismatch at " + path)
             start = target.offset
