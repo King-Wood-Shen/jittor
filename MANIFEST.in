@@ -289,6 +289,7 @@ include backends/rocm/libraries/rocprim/scan.cu
 include backends/rocm/libraries/rocprim/scan.h
 include backends/rocm/runtime/driver.cc
 include docs/_myst_autodoc.py
+include docs/_repo_links.py
 include docs/_static/logo.png
 include docs/api/contrib.md
 include docs/api/core.md
@@ -953,6 +954,7 @@ include tools/docs/check_build.py
 include tools/docs/check_governance.py
 include tools/docs/check_links.py
 include tools/docs/local_doc_builder.py
+include tools/docs/test_repo_links.py
 include tools/gate_budget_report.py
 include tools/gate_conclusion_diff.py
 include tools/gate_conclusion_plugin.py
