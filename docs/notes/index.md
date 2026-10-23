@@ -24,7 +24,6 @@ ms-swift-artifact-storage
 native-zero-optimizer
 native-tensor-parallel
 native-fsdp
-ms-swift-artifact-storage
 ```
 
 ## 按问题索引
