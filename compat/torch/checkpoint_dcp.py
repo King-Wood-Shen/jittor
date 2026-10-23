@@ -52,7 +52,10 @@ def _group(directory, *, allow_singleton=False):
         or int(os.environ.get("SLURM_JOB_NUM_NODES", "1")) != 1
     ):
         raise NotImplementedError("DCP supports one node and an unchanged world only")
-    if native_dist.get_default_store() is None:
+    # A singleton restore performs no cross-rank operation. Registering a
+    # native group only to provide rank/world metadata would create a FileStore
+    # beside the checkpoint reader and mutate an otherwise read-only source.
+    if world > 1 and native_dist.get_default_store() is None:
         rendezvous = Path(os.environ.get("JITTOR_DIST_RENDEZVOUS_DIR", directory))
         if rendezvous.is_symlink():
             raise ValueError("DCP rendezvous directory cannot be a symlink")
