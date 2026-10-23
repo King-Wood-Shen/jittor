@@ -151,6 +151,17 @@ def _check_tree(current, saved, path=""):
             _check_tree(value, saved[index], _pointer(path, index))
 
 
+def _rank_local_root_keys(metadata):
+    """Return root values explicitly stored as per-rank state in the manifest."""
+    records = metadata.get("records")
+    if not records:
+        raise RuntimeError("DCP checkpoint has no rank records")
+    tree = records[0].get("tree", {})
+    if tree.get("kind") != "dict":
+        raise RuntimeError("DCP checkpoint root is not a state dictionary")
+    return {key for key, value in tree.get("items", ()) if value.get("kind") == "rank_local"}
+
+
 def _assign_tree(current, saved):
     if isinstance(current, jt.Var):
         source = _saved_tensor(saved)
@@ -207,6 +218,18 @@ def load(state_dict, *, storage_reader=None, planner=None, **kwargs):
     if metadata["world_size"] != int(dist.get_world_size()):
         raise NotImplementedError("DCP checkpoint world size differs; resharding is unsupported")
     restored = native_checkpoint.load(directory, tensor_shards=_load_targets(state_dict))
-    _check_tree(state_dict, restored)
-    _assign_tree(state_dict, restored)
+    if set(state_dict) != set(restored):
+        raise RuntimeError("DCP state keys changed: /")
+    rank_local = _rank_local_root_keys(metadata)
+    for key, current in state_dict.items():
+        if key not in rank_local:
+            _check_tree(current, restored[key], _pointer("", key))
+    for key, current in state_dict.items():
+        if key in rank_local:
+            # Fresh optimizers have no moments yet. Their state mapping is
+            # intentionally populated from the validated per-rank checkpoint;
+            # the public FSDP optimizer setter performs parameter/FQN checks.
+            state_dict[key] = restored[key]
+        else:
+            state_dict[key] = _assign_tree(current, restored[key])
     return None
