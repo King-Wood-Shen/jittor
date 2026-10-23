@@ -9,8 +9,9 @@ and went to the host.
 
 What is published here is discovery, selection and synchronization, plus the
 selected ``torch_npu`` APIs a Torch model reaches for directly. It is not
-the torch_npu extension: streams, RNG state and the memory statistics have
-their own contracts and are left refusing rather than answered with a zero.
+the torch_npu extension: streams and memory statistics have their own
+contracts and are left refusing rather than answered with a zero. RNG state
+uses Jittor's native ACL stream counters and has a Jittor-specific format.
 """
 import contextlib
 import types
@@ -299,6 +300,10 @@ def install(ctx):
     random.get_rng_state_all = _api_cuda_get_rng_state_all
     random.set_rng_state = _api_cuda_set_rng_state
     random.set_rng_state_all = _api_cuda_set_rng_state_all
+    rng_state_names = ("get_rng_state", "get_rng_state_all",
+                       "set_rng_state", "set_rng_state_all")
+    for name in rng_state_names:
+        setattr(npu, name, getattr(random, name))
     npu.random = random
     registry.publish("torch.npu.random", random, bind_parent=False)
 
@@ -310,6 +315,10 @@ def install(ctx):
         "Native ACL discovery and selection; the index accepts an int, a "
         "string, a torch.device or None, as torch's does. Seed APIs reset "
         "the native ACL stream generators.")
+    register_api_bindings(
+        npu, "torch.npu", rng_state_names, Fidelity.EXACT,
+        "Serializes and restores native ACL stream counter states as CPU byte tensors; "
+        "the state format is native to Jittor.")
     register_api_bindings(
         random, "torch.npu.random",
         ("get_rng_state", "get_rng_state_all", "set_rng_state", "set_rng_state_all"),
