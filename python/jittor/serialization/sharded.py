@@ -104,7 +104,7 @@ def write_rank_state(state, directory, rank, world_size, global_rank):
                 from jittor._core.dtypes import dtype_name
                 dtype = dtype_name(tensor.dtype)
                 backend, device = jt.core.dispatch_context([tensor])
-                if backend not in ("cpu", "cuda"):
+                if backend not in ("cpu", "cuda", "acl"):
                     raise NotImplementedError("checkpoint tensor backend is not validated: " + backend)
                 if dtype == "bfloat16":
                     # Public numpy() exports BF16 numerically as FP32. An

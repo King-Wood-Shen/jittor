@@ -183,11 +183,16 @@ def _rng_snapshot():
     jt.sync_all(True)
     result = {"python": random.getstate(), "numpy": np.random.get_state(),
               "cpu": jt.core.rng_state("cpu"), "cuda": []}
-    if jt.flags.use_cuda:
+    backend_name = jt.compiler.build_config.backend if jt.flags.use_cuda else "cpu"
+    if backend_name == "acl":
+        result["acl"] = jt.core.rng_states("acl")
+    elif backend_name == "cuda":
         backend = jt.compile_extern.get_library("curand", load=True)
         result["cuda"] = [(int(backend.curand_generator_seed(device)),
                            int(backend.curand_generator_offset(device)))
                           for device in range(int(jt.get_device_count()))]
+    elif backend_name != "cpu":
+        raise NotImplementedError("native checkpoint RNG backend: " + backend_name)
     return result
 
 
@@ -195,12 +200,21 @@ def _restore_rng(state):
     # Native setters validate their opaque payloads and preserve independent
     # CPU/device streams. The public helper snapshots current state to roll
     # back RNG on a rejected field before model/optimizer mutation.
-    if bool(state["cuda"]) != bool(jt.flags.use_cuda):
+    backend_name = jt.compiler.build_config.backend if jt.flags.use_cuda else "cpu"
+    if backend_name not in ("cpu", "cuda", "acl"):
+        raise NotImplementedError("native checkpoint RNG backend: " + backend_name)
+    saved_acl = state.get("acl", [])
+    if (bool(state["cuda"]) != (backend_name == "cuda")
+            or bool(saved_acl) != (backend_name == "acl")):
         raise ValueError("checkpoint RNG execution backend mismatch")
+    if saved_acl and len(saved_acl) != int(jt.core.backend_device_count("acl")):
+        raise ValueError("checkpoint ACL RNG device count/backend mismatch")
+    if state["cuda"] and len(state["cuda"]) != int(jt.get_device_count()):
+        raise ValueError("checkpoint CUDA RNG device count/backend mismatch")
     jt.core.set_rng_state("cpu", state["cpu"])
+    if saved_acl:
+        jt.core.set_rng_states("acl", saved_acl)
     if state["cuda"]:
-        if not jt.flags.use_cuda or len(state["cuda"]) != int(jt.get_device_count()):
-            raise ValueError("checkpoint CUDA RNG device count/backend mismatch")
         backend = jt.compile_extern.get_library("curand")
         for device, (seed, offset) in enumerate(state["cuda"]):
             # Earlier checkpoints used the signed seed returned by the legacy
