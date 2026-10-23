@@ -70,6 +70,18 @@ class CoverageAuditTests(unittest.TestCase):
         self.serial = 0
         self.bind_measurements(self.row)
 
+    def test_git_uses_only_the_explicit_checkout_as_safe_directory(self):
+        with mock.patch.object(
+            registry.subprocess, "check_output", return_value="abc\n"
+        ) as run:
+            self.assertEqual(registry.git(self.root, "rev-parse", "HEAD"), "abc")
+        command = run.call_args.args[0]
+        self.assertEqual(
+            command[:5],
+            ["git", "-c", "safe.directory=" + str(self.root), "-C", str(self.root)],
+        )
+        self.assertEqual(command[5:], ["rev-parse", "HEAD"])
+
     def test_deepspeed_engine_gate_is_separate_from_ordinary_model_cases(self):
         row = next(item for item in audit.audit(ROOT)["repos"] if item["repo"] == "deepspeed")
         self.assertEqual(row["registered_cases"], [])
