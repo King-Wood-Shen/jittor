@@ -498,9 +498,12 @@ def _matmul_kernel_dispatch(op, a, b, trans_a, trans_b):
     backend = getattr(getattr(jt.compiler, "build_config", None), "backend", None)
     if backend == "acl":
         amp_reg = int(jt.flags.amp_reg)
-        if (dtype is None and a.dtype == b.dtype
-                and _jittor_dtype_name(a.dtype) == "float32"
-                and not amp_reg & jt.amp_flags.prefer32):
+        if (
+            dtype is None
+            and a.dtype == b.dtype
+            and _jittor_dtype_name(a.dtype) == "float32"
+            and not amp_reg & jt.amp_flags.prefer32
+        ):
             if amp_reg & jt.amp_flags.prefer_bfloat16:
                 dtype = "bfloat16"
             elif amp_reg & jt.amp_flags.prefer16:
