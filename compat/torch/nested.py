@@ -2,10 +2,22 @@
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
 
 import numpy as np
+import sys
 from typing import Any, cast
+
+if sys.version_info >= (3, 8):
+    from typing import Protocol
+else:  # Python 3.7, declared by the core distribution.
+    from typing_extensions import Protocol
 import jittor as jt
 from ..diagnostics import EXPECTED, swallowed
 from .tensor_state import get_tensor_state
+
+
+class _LeafAccumulatorQuery(Protocol):
+    """Runtime-only query exposed by the native VarHolder pybind layer."""
+
+    def _has_leaf_accumulator(self) -> bool: ...
 
 
 class _TorchSize(tuple):
@@ -264,7 +276,7 @@ def _torch_register_leaf(v):
     their result immediately; Var.requires_grad_ also calls this helper later.
     """
     try:
-        if isinstance(v, jt.Var) and v._has_leaf_accumulator():
+        if isinstance(v, jt.Var) and cast(_LeafAccumulatorQuery, v)._has_leaf_accumulator():
             get_tensor_state(jt).leaf_params[id(v)] = v
     except EXPECTED as exc:
         swallowed("torch/nested.py _torch_register_leaf: if isinstance(v, jt.Var) and v.requires_grad:", exc)
