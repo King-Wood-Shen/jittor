@@ -159,8 +159,18 @@ def child_env(extra=None, inherit=True, without_torch_mode=False,
     if extra:
         env.update({key: str(value) for key, value in extra.items()})
     if without_torch_mode:
+        runtime_root = env.get("JITTOR_TORCH_RUNTIME_ROOT")
         for name in TORCH_MODE_VARIABLES:
             env.pop(name, None)
+        if runtime_root:
+            shim_site = os.path.realpath(os.path.join(runtime_root, "site-packages"))
+            path = env.get("PYTHONPATH", "")
+            kept = [part for part in path.split(os.pathsep)
+                    if part and os.path.realpath(part) != shim_site]
+            if kept:
+                env["PYTHONPATH"] = os.pathsep.join(kept)
+            else:
+                env.pop("PYTHONPATH", None)
     if not repo_paths:
         env.pop("PYTHONPATH", None)
         return env

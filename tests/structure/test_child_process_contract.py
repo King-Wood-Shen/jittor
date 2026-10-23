@@ -277,6 +277,43 @@ def test_without_torch_mode_clears_every_variable_that_installs_the_shim():
                 os.environ[name] = value
 
 
+def test_without_torch_mode_removes_deployed_shim_from_child_path(tmp_path, monkeypatch):
+    """Clearing shim flags must also hide the shim installed on PYTHONPATH."""
+    import os
+    import subprocess
+    import sys
+
+    child_process = _child_process_module()
+    runtime = tmp_path / "runtime"
+    shim_site = runtime / "site-packages"
+    shim_torch = shim_site / "torch"
+    shim_torch.mkdir(parents=True)
+    (shim_torch / "__init__.py").write_text("# deployed shim fixture\n")
+    dependency_site = tmp_path / "dependencies"
+    dependency_site.mkdir()
+
+    monkeypatch.setenv("JITTOR_TORCH_RUNTIME_ROOT", str(runtime))
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join((str(shim_site), str(dependency_site))))
+    env = child_process.child_env(without_torch_mode=True)
+    child_path = env["PYTHONPATH"].split(os.pathsep)
+    assert str(shim_site) not in child_path
+    assert str(dependency_site) in child_path
+    assert "JITTOR_TORCH_RUNTIME_ROOT" not in env
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import importlib.util; s=importlib.util.find_spec('torch'); print(s.origin if s else '')",
+        ],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert str(shim_torch) not in result.stdout
+
+
 # --------------------------------------------------------------------------
 # The timeout has to end the whole tree, not just the direct child (9.23).
 # --------------------------------------------------------------------------
