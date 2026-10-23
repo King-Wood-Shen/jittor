@@ -1,7 +1,51 @@
 import os
 from pathlib import Path
+import subprocess
 
 from _helpers.nox_probe import _FakeSession, _load_noxfile
+
+
+def test_cpu_gate_trusts_only_its_checkout_with_isolated_home(monkeypatch, tmp_path):
+    module = _load_noxfile(monkeypatch, tmp_path)
+    session = _FakeSession(tmp_path, "/usr/bin/python3-config")
+    env = module["_cpu_gate_env"](session)
+
+    assert env["HOME"] != os.environ.get("HOME")
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_KEY_0"] == env["GIT_CONFIG_KEY_1"] == "safe.directory"
+    assert env["GIT_CONFIG_VALUE_0"] == ""
+    assert env["GIT_CONFIG_VALUE_1"] == str(module["REPO_ROOT"])
+
+    # Runner/global Git config may contain an allow-all safe.directory entry.
+    # The CPU gate must replace that list before trusting this checkout only.
+    global_config = tmp_path / "global.gitconfig"
+    subprocess.run(
+        ["git", "config", "--file", str(global_config), "--add", "safe.directory", "*"],
+        check=True,
+    )
+    owner_probe = {key: value for key, value in env.items() if value is not None}
+    owner_probe["GIT_CONFIG_GLOBAL"] = str(global_config)
+    owner_probe["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
+
+    trusted = subprocess.run(
+        ["git", "-C", str(module["REPO_ROOT"]), "rev-parse", "--show-toplevel"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=owner_probe,
+    )
+    assert trusted.stdout.strip() == str(module["REPO_ROOT"])
+
+    untrusted_root = tmp_path / "another-repository"
+    subprocess.run(["git", "init", "--quiet", str(untrusted_root)], check=True)
+    untrusted = subprocess.run(
+        ["git", "-C", str(untrusted_root), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        env=owner_probe,
+    )
+    assert untrusted.returncode != 0
+    assert "detected dubious ownership" in untrusted.stderr
 
 
 def test_session_env_uses_the_session_interpreters_python_config(monkeypatch, tmp_path):
@@ -23,10 +67,16 @@ def test_nccl_warms_serially_then_launches_native_and_torch_modes(monkeypatch, t
     module = _load_noxfile(monkeypatch, tmp_path)
     session = _FakeSession(tmp_path, "/usr/bin/python3-config")
     module["nccl"](session)
-    warm = [(i, args, kw) for i, (args, kw) in enumerate(session.calls)
-            if "-c" in args and "probe_library('nccl', load=True)" in str(args)]
-    launch = [(i, args, kw) for i, (args, kw) in enumerate(session.calls)
-              if any(str(arg).endswith("distributed/launch.py") for arg in args)]
+    warm = [
+        (i, args, kw)
+        for i, (args, kw) in enumerate(session.calls)
+        if "-c" in args and "probe_library('nccl', load=True)" in str(args)
+    ]
+    launch = [
+        (i, args, kw)
+        for i, (args, kw) in enumerate(session.calls)
+        if any(str(arg).endswith("distributed/launch.py") for arg in args)
+    ]
     assert len(warm) == len(launch) == 2
     assert max(i for i, _, _ in warm) < min(i for i, _, _ in launch)
     assert [kw["env"]["CUDA_VISIBLE_DEVICES"] for _, _, kw in warm] == ["3", "5"]
@@ -49,8 +99,11 @@ def test_nccl_target_overrides_preserve_pytest_flags_and_choose_their_mode(monke
         session = _FakeSession(tmp_path, "/usr/bin/python3-config")
         session.posargs = (target + "::selected_case", "-k", "selection", "-q")
         module["nccl"](session)
-        launch = [(args, kw) for args, kw in session.calls
-                  if any(str(arg).endswith("distributed/launch.py") for arg in args)]
+        launch = [
+            (args, kw)
+            for args, kw in session.calls
+            if any(str(arg).endswith("distributed/launch.py") for arg in args)
+        ]
         assert len(launch) == 1
         args, kw = launch[0]
         assert args[-4:] == session.posargs
@@ -190,8 +243,7 @@ def test_gate_workers_respect_a_smaller_cgroup_quota(monkeypatch, tmp_path):
     assert module["_runtime_gate_workers"]() == 1
 
 
-def test_gate_workers_keep_the_configured_count_when_quota_is_sufficient(
-        monkeypatch, tmp_path):
+def test_gate_workers_keep_the_configured_count_when_quota_is_sufficient(monkeypatch, tmp_path):
     module = _load_noxfile(monkeypatch, tmp_path)
     module["_runtime_gate_workers"].__globals__["GATE_WORKERS"] = 4
     module["_runtime_gate_workers"].__globals__["effective_cpu_count"] = lambda: 8
@@ -199,8 +251,7 @@ def test_gate_workers_keep_the_configured_count_when_quota_is_sufficient(
     assert module["_runtime_gate_workers"]() == 4
 
 
-def test_smoke_budget_log_reports_actual_and_configured_workers(
-        monkeypatch, tmp_path):
+def test_smoke_budget_log_reports_actual_and_configured_workers(monkeypatch, tmp_path):
     module = _load_noxfile(monkeypatch, tmp_path)
     module["_enforce_smoke_budget"].__globals__["GATE_WORKERS"] = 4
     module["_enforce_smoke_budget"].__globals__["budget_report"] = (
@@ -212,7 +263,8 @@ def test_smoke_budget_log_reports_actual_and_configured_workers(
             "configured_workers": configured_workers,
             "effective_cpus": 1,
             "threads_per_worker": 1,
-        })
+        }
+    )
     session = _FakeSession(tmp_path, "/usr/bin/python3-config")
 
     module["_enforce_smoke_budget"](session, workers=1)
