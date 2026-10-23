@@ -19,7 +19,13 @@ ROOT = Path(__file__).resolve().parents[4]
 
 
 def git(root, *args):
-    return subprocess.check_output(["git", "-C", str(root)] + list(args), text=True).strip()
+    # Nox isolates HOME, so checkout's global safe.directory entry is absent
+    # in child audit processes. Trust only the exact repository this call was
+    # asked to inspect; never widen Git's safe-directory policy globally.
+    return subprocess.check_output(
+        ["git", "-c", "safe.directory=" + str(root), "-C", str(root)] + list(args),
+        text=True,
+    ).strip()
 
 
 def digest(path):
