@@ -1163,6 +1163,7 @@ def structure(session):
         PYTEST,
         PYTEST_TIMEOUT,
         SETUPTOOLS,
+        ASV,
         "astunparse==1.6.3",
         JUPYTEXT,
         NBFORMAT,
