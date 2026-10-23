@@ -1,8 +1,11 @@
 """Custom Module state conversion and differentiable scalar accumulation."""
+import os
 import operator
 
 import numpy as np
+import pytest
 import torch
+import jittor as jt
 
 from _helpers.device_types import instantiate_device_type_tests
 
@@ -121,3 +124,24 @@ class TestCustomModuleState:
 
 
 instantiate_device_type_tests(TestCustomModuleState, globals(), only_for=("cpu", "cuda"))
+
+
+@pytest.mark.skipif(os.environ.get("JITTOR_TEST_DEVICES") != "npu",
+                    reason="requires a selected ACL device")
+def test_npu_frozen_augmented_arithmetic_stays_frozen():
+    """A no-grad Swift log accumulator stays frozen during in-place reset."""
+    assert bool(getattr(jt.compiler, "has_acl", 0)) and bool(jt.flags.use_cuda)
+    fallback_start = jt.core.backend_fallback_count()
+    cases = ((operator.iadd, 4.0),
+             (operator.isub, 0.0),
+             (operator.imul, 4.0),
+             (operator.itruediv, 1.0))
+    for operation, expected in cases:
+        accumulator = torch.tensor(2.0, device="npu")
+        identity = accumulator
+        operation(accumulator, accumulator)
+        assert accumulator is identity
+        assert not accumulator.requires_grad
+        np.testing.assert_allclose(accumulator.cpu().numpy(), expected, rtol=1e-6)
+    torch.npu.synchronize()
+    assert jt.core.backend_fallback_count() == fallback_start == 0
