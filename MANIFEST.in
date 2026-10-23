@@ -289,6 +289,7 @@ include backends/rocm/libraries/rocprim/scan.cu
 include backends/rocm/libraries/rocprim/scan.h
 include backends/rocm/runtime/driver.cc
 include docs/_myst_autodoc.py
+include docs/_repo_links.py
 include docs/_static/logo.png
 include docs/api/contrib.md
 include docs/api/core.md
@@ -474,6 +475,12 @@ include docs/results/2026-10-16-transformers-main-source-training.md
 include docs/results/2026-10-16-transformers-maintained-cpu-nightly.md
 include docs/results/2026-10-16-verl-maintained-cpu-nightly.md
 include docs/results/2026-10-19-ms-swift-ascend-algorithm-training.md
+include docs/results/2026-10-20-ms-swift-ascend-attention.md
+include docs/results/2026-10-20-ms-swift-ascend-fp16.md
+include docs/results/2026-10-20-ms-swift-ascend-galore.md
+include docs/results/2026-10-21-ms-swift-ascend-inference.md
+include docs/results/2026-10-21-ms-swift-ascend-muonclip.md
+include docs/results/2026-10-21-ms-swift-ascend-world2.md
 include docs/results/index.md
 include docs/tutorials/index.md
 include examples/README.md
@@ -948,6 +955,7 @@ include tools/docs/check_build.py
 include tools/docs/check_governance.py
 include tools/docs/check_links.py
 include tools/docs/local_doc_builder.py
+include tools/docs/test_repo_links.py
 include tools/gate_budget_report.py
 include tools/gate_conclusion_diff.py
 include tools/gate_conclusion_plugin.py
