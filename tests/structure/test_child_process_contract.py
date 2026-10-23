@@ -280,8 +280,6 @@ def test_without_torch_mode_clears_every_variable_that_installs_the_shim():
 def test_without_torch_mode_removes_deployed_shim_from_child_path(tmp_path, monkeypatch):
     """Clearing shim flags must also hide the shim installed on PYTHONPATH."""
     import os
-    import subprocess
-    import sys
 
     child_process = _child_process_module()
     runtime = tmp_path / "runtime"
@@ -300,16 +298,15 @@ def test_without_torch_mode_removes_deployed_shim_from_child_path(tmp_path, monk
     assert str(dependency_site) in child_path
     assert "JITTOR_TORCH_RUNTIME_ROOT" not in env
 
-    result = subprocess.run(
+    result = child_process.run_python_child(
         [
-            sys.executable,
             "-c",
             "import importlib.util; s=importlib.util.find_spec('torch'); print(s.origin if s else '')",
         ],
         env=env,
+        inherit=False,
         check=True,
-        capture_output=True,
-        text=True,
+        without_torch_mode=True,
     )
     assert str(shim_torch) not in result.stdout
 
