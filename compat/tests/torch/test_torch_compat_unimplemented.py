@@ -886,28 +886,30 @@ class TestLibraryOpcheck(StubPolicyBase):
 
 
 class TestDistributedStubs(StubPolicyBase):
-    """dcp save/load, subgroups, stores and DTensor were identities."""
+    """Unsupported distributed operations must never silently claim success."""
 
     def _dist(self):
         import sys
         return sys.modules["torch.distributed"]
 
-    def test_dcp_save_is_refused(self):
+    def test_dcp_save_requires_a_distributed_world(self):
         import sys
         dcp = sys.modules["torch.distributed.checkpoint"]
-        self.assertRefuses(lambda: dcp.save({"w": jt.ones(2)}),
-                           "checkpoint.save", "discarding the checkpoint")
+        with self.assertRaises((RuntimeError, NotImplementedError)):
+            dcp.save({"w": jt.ones(2)}, storage_writer=dcp.FileSystemWriter("unused"))
 
-    def test_dcp_load_is_refused(self):
+    def test_dcp_load_requires_a_distributed_world(self):
         import sys
         dcp = sys.modules["torch.distributed.checkpoint"]
-        self.assertRefuses(lambda: dcp.load({"w": jt.ones(2)}),
-                           "checkpoint.load")
+        with self.assertRaises((RuntimeError, NotImplementedError)):
+            dcp.load({"w": jt.ones(2)}, storage_reader=dcp.FileSystemReader("unused"))
 
-    def test_dcp_save_stub_fallback(self):
+    def test_dcp_save_never_uses_the_permissive_stub(self):
         import sys
         dcp = sys.modules["torch.distributed.checkpoint"]
-        self.assertStubFallback(lambda: dcp.save({"w": jt.ones(2)}))
+        stub_policy.set_allow_stub(True)
+        with self.assertRaises((RuntimeError, NotImplementedError)):
+            dcp.save({"w": jt.ones(2)}, storage_writer=dcp.FileSystemWriter("unused"))
 
     def test_single_rank_store_still_works(self):
         # One rank has nobody to meet, so a per-process dict IS a correct store.

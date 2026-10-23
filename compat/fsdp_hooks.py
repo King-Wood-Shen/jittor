@@ -64,8 +64,10 @@ REQUIRED = (
     "_execute_with_true_fsdp",
     # installers/distributed.py, from the distributed-checkpoint state dict.
     "_load_full_state_dict",
+    "_load_sharded_state_dict",
     "_get_full_state_dict",
     "_optimizer_checkpoint_parameter_names",
+    "_dcp_shard_descriptor",
     "refresh_optimizer_fsdp_params",
     "_gather_optimizer_state_dict",
     "_shard_optimizer_state_dict",
@@ -81,14 +83,14 @@ def register(implementation):
     install time, because a parameter can carry an FSDP marker in a process
     where the torch shim's installers never ran.
     """
-    missing = [name for name in REQUIRED
-               if not callable(getattr(implementation, name, None))]
+    missing = [name for name in REQUIRED if not callable(getattr(implementation, name, None))]
     if missing:
         raise TypeError(
             "%r cannot serve as the FSDP provider: missing %s. The layers "
             "below fsdp2 call exactly the names in fsdp_hooks.REQUIRED; if one "
             "of them was renamed, both sides have to move together."
-            % (implementation, ", ".join(missing)))
+            % (implementation, ", ".join(missing))
+        )
     global _provider
     _provider = implementation
     return implementation

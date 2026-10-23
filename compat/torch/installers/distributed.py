@@ -19,6 +19,12 @@ from ..checkpoint_state import (
     get_optimizer_state_dict, set_optimizer_state_dict,
     get_model_state_dict, set_model_state_dict, get_state_dict, set_state_dict,
 )
+from ..checkpoint_dcp import (
+    DefaultSavePlanner,
+    DefaultLoadPlanner,
+    save as _dcp_save,
+    load as _dcp_load,
+)
 from ..fidelity import Fidelity, register_api_bindings
 from ...diagnostics import EXPECTED, swallowed
 from ...transaction import set_env, set_flag
@@ -974,27 +980,11 @@ def _api_checkpoint_save_state_dict(*args, **kwargs):
 
 
 def _api_checkpoint_load(*args, **kwargs):
-    return _stub_unimplemented('torch.distributed.checkpoint.load', _dcp_load_effect, _dcp_hint, stub_result=None)
+    return _dcp_load(*args, **kwargs)
 
 
 def _api_checkpoint_save(*args, **kwargs):
-    return _stub_unimplemented('torch.distributed.checkpoint.save', _dcp_save_effect, _dcp_hint, stub_result=None)
-
-
-class DefaultSavePlanner:
-    """Import boundary for callers using FULL, rather than sharded, files."""
-
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError(
-            "torch.distributed.checkpoint.default_planner.DefaultSavePlanner: "
-            "sharded checkpoint planning is not implemented; use FULL state dicts and torch.save")
-
-
-class DefaultLoadPlanner:
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError(
-            "torch.distributed.checkpoint.default_planner.DefaultLoadPlanner: "
-            "sharded checkpoint planning is not implemented; use FULL state dicts and torch.load")
+    return _dcp_save(*args, **kwargs)
 
 
 def _api_checkpoint_fs_write_item(*args, **kwargs):
@@ -1003,8 +993,6 @@ def _api_checkpoint_fs_write_item(*args, **kwargs):
 
 _api_checkpoint_load_state_dict._jittor_unimplemented = 'torch.distributed.checkpoint.load_state_dict'
 _api_checkpoint_save_state_dict._jittor_unimplemented = 'torch.distributed.checkpoint.save_state_dict'
-_api_checkpoint_load._jittor_unimplemented = 'torch.distributed.checkpoint.load'
-_api_checkpoint_save._jittor_unimplemented = 'torch.distributed.checkpoint.save'
 _api_checkpoint_fs_write_item._jittor_unimplemented = 'torch.distributed.checkpoint.filesystem._write_item'
 
 def _install_distributed(g, registry=None):
@@ -1225,18 +1213,15 @@ def _install_distributed(g, registry=None):
     checkpoint.__path__ = getattr(checkpoint, "__path__", [])
     checkpoint.FileSystemReader = FileSystemReader
     checkpoint.FileSystemWriter = FileSystemWriter
-    # torch.distributed.checkpoint save/load were the identity: dcp.save()
-    # wrote nothing and returned successfully, so a sharded checkpoint was
-    # silently never persisted and dcp.load() silently left the model at its
-    # current weights. Refuse instead of losing the run.
+    # Legacy save_state_dict/load_state_dict and planner item hooks remain
+    # explicit boundaries; the modern save/load route supports same-world
+    # rank-local FSDP2 files with validated metadata.
     checkpoint.load_state_dict = _api_checkpoint_load_state_dict
     _record_unimplemented('torch.distributed.checkpoint.load_state_dict', _dcp_load_effect, _dcp_hint)
     checkpoint.save_state_dict = _api_checkpoint_save_state_dict
     _record_unimplemented('torch.distributed.checkpoint.save_state_dict', _dcp_save_effect, _dcp_hint)
     checkpoint.load = _api_checkpoint_load
-    _record_unimplemented('torch.distributed.checkpoint.load', _dcp_load_effect, _dcp_hint)
     checkpoint.save = _api_checkpoint_save
-    _record_unimplemented('torch.distributed.checkpoint.save', _dcp_save_effect, _dcp_hint)
     checkpoint_sd = _types.ModuleType("torch.distributed.checkpoint.state_dict")
     checkpoint_sd.StateDictOptions = StateDictOptions
     checkpoint_sd.get_model_state_dict = _get_model_state_dict
@@ -1248,9 +1233,6 @@ def _install_distributed(g, registry=None):
     checkpoint_planner = _types.ModuleType("torch.distributed.checkpoint.default_planner")
     checkpoint_planner.DefaultSavePlanner = DefaultSavePlanner
     checkpoint_planner.DefaultLoadPlanner = DefaultLoadPlanner
-    for name in ("DefaultSavePlanner", "DefaultLoadPlanner"):
-        _record_unimplemented("torch.distributed.checkpoint.default_planner." + name,
-                              "plan no sharded checkpoint reads or writes", _dcp_hint)
     checkpoint_fs = _types.ModuleType("torch.distributed.checkpoint.filesystem")
     checkpoint_fs.FileSystemReader = FileSystemReader
     checkpoint_fs.FileSystemWriter = FileSystemWriter
@@ -1348,11 +1330,14 @@ def _install_distributed(g, registry=None):
         ("powerSGD_hook", "batched_powerSGD_hook"), Fidelity.UNIMPLEMENTED,
         "Names satisfy optional Accelerate imports; invoking a communication hook raises NotImplementedError")
     register_api_bindings(checkpoint, "torch.distributed.checkpoint",
-        ("load_state_dict", "save_state_dict", "load", "save", "FileSystemReader", "FileSystemWriter"),
-        Fidelity.UNIMPLEMENTED, "Checkpoint I/O follows the existing explicit unsupported policy")
+        ("load_state_dict", "save_state_dict"), Fidelity.UNIMPLEMENTED,
+        "Legacy DCP I/O remains an explicit unsupported boundary")
+    register_api_bindings(checkpoint, "torch.distributed.checkpoint",
+        ("load", "save", "FileSystemReader", "FileSystemWriter"), Fidelity.APPROXIMATE,
+        "Same-world rank-local FSDP2 files with per-rank SHA and shard-shape validation; no resharding")
     register_api_bindings(checkpoint_planner, "torch.distributed.checkpoint.default_planner",
-        ("DefaultSavePlanner", "DefaultLoadPlanner"), Fidelity.UNIMPLEMENTED,
-        "Import-compatible names; construction refuses unavailable sharded checkpoint planning")
+        ("DefaultSavePlanner", "DefaultLoadPlanner"), Fidelity.APPROXIMATE,
+        "Same-world rank-local FSDP2 planning only; custom plans unsupported")
     register_api_bindings(checkpoint_sd, "torch.distributed.checkpoint.state_dict",
         ("StateDictOptions", "get_model_state_dict", "set_model_state_dict", "get_state_dict", "set_state_dict",
          "get_optimizer_state_dict", "set_optimizer_state_dict"),

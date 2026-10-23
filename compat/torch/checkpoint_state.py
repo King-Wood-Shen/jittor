@@ -20,6 +20,7 @@ def _torch():
 def _options(options):
     if options is None:
         from .installers.distributed import StateDictOptions
+
         options = StateDictOptions()
     if options.broadcast_from_rank0 and not options.full_state_dict:
         raise ValueError("broadcast_from_rank0 requires full_state_dict=True")
@@ -29,8 +30,10 @@ def _options(options):
 def _optimizer_load_options(options):
     options = _options(options)
     if options.full_state_dict and options.flatten_optimizer_state_dict:
-        raise NotImplementedError("loading full_state_dict with flatten_optimizer_state_dict "
-                                  "is not supported; use either option separately")
+        raise NotImplementedError(
+            "loading full_state_dict with flatten_optimizer_state_dict "
+            "is not supported; use either option separately"
+        )
     return options
 
 
@@ -63,8 +66,9 @@ def _offload_to_cpu(value):
 
 def _fsdp(model):
     provider = fsdp_hooks.provider()
-    if provider is not None and any(getattr(child, "_is_fsdp_module", False)
-                                    for child in model.modules()):
+    if provider is not None and any(
+        getattr(child, "_is_fsdp_module", False) for child in model.modules()
+    ):
         return provider
     return None
 
@@ -90,9 +94,11 @@ def _parameter_names(model):
 def _parameter_aliases(model):
     """Resolve every public alias through the native parameter traversal."""
     names = _parameter_names(model)
-    aliases = {name: names[id(parameter)] for name, parameter in
-               _unwrapped_model(model).named_parameters(remove_duplicate=False)
-               if id(parameter) in names}
+    aliases = {
+        name: names[id(parameter)]
+        for name, parameter in _unwrapped_model(model).named_parameters(remove_duplicate=False)
+        if id(parameter) in names
+    }
     aliases.update((name, name) for name in names.values())
     return aliases
 
@@ -100,11 +106,14 @@ def _parameter_aliases(model):
 def _submodule_prefixes(model, submodules):
     if not submodules:
         return ()
-    warnings.warn("Getting submodule-only checkpoint state is deprecated; "
-                  "filter the returned state dictionary instead.", FutureWarning, stacklevel=3)
+    warnings.warn(
+        "Getting submodule-only checkpoint state is deprecated; "
+        "filter the returned state dictionary instead.",
+        FutureWarning,
+        stacklevel=3,
+    )
     selected = {id(module) for module in submodules}
-    return tuple(name + "." for name, module in model.named_modules()
-                 if id(module) in selected)
+    return tuple(name + "." for name, module in model.named_modules() if id(module) in selected)
 
 
 def _normalize_optimizer_aliases(state, model):
@@ -121,7 +130,7 @@ def _normalize_optimizer_aliases(state, model):
                 for name in prefixes:
                     prefix = section + name + "."
                     if key.startswith(prefix):
-                        normalized = section + aliases[name] + "." + key[len(prefix):]
+                        normalized = section + aliases[name] + "." + key[len(prefix) :]
                         break
             if normalized in result:
                 raise ValueError("duplicate optimizer checkpoint parameter alias: " + normalized)
@@ -167,12 +176,14 @@ def _initialize(optimizer):
 
 def _flatten(state):
     result = {}
+
     def visit(value, prefix):
         if isinstance(value, Mapping):
             for key, item in value.items():
                 visit(item, prefix + "." + str(key))
         else:
             result[prefix] = value
+
     for name, fields in state["state"].items():
         visit(fields, "state." + name)
     for group in state["param_groups"]:
@@ -196,15 +207,17 @@ def _unflatten(state, model, optimizers):
                 group_prefix = "param_groups." + name + "."
                 for key, value in state.items():
                     if key.startswith(prefix):
-                        path = key[len(prefix):].split(".")
+                        path = key[len(prefix) :].split(".")
                         target = fields
                         for part in path[:-1]:
                             target = target.setdefault(part, {})
                         target[path[-1]] = value
                     elif key.startswith(group_prefix):
-                        field = key[len(group_prefix):]
+                        field = key[len(group_prefix) :]
                         if field in loaded and loaded[field] != value:
-                            raise ValueError("inconsistent optimizer parameter-group option: " + field)
+                            raise ValueError(
+                                "inconsistent optimizer parameter-group option: " + field
+                            )
                         loaded[field] = value
                 if fields:
                     result["state"][name] = fields
@@ -217,16 +230,24 @@ def get_model_state_dict(model, *, submodules=None, options=None):
     model = _unwrapped_model(model)
     prefixes = _submodule_prefixes(model, submodules)
     provider = _fsdp(model)
-    result = provider._get_full_state_dict(model) if provider is not None and options.full_state_dict else model.state_dict()
+    result = (
+        provider._get_full_state_dict(model)
+        if provider is not None and options.full_state_dict
+        else model.state_dict()
+    )
     if options.ignore_frozen_params:
-        frozen = {name for name, parameter in model.named_parameters() if not parameter.requires_grad}
+        frozen = {
+            name for name, parameter in model.named_parameters() if not parameter.requires_grad
+        }
         result = {name: value for name, value in result.items() if name not in frozen}
     if prefixes:
         selected = {}
         for name, value in result.items():
             for prefix in prefixes:
                 if name.startswith(prefix):
-                    selected[name if options.keep_submodule_prefixes else name[len(prefix):]] = value
+                    selected[name if options.keep_submodule_prefixes else name[len(prefix) :]] = (
+                        value
+                    )
         result = selected
     if options.cpu_offload:
         result = _map_tree(result, _offload_to_cpu)
@@ -255,12 +276,17 @@ def set_model_state_dict(model, state_dict, *, options=None):
         for module, values in state.items():
             if id(module) in modules:
                 prefix = modules[id(module)]
-                expanded.update(((prefix + "." if prefix else "") + name, value)
-                                for name, value in values.items())
+                expanded.update(
+                    ((prefix + "." if prefix else "") + name, value)
+                    for name, value in values.items()
+                )
         state = expanded
     provider = _fsdp(model)
-    if provider is not None and options.full_state_dict:
-        provider._load_full_state_dict(model, state, strict=options.strict)
+    if provider is not None:
+        if options.full_state_dict:
+            provider._load_full_state_dict(model, state, strict=options.strict)
+        else:
+            provider._load_sharded_state_dict(model, state, strict=options.strict)
         return None
     loader = model.load_state_dict
     if getattr(loader, "__func__", None) is jt.Module.load_state_dict:
@@ -290,16 +316,24 @@ def get_optimizer_state_dict(model, optimizers, *, submodules=None, options=None
                 if id(parameter) not in names:
                     raise ValueError("optimizer parameter does not belong to the model")
                 pid_to_name[pid] = names[id(parameter)]
-            result["param_groups"].append(dict(saved_group,
-                params=[pid_to_name[pid] for pid in saved_group["params"]]))
+            result["param_groups"].append(
+                dict(saved_group, params=[pid_to_name[pid] for pid in saved_group["params"]])
+            )
         result["state"].update({pid_to_name[pid]: fields for pid, fields in state["state"].items()})
     provider = _fsdp(model)
     if provider is not None and options.full_state_dict:
         metadata = {}
         for name, fields in result["state"].items():
-            metadata[name] = {key: (("step", float(value.item())) if key == "step" and isinstance(value, jt.Var)
-                                    else ("tensor", str(value.dtype)) if isinstance(value, jt.Var)
-                                    else ("value", value)) for key, value in fields.items()}
+            metadata[name] = {
+                key: (
+                    ("step", float(value.item()))
+                    if key == "step" and isinstance(value, jt.Var)
+                    else ("tensor", str(value.dtype))
+                    if isinstance(value, jt.Var)
+                    else ("value", value)
+                )
+                for key, value in fields.items()
+            }
         dist = _torch().distributed
         ranks = [None] * (dist.get_world_size() if dist.is_initialized() else 1)
         if len(ranks) > 1:
@@ -346,17 +380,31 @@ def set_optimizer_state_dict(model, optimizers, optim_state_dict, *, options=Non
             loaded_group = dict(current_group)
             for saved in state["param_groups"]:
                 if (set(saved["params"]) & set(fqns)) or (not saved["params"] and not fqns):
-                    loaded_group.update((key, value) for key, value in saved.items() if key != "params")
+                    loaded_group.update(
+                        (key, value) for key, value in saved.items() if key != "params"
+                    )
             groups.append(loaded_group)
             for parameter, pid, name in zip(group["params"], current_group["params"], fqns):
-                if options.strict and state["state"] and parameter.requires_grad and name not in state["state"]:
-                    raise RuntimeError("Missing optimizer state for parameter '" + name +
-                                       "' in checkpoint. To load anyway, use StateDictOptions(strict=False).")
+                if (
+                    options.strict
+                    and state["state"]
+                    and parameter.requires_grad
+                    and name not in state["state"]
+                ):
+                    raise RuntimeError(
+                        "Missing optimizer state for parameter '"
+                        + name
+                        + "' in checkpoint. To load anyway, use StateDictOptions(strict=False)."
+                    )
                 if name in state["state"]:
                     # A host-offloaded checkpoint must resume with its moments
                     # on the parameter's actual device, never a CPU fallback.
-                    values[pid] = _map_tree(state["state"][name],
-                        lambda value, p=parameter: _torch().clone(value.to(device=p.device).detach()))
+                    values[pid] = _map_tree(
+                        state["state"][name],
+                        lambda value, p=parameter: _torch().clone(
+                            value.to(device=p.device).detach()
+                        ),
+                    )
         plans.append((optimizer, {"state": values, "param_groups": groups}))
     for optimizer, state in plans:
         optimizer.load_state_dict(state)
@@ -365,8 +413,11 @@ def set_optimizer_state_dict(model, optimizers, optim_state_dict, *, options=Non
 def get_state_dict(model, optimizers=None, *, submodules=None, options=None):
     optimizers = _optimizers(optimizers)
     model_state = get_model_state_dict(model, submodules=submodules, options=options)
-    optimizer_state = (get_optimizer_state_dict(model, optimizers, submodules=submodules, options=options)
-                       if optimizers else {})
+    optimizer_state = (
+        get_optimizer_state_dict(model, optimizers, submodules=submodules, options=options)
+        if optimizers
+        else {}
+    )
     return model_state, optimizer_state
 
 

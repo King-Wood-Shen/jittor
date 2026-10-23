@@ -29,14 +29,36 @@ def _optimizer_checkpoint_parameter_names(module):
     return names
 
 
+def _dcp_shard_descriptor(value):
+    """Describe the exact unpadded interval owned by this FSDP2 shard."""
+    from jittor.serialization.sharded import TensorShard
+
+    state, entry = shard._fsdp_param_entry(value)
+    if state is None or entry is None:
+        return None
+    if getattr(value, "_jittor_fsdp2_role", None) != "shard":
+        raise RuntimeError("DCP requires a resharded FSDP2 parameter state dict")
+    rank = int(state.true_fsdp_rank)
+    if getattr(state, "true_fsdp_flat", False):
+        rank_start = rank * int(state.true_fsdp_flat_shard_numel)
+        offset = min(max(rank_start - int(entry.flat_offset), 0), int(entry.numel))
+        local = value
+    else:
+        offset = min(rank * int(entry.shard_numel), int(entry.numel))
+        count = min(int(entry.shard_numel), int(entry.numel) - offset)
+        local = common._slice_flat(value, 0, count)
+    return TensorShard(local, tuple(int(v) for v in entry.shape), offset)
+
+
 def _checkpoint_tensor(value, reference, *, preserve_dtype=False):
     from ..torch.context import get_install_context
 
     g = get_install_context(jt).target_namespace
     # The Torch factory accepts frontend device names (e.g. npu:0), while
     # dispatch_context returns internal backend names such as acl.
-    return g.tensor(value, dtype=value.dtype if preserve_dtype else reference.dtype,
-                    device=reference.device).detach()
+    return g.tensor(
+        value, dtype=value.dtype if preserve_dtype else reference.dtype, device=reference.device
+    ).detach()
 
 
 def _get_full_state_dict(module):
@@ -49,10 +71,15 @@ def _get_full_state_dict(module):
                 if getattr(state, "true_fsdp_flat", False):
                     if id(state) not in flat_cache:
                         flat_cache[id(state)] = common._all_gather_shards(
-                            state.true_fsdp_flat_shard, getattr(state, "shard_group", None))
-                    value = common._slice_flat(flat_cache[id(state)], entry.flat_offset, entry.numel).reshape(entry.shape)
+                            state.true_fsdp_flat_shard, getattr(state, "shard_group", None)
+                        )
+                    value = common._slice_flat(
+                        flat_cache[id(state)], entry.flat_offset, entry.numel
+                    ).reshape(entry.shape)
                 else:
-                    value = common._all_gather_shards(entry.shard, getattr(state, "shard_group", None))
+                    value = common._all_gather_shards(
+                        entry.shard, getattr(state, "shard_group", None)
+                    )
                     value = common._slice_flat(value, 0, entry.numel).reshape(entry.shape)
         result[name] = value.detach().clone()
     return result
@@ -86,19 +113,34 @@ def _gather_optimizer_state_dict(module, state_dict, rank_metadata):
                 elif spec[0] == "value":
                     target[field] = spec[1]
     for state, named_entries in grouped.values():
-        fields = sorted({field for name, _ in named_entries
-                         for field, spec in metadata.get(name, {}).items() if spec[0] == "tensor"})
+        fields = sorted(
+            {
+                field
+                for name, _ in named_entries
+                for field, spec in metadata.get(name, {}).items()
+                if spec[0] == "tensor"
+            }
+        )
         with common._frontend_scope(state):
             for field in fields:
                 local_values = []
                 for name, entry in named_entries:
                     value = state_dict["state"].get(name, {}).get(field)
                     if value is None:
-                        spec = next(metadata[current][field]
-                                    for current, _ in named_entries if field in metadata.get(current, {}))
-                        value = common._zeros_like_shape(entry.shard, entry.shard.shape, dtype=spec[1]).stop_grad()
+                        spec = next(
+                            metadata[current][field]
+                            for current, _ in named_entries
+                            if field in metadata.get(current, {})
+                        )
+                        value = common._zeros_like_shape(
+                            entry.shard, entry.shard.shape, dtype=spec[1]
+                        ).stop_grad()
                     if tuple(value.shape) != tuple(entry.shard.shape):
-                        raise ValueError("FSDP optimizer state is not parameter-shaped: {}.{}".format(name, field))
+                        raise ValueError(
+                            "FSDP optimizer state is not parameter-shaped: {}.{}".format(
+                                name, field
+                            )
+                        )
                     local_values.append(common._flatten_var(value))
                 if getattr(state, "true_fsdp_flat", False):
                     local = jt.concat(local_values, dim=0)
@@ -106,12 +148,24 @@ def _gather_optimizer_state_dict(module, state_dict, rank_metadata):
                     full = common._all_gather_shards(local, getattr(state, "shard_group", None))
                     for name, entry in named_entries:
                         if field in metadata.get(name, {}):
-                            result[name][field] = common._slice_flat(full, entry.flat_offset, entry.numel).reshape(entry.shape).detach().clone()
+                            result[name][field] = (
+                                common._slice_flat(full, entry.flat_offset, entry.numel)
+                                .reshape(entry.shape)
+                                .detach()
+                                .clone()
+                            )
                 else:
                     for (name, entry), local in zip(named_entries, local_values):
                         if field in metadata.get(name, {}):
-                            full = common._all_gather_shards(local, getattr(state, "shard_group", None))
-                            result[name][field] = common._slice_flat(full, 0, entry.numel).reshape(entry.shape).detach().clone()
+                            full = common._all_gather_shards(
+                                local, getattr(state, "shard_group", None)
+                            )
+                            result[name][field] = (
+                                common._slice_flat(full, 0, entry.numel)
+                                .reshape(entry.shape)
+                                .detach()
+                                .clone()
+                            )
     return {"state": result, "param_groups": state_dict["param_groups"]}
 
 
@@ -130,15 +184,27 @@ def _shard_optimizer_state_dict(module, state_dict):
                     result[name][field] = value
                     continue
                 if tuple(value.shape) != tuple(entry.shape):
-                    raise ValueError("FULL FSDP optimizer tensor has wrong shape: {}.{}".format(name, field))
-                full = common._flatten_var(_checkpoint_tensor(value, entry.shard, preserve_dtype=True))
+                    raise ValueError(
+                        "FULL FSDP optimizer tensor has wrong shape: {}.{}".format(name, field)
+                    )
+                full = common._flatten_var(
+                    _checkpoint_tensor(value, entry.shard, preserve_dtype=True)
+                )
                 if getattr(state, "true_fsdp_flat", False):
-                    start = min(max(int(state.true_fsdp_rank) * int(state.true_fsdp_flat_shard_numel)
-                                    - int(entry.flat_offset), 0), int(entry.numel))
+                    start = min(
+                        max(
+                            int(state.true_fsdp_rank) * int(state.true_fsdp_flat_shard_numel)
+                            - int(entry.flat_offset),
+                            0,
+                        ),
+                        int(entry.numel),
+                    )
                     local = common._slice_flat(full, start, entry.shard_numel)
                 else:
                     full = common._pad_flat(full, entry.padded_numel)
-                    local = common._slice_flat(full, int(state.true_fsdp_rank) * entry.shard_numel, entry.shard_numel)
+                    local = common._slice_flat(
+                        full, int(state.true_fsdp_rank) * entry.shard_numel, entry.shard_numel
+                    )
                 result[name][field] = local.detach().clone()
     return {"state": result, "param_groups": state_dict["param_groups"]}
 
@@ -150,7 +216,11 @@ def _load_full_state_dict(module, state_dict, strict=True):
     missing = set(current) - set(state_dict)
     unexpected = set(state_dict) - set(current)
     if strict and (missing or unexpected):
-        raise RuntimeError("FSDP state dict keys mismatch: missing={} unexpected={}".format(sorted(missing), sorted(unexpected)))
+        raise RuntimeError(
+            "FSDP state dict keys mismatch: missing={} unexpected={}".format(
+                sorted(missing), sorted(unexpected)
+            )
+        )
     if missing and not strict:
         state_dict = dict(_get_full_state_dict(module), **state_dict)
     consumed = set()
@@ -163,8 +233,7 @@ def _load_full_state_dict(module, state_dict, strict=True):
         for entry in state.true_fsdp_params:
             key = "{}.{}".format(prefix, entry.name) if prefix else entry.name
             if key not in state_dict:
-                raise KeyError(
-                    "missing FSDP parameter in full state dict: {}".format(key))
+                raise KeyError("missing FSDP parameter in full state dict: {}".format(key))
             full = _checkpoint_tensor(state_dict[key], entry.shard)
             if tuple(full.shape) != tuple(entry.shape):
                 raise RuntimeError("FSDP checkpoint parameter shape mismatch: {}".format(key))
@@ -181,26 +250,28 @@ def _load_full_state_dict(module, state_dict, strict=True):
             if not full_values:
                 continue
             flat = common._pad_flat(
-                jt.concat(
-                    [common._flatten_var(value) for value in full_values], dim=0),
+                jt.concat([common._flatten_var(value) for value in full_values], dim=0),
                 state.true_fsdp_flat_padded_numel,
             )
-            local = jt.Var.copy(common._slice_flat(
-                flat,
-                int(state.true_fsdp_rank) * int(state.true_fsdp_flat_shard_numel),
-                int(state.true_fsdp_flat_shard_numel),
-            )).stop_grad()
+            local = jt.Var.copy(
+                common._slice_flat(
+                    flat,
+                    int(state.true_fsdp_rank) * int(state.true_fsdp_flat_shard_numel),
+                    int(state.true_fsdp_flat_shard_numel),
+                )
+            ).stop_grad()
             state.true_fsdp_flat_shard.update(local)
             shard._refresh_flat_entry_shards(state)
         else:
             for entry, full in zip(state.true_fsdp_params, full_values):
-                padded = common._pad_flat(
-                    common._flatten_var(full), entry.padded_numel)
-                local = jt.Var.copy(common._slice_flat(
-                    padded,
-                    int(state.true_fsdp_rank) * int(entry.shard_numel),
-                    int(entry.shard_numel),
-                )).stop_grad()
+                padded = common._pad_flat(common._flatten_var(full), entry.padded_numel)
+                local = jt.Var.copy(
+                    common._slice_flat(
+                        padded,
+                        int(state.true_fsdp_rank) * int(entry.shard_numel),
+                        int(entry.shard_numel),
+                    )
+                ).stop_grad()
                 entry.shard.update(local)
 
         for entry in state.true_fsdp_params:
@@ -218,4 +289,96 @@ def _load_full_state_dict(module, state_dict, strict=True):
         if tuple(value.shape) != tuple(current[key].shape):
             raise RuntimeError("FSDP checkpoint buffer shape mismatch: {}".format(key))
         current[key].assign(value)
+    return consumed
+
+
+def _load_sharded_state_dict(module, state_dict, strict=True):
+    """Restore per-rank FSDP2 values into their existing local shard owners."""
+    current = module.state_dict()
+    missing = set(current) - set(state_dict)
+    unexpected = set(state_dict) - set(current)
+    if strict and (missing or unexpected):
+        raise RuntimeError(
+            "FSDP state dict keys mismatch: missing={} unexpected={}".format(
+                sorted(missing), sorted(unexpected)
+            )
+        )
+
+    consumed = set()
+    flat_groups = {}
+    entries = list(_checkpoint_entries(module))
+    for name, state, entry in entries:
+        if name not in state_dict:
+            continue
+        if getattr(state, "true_fsdp_flat", False):
+            flat_groups.setdefault(id(state), (state, []))[1].append((name, entry))
+            continue
+        with common._frontend_scope(state):
+            value = _checkpoint_tensor(state_dict[name], entry.shard)
+            flat = common._flatten_var(value)
+            if int(flat.numel()) > int(entry.shard_numel):
+                raise RuntimeError("FSDP local checkpoint shard is too large: " + name)
+            flat = common._pad_flat(flat, int(entry.shard_numel))
+            local = jt.Var.copy(flat).stop_grad()
+            if tuple(local.shape) != tuple(entry.shard.shape):
+                raise RuntimeError("FSDP local checkpoint shard shape mismatch: " + name)
+            entry.shard.update(local)
+        if getattr(entry, "requires_grad", True) and entry.shard.is_stop_grad():
+            entry.shard.start_grad()
+        object.__setattr__(entry.owner, entry.attr, entry.shard)
+        entry.full_param = None
+        consumed.add(name)
+
+    for state, named_entries in flat_groups.values():
+        reference = state.true_fsdp_flat_shard
+        local_numel = int(state.true_fsdp_flat_shard_numel)
+        rank_start = int(state.true_fsdp_rank) * local_numel
+        rank_end = rank_start + local_numel
+        parts = []
+        cursor = 0
+        with common._frontend_scope(state):
+            for name, entry in sorted(named_entries, key=lambda item: int(item[1].flat_offset)):
+                entry_start = int(entry.flat_offset)
+                entry_end = entry_start + int(entry.numel)
+                overlap_start = max(rank_start, entry_start)
+                overlap_end = min(rank_end, entry_end)
+                count = max(0, overlap_end - overlap_start)
+                consumed.add(name)
+                if count == 0:
+                    continue
+                local_start = overlap_start - rank_start
+                if local_start != cursor:
+                    raise RuntimeError("FSDP flat checkpoint shard has a gap at: " + name)
+                value = _checkpoint_tensor(state_dict[name], reference)
+                part = common._flatten_var(value)
+                if int(part.numel()) != count:
+                    raise RuntimeError("FSDP flat checkpoint shard size mismatch: " + name)
+                parts.append(part)
+                cursor += count
+            if cursor < local_numel:
+                parts.append(
+                    common._zeros_like_shape(
+                        reference, (local_numel - cursor,), dtype=reference.dtype
+                    )
+                )
+            local_flat = parts[0] if len(parts) == 1 else jt.concat(parts, dim=0)
+            local = jt.Var.copy(local_flat).stop_grad()
+            if tuple(local.shape) != tuple(reference.shape):
+                raise RuntimeError("FSDP flat checkpoint shard shape mismatch")
+            reference.update(local)
+            shard._refresh_flat_entry_shards(state)
+        for _, entry in named_entries:
+            if getattr(entry, "requires_grad", True) and entry.shard.is_stop_grad():
+                entry.shard.start_grad()
+            object.__setattr__(entry.owner, entry.attr, entry.shard)
+            entry.full_param = None
+
+    for name in set(current) & set(state_dict) - consumed:
+        state, entry = shard._fsdp_param_entry(current[name])
+        if state is not None and entry is not None:
+            continue
+        value = _checkpoint_tensor(state_dict[name], current[name])
+        if tuple(value.shape) != tuple(current[name].shape):
+            raise RuntimeError("FSDP checkpoint buffer shape mismatch: " + name)
+        current[name].assign(value)
     return consumed
