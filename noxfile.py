@@ -322,6 +322,7 @@ NPU_TESTS = (
     "tests/backends/acl/test_acl_torch_compat.py",
     "compat/tests/torch/test_adaptive_avg_pool2d.py",
     "compat/tests/torch/test_extreme_reduction_scalar.py",
+    "compat/tests/torch/test_module_custom_state.py::test_npu_frozen_augmented_arithmetic_stays_frozen",
     "tests/ops/test_adaptive_pool_output_size.py",
     "compat/tests/torch/test_contiguous_storage.py::test_contiguous_storage_and_gradient_npu",
     "compat/tests/torch/test_slice_assignment.py::test_slice_assignment_forward_backward_npu",
