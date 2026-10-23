@@ -48,6 +48,10 @@ def routing(monkeypatch):
     native = SimpleNamespace(
         Var=Tensor, Module=Module, nn=SimpleNamespace(),
         core=SimpleNamespace(Var=Tensor, dispatch_context=lambda tensors: ("acl", 0)),
+        # matrix.py consults the active backend before applying ACL-specific
+        # dtype normalization. Keep this tiny frontend stub aligned with the
+        # public Jittor object's compiler.build_config contract.
+        compiler=SimpleNamespace(build_config=SimpleNamespace(backend=None)),
         flag_scope=lambda **kwargs: nullcontext(),
         flags=SimpleNamespace(amp_reg=0),
         amp_flags=SimpleNamespace(keep_reduce=1, reduce16_no_fp32_acc=2,
