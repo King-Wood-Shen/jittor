@@ -357,6 +357,11 @@ def _include_tree_signature(directories):
       :func:`core_source_signature` makes for external headers -- and it is
       what keeps this off the import path: those trees hold ~1400 headers
       each, and walking six of them cost 90 ms of every warm CUDA import.
+    * Jittor's build cache. It holds generated custom-op headers and temporary
+      sources that this build itself rewrites after the input snapshot. Named
+      source files there remain covered by the separate ``files`` signature;
+      recursively treating the cache as an external include tree makes a
+      freshly built product look stale on its next import.
 
     What is left is the caller's own directories, which is the case that
     matters for a custom op built outside this repository.
@@ -365,16 +370,23 @@ def _include_tree_signature(directories):
     signature = {}
     tree = _compiler_state.os.path.realpath(_compiler_state.jittor_path)
     toolkit = [_compiler_state.os.path.realpath(path) for path in _compiler_state.cuda_include_dirs]
+    cache = _compiler_state.os.path.realpath(_compiler_state.cache_path)
     for directory in sorted(set(directories)):
         if not directory:
             continue
         real = _compiler_state.os.path.realpath(directory)
         if _compiler_state._is_within(real, tree):
             continue
+        if _compiler_state._is_within(real, cache):
+            continue
         if any(_compiler_state._is_within(real, path) or _compiler_state._is_within(path, real)
                for path in toolkit):
             continue
-        for current, _, names in _compiler_state.os.walk(real):
+        for current, children, names in _compiler_state.os.walk(real):
+            children[:] = [name for name in children
+                           if not _compiler_state._is_within(
+                               _compiler_state.os.path.realpath(
+                                   _compiler_state.os.path.join(current, name)), cache)]
             for name in names:
                 if not name.endswith(_compiler_state._SOURCE_EXTENSIONS):
                     continue

@@ -720,6 +720,26 @@ class TestCustomOpBuildStamp(unittest.TestCase):
         self.assertIn("/bare/path", dirs)
         self.assertIn("/spaced", dirs)
 
+    def test_generated_cache_headers_do_not_invalidate_external_inputs(self):
+        """The cache is an output tree even when the caller passes it via -I."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            external = root / "external.h"
+            external.write_text("first")
+            with tempfile.TemporaryDirectory(dir=self.compiler.cache_path) as cache:
+                generated = Path(cache) / "generated.h"
+                generated.write_text("generated")
+                sources = self.compiler._include_tree_signature([str(root), str(cache)])
+                self.assertEqual(list(sources), ["external.h"])
+                # A named source in the cache is still checked independently.
+                self.assertIsNotNone(self.compiler._stat_signature([str(generated)])[str(generated)])
+                generated.write_text("rewritten by build")
+                self.assertEqual(
+                    self.compiler._include_tree_signature([str(root), str(cache)]), sources)
+                external.write_text("changed external input")
+                self.assertNotEqual(
+                    self.compiler._include_tree_signature([str(root), str(cache)]), sources)
+
 
 _GATE_MARKER = "GATE_RESULT "
 _GATE_PROBE = r"""
