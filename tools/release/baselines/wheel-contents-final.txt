@@ -1,10 +1,10 @@
 # Jittor wheel contents baseline (SHA-256 and exact archive member paths)
 # source-wheel: jittor-2.0.0-py3-none-any.whl
-# source-wheel-sha256: 4f9479159cdcec37d8f44417bd018b84d3cc1db096a16e1befe60e0c35a8ef17
+# source-wheel-sha256: 28943cca18cf526995737f759a582f33461a3ed565aff012af1e4b1fb587c5ac
 # entries: 1133
 # Regenerate only after reviewing every path and content change.
 fb0d15cb73dc519400967b63b0091df66a8c4388e3cb7dd107b8fc40fcc5054f  jittor-2.0.0.dist-info/METADATA
-c78cf888ba1550060dd15d2e1bf7f6011b8d526d39ed36c6f0a2b00096d8b241  jittor-2.0.0.dist-info/RECORD
+598d86e7995249d2b934119c260d09f9aaba5280f26da534cf7baaf660f1ce70  jittor-2.0.0.dist-info/RECORD
 2b6eb4118ce7cd7b09601406aa623c553c4476265836f0d9c16f5c061f7efcc0  jittor-2.0.0.dist-info/WHEEL
 435a22ada7651633d681246096725d6b8a5d15b729df61706c5637cbc58c39c7  jittor-2.0.0.dist-info/entry_points.txt
 8b18f18c9c43b17e6e2bcdefc8df9d423c12e6769d5d13cf6a46fed31e7e1666  jittor-2.0.0.dist-info/licenses/LICENSE.txt
@@ -450,7 +450,7 @@ a2ff78d28fefc648ada7b78a87c9ae78235f661fe39deae39e89bf1feeb46547  jittor/build/u
 5e3eb16811e88b90ec27aa9a3913bedcee82b21db50b28367d86106800410453  jittor/build/utils/clean_cache.py
 c3fc3e2772c4fd779abf25a82432b5bba7b7f58cf3311646b21b4a715cb8acc3  jittor/build/utils/compiler_flags.py
 260757bfa7d708dc99883af03595204699297d402d1d49806a0fb8e9afeb3776  jittor/build/utils/config.py
-21ba6796658291e41ae1a63f3a643565527ac65a115b402588a2757a042f7139  jittor/build/utils/cuda_wheel.py
+47119ebe8cdce43da3293653e7cf155b1f3b6f14b22bcf4ce3c96f6a83942243  jittor/build/utils/cuda_wheel.py
 5f3846f00c0aeebf459f94818d8f1fdafd99d8a7f320bc3585d076431676e9d9  jittor/build/utils/env_config.py
 bd5aa9cebb417d2bb74b7036c5f8e4f90abe6c2f1462fed3d66eca29ef883fc7  jittor/build/utils/env_manifest.py
 68a08a03eadbe99a76993e566f4a0332abc07cc8310383788e859380db88eea0  jittor/build/utils/install_cuda.py
