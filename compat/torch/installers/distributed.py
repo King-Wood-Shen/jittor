@@ -427,7 +427,14 @@ def _init_process_group(*args, **kwargs):
             raise RuntimeError("torch/Jittor distributed world-size mismatch")
         if "rank" in kwargs and requested_rank != _distributed_rank():
             raise RuntimeError("torch/Jittor distributed rank mismatch")
+        selected_backend = active_backend
+    else:
+        selected_backend = backend_name or "mpi"
     state["initialized"] = True
+    # A singleton Torch process group has no native communicator to query.
+    # Keep the caller's explicit backend so get_backend() does not report the
+    # native WORLD group's historical singleton default ("mpi").
+    state["backend"] = selected_backend
     state["store"] = store
     return None
 
@@ -440,6 +447,7 @@ def _destroy_process_group(*args, **kwargs):
     if callable(close):
         close()
     state["store"] = None
+    state["backend"] = None
     state["initialized"] = False
     return None
 
@@ -869,7 +877,12 @@ def _api_dist_is_initialized(*a, **k):
 
 def _api_dist_get_backend(group=None):
     _context = get_install_context(jt).state["distributed_api"]
+    state = _context["state"]
     world_group = _context['world_group']
+    if (group is None or group is world_group) and state["initialized"]:
+        selected_backend = state.get("backend")
+        if selected_backend is not None:
+            return str(selected_backend).lower()
     return group._get_backend_name() if group is not None and hasattr(group, '_get_backend_name') else world_group._get_backend_name()
 
 
@@ -1012,7 +1025,11 @@ def _install_distributed(g, registry=None):
         _modules["torch.distributed"] = dist
     # Executable leaves need a filesystem spec for ``python -m``.
     dist.__path__ = [os.path.join(os.path.dirname(__file__), "..", "distributed_cli")]
-    state = {"initialized": _native_distributed_active(), "store": None}
+    state = {
+        "initialized": _native_distributed_active(),
+        "store": None,
+        "backend": None,
+    }
     world_group = _JittorProcessGroup(name="world")
     pg_map = {world_group: (world_group._get_backend_name(),)}
     get_install_context(g).state["distributed_api"] = MappingProxyType({

@@ -66,7 +66,7 @@ class Tensor:
 def distributed_state(monkeypatch):
     context = get_install_context(jt)
     world = Group()
-    state = {"initialized": False, "store": None}
+    state = {"initialized": False, "store": None, "backend": None}
     groups = {world: ("nccl",)}
     monkeypatch.setitem(context.state, "distributed_api", MappingProxyType({
         "state": state, "world_group": world, "pg_map": groups,
@@ -170,10 +170,12 @@ def test_init_destroy_store_and_backend_validation(distributed_state, monkeypatc
             self.closed += 1
     store = Store()
     owner._init_process_group(backend="gloo", rank=0, world_size=1, store=store)
-    assert state == {"initialized": True, "store": store}
+    assert state == {"initialized": True, "store": store, "backend": "gloo"}
     assert owner._api_c10d_get_default_store() is store
     owner._destroy_process_group()
-    assert store.closed == 1 and state == {"initialized": False, "store": None}
+    assert store.closed == 1 and state == {
+        "initialized": False, "store": None, "backend": None,
+    }
     monkeypatch.setattr(owner, "_native_distributed_active", lambda: True)
     with pytest.raises(RuntimeError, match="does not match"):
         owner._init_process_group(backend="hccl", rank=2, world_size=4)
@@ -181,11 +183,26 @@ def test_init_destroy_store_and_backend_validation(distributed_state, monkeypatc
     assert state["initialized"]
 
 
+def test_singleton_process_group_publishes_selected_backend(distributed_state, monkeypatch):
+    state, world, _ = distributed_state
+    monkeypatch.setattr(owner, "_distributed_rank", lambda: 0)
+    monkeypatch.setattr(owner, "_distributed_world_size", lambda: 1)
+    owner._init_process_group(backend="hccl", rank=0, world_size=1)
+    assert state["initialized"] and state["backend"] == "hccl"
+    assert owner._api_dist_get_backend() == "hccl"
+    assert owner._api_dist_get_backend(world) == "hccl"
+
+
 def test_checkpoint_stubs_keep_policy_and_importable_owner(monkeypatch):
     from jittor.compat import stub_policy
     dist = compatibility_owner(jt).distributed
     monkeypatch.setattr(stub_policy, "allow_stub", lambda: False)
-    for name in ("load", "save", "load_state_dict", "save_state_dict"):
+    for name in ("load", "save"):
+        function = getattr(dist.checkpoint, name)
+        assert "<locals>" not in function.__qualname__
+        assert pickle.loads(pickle.dumps(function)) is function
+
+    for name in ("load_state_dict", "save_state_dict"):
         function = getattr(dist.checkpoint, name)
         assert "<locals>" not in function.__qualname__
         assert pickle.loads(pickle.dumps(function)) is function

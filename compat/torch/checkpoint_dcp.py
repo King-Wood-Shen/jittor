@@ -40,12 +40,12 @@ def _torch():
     return get_install_context(jt).target_namespace
 
 
-def _group(directory):
+def _group(directory, *, allow_singleton=False):
     dist = _torch().distributed
     if not dist.is_initialized():
         raise RuntimeError("DCP sharded save/load requires an initialized process group")
     world = int(dist.get_world_size())
-    if world < 2:
+    if world < 2 and not allow_singleton:
         raise NotImplementedError("DCP rank-local storage requires at least two ranks")
     if (
         int(os.environ.get("LOCAL_WORLD_SIZE", world)) != world
@@ -162,6 +162,25 @@ def _rank_local_root_keys(metadata):
     return {key for key, value in tree.get("items", ()) if value.get("kind") == "rank_local"}
 
 
+def _validate_load_world_size(metadata, target_world):
+    """Allow only model-only resharding into a one-rank target."""
+    source_world = int(metadata["world_size"])
+    target_world = int(target_world)
+    if source_world == target_world:
+        return
+    if source_world > 1 and target_world == 1:
+        rank_local = _rank_local_root_keys(metadata)
+        if rank_local:
+            raise NotImplementedError(
+                "DCP cannot reshard rank-local state: "
+                + ", ".join(sorted(rank_local))
+            )
+        return
+    raise NotImplementedError(
+        "DCP checkpoint world size differs; only model-only restore to one rank is supported"
+    )
+
+
 def _assign_tree(current, saved):
     if isinstance(current, jt.Var):
         source = _saved_tensor(saved)
@@ -213,10 +232,10 @@ def load(state_dict, *, storage_reader=None, planner=None, **kwargs):
     if not isinstance(state_dict, dict) or not state_dict:
         raise ValueError("DCP load expects a preallocated nonempty state dictionary")
     directory = _storage(storage_reader, "Reader")
-    dist = _group(directory)
     metadata = read_manifest(directory)
-    if metadata["world_size"] != int(dist.get_world_size()):
-        raise NotImplementedError("DCP checkpoint world size differs; resharding is unsupported")
+    source_world = int(metadata["world_size"])
+    dist = _group(directory, allow_singleton=source_world > 1)
+    _validate_load_world_size(metadata, dist.get_world_size())
     restored = native_checkpoint.load(directory, tensor_shards=_load_targets(state_dict))
     if set(state_dict) != set(restored):
         raise RuntimeError("DCP state keys changed: /")
