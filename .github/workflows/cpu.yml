@@ -130,8 +130,8 @@ jobs:
     env:
       ASV_MACHINE: github-ubuntu-cpu
       ASV_COMPARE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-      ASV_PR_BENCHMARKS: '^(operators|optimizer_step|convolution)\.'
-      ASV_SCHEDULED_BENCHMARKS: '^(operators|optimizer_step|convolution|reductions)\.'
+      ASV_PR_BENCHMARKS: '^(?:(?:operators|convolution)\..*\(jittor, cpu,|optimizer_step\..*\([^)]*, cpu\))'
+      ASV_SCHEDULED_BENCHMARKS: '^(?:(?:operators|convolution|reductions)\..*\(jittor, cpu,|optimizer_step\..*\([^)]*, cpu\))'
     steps:
       # `runner` is not an allowed context in a job-level `env:` -- using it
       # there made GitHub reject the whole workflow file, so no job ran.
