@@ -386,6 +386,9 @@ def test_torch_semantic_core_suites_run_in_the_torch_process():
         "tests/backends/parity/test_device_parity.py",
         "tests/core/test_regression.py",
         "tests/type/test_type_system.py",
+        # Importing this helper executes fsdp2/__init__.py, which imports
+        # the Torch frontend from its optimizer module during collection.
+        "compat/tests/fsdp2/test_fsdp2_flat_policy.py",
     }
     assert required <= set(module.TORCH_MODE_PATHS)
 

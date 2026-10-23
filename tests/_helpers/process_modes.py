@@ -13,6 +13,10 @@ TORCH_MODE_PATHS = (
     # This multi-rank suite exercises Torch collectives and optimizer subclasses.
     # Pure native sequences live under tests/backends/comm/nccl instead.
     "compat/tests/fsdp2/test_fsdp2_nccl.py",
+    # Importing the native flat-policy helper first executes the parent
+    # compat.fsdp2 package, whose optimizer module imports the Torch frontend.
+    # Keep that collection-time import inside the Torch-owned process.
+    "compat/tests/fsdp2/test_fsdp2_flat_policy.py",
     "compat/tests/structure",
     "adapters/tests/vllm",
     # The OpInfo runner exercises Torch-facing signatures for the shared
