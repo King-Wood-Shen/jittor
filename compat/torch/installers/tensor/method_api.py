@@ -1625,20 +1625,34 @@ def _api_zero(self):
     return _ip(self, zeros, preserve_storage=True)
 
 
+def _api_inplace_binary(self, other, expression):
+    # Native arithmetic can publish a trainable RHS even when both operands
+    # are stop-grad. Torch's augmented operation must not turn a frozen logger
+    # accumulator into a gradient-carrying tensor in that case. Preserve the
+    # graph whenever either original operand is trainable.
+    other_trainable = isinstance(other, _NativeVar) and bool(other.requires_grad)
+    if not _owner.jt.flags.no_grad and not self.requires_grad and not other_trainable:
+        with _owner.jt.no_grad():
+            value = expression()
+    else:
+        value = expression()
+    return _ip(self, value, preserve_storage=True)
+
+
 def _api_add(self, o, alpha=1):
-    return _ip(self, self + o * alpha, preserve_storage=True)
+    return _api_inplace_binary(self, o, lambda: self + o * alpha)
 
 
 def _api_sub(self, o, alpha=1):
-    return _ip(self, self - o * alpha, preserve_storage=True)
+    return _api_inplace_binary(self, o, lambda: self - o * alpha)
 
 
 def _api_mul(self, o):
-    return _ip(self, self * o, preserve_storage=True)
+    return _api_inplace_binary(self, o, lambda: self * o)
 
 
 def _api_div(self, o):
-    return _ip(self, self / o, preserve_storage=True)
+    return _api_inplace_binary(self, o, lambda: self / o)
 
 
 def _api_clamp_min(input, v):
