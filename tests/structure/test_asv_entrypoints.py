@@ -188,13 +188,16 @@ class TestAsvEntryPoints(unittest.TestCase):
     def test_scheduled_ci_reaches_every_general_suite(self):
         cpu = yaml.safe_load((ROOT / ".github/workflows/cpu.yml").read_text())["jobs"]["benchmark"]
         patterns = cpu["env"]
-        regular = re.compile(patterns["ASV_PR_BENCHMARKS"])
-        scheduled = re.compile(patterns["ASV_SCHEDULED_BENCHMARKS"])
+        regular: re.Pattern[str] = re.compile(patterns["ASV_PR_BENCHMARKS"])
+        scheduled: re.Pattern[str] = re.compile(patterns["ASV_SCHEDULED_BENCHMARKS"])
         cuda = yaml.safe_load((ROOT / ".github/workflows/cuda.yml").read_text())["jobs"][
             "benchmark-cuda"
         ]
         command = next(step["run"] for step in cuda["steps"] if "--bench" in step.get("run", ""))
-        cuda_pattern = re.compile(re.search(r"--bench '([^']+)'", command).group(1))
+        cuda_match = re.search(r"--bench '([^']+)'", command)
+        self.assertIsNotNone(cuda_match)
+        assert cuda_match is not None
+        cuda_pattern: re.Pattern[str] = re.compile(cuda_match.group(1))
         for path in (ROOT / "benchmarks/asv").glob("*.py"):
             if path.stem.startswith("_") or path.stem == "accelerate_training":
                 continue  # This suite intentionally requires its own Torch process/cache.
@@ -247,7 +250,10 @@ class TestAsvEntryPoints(unittest.TestCase):
                 names = ast.literal_eval(fields["param_names"])
                 if "device" not in names:
                     continue
-                parameters = [parameter_values(item) for item in fields["params"].elts]
+                params = fields["params"]
+                self.assertIsInstance(params, ast.Tuple)
+                assert isinstance(params, ast.Tuple)
+                parameters = [parameter_values(item) for item in params.elts]
                 for values in itertools.product(*parameters):
                     by_name = dict(zip(names, values))
                     benchmark = "%s.%s.time_run(%s)" % (
