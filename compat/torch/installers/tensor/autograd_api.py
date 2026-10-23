@@ -121,7 +121,7 @@ def _run_post_accumulate_hooks(leaves, grad_by_id):
                     raise RuntimeError("Tensor post accumulate grad hook must return None")
 
 
-def _fill_opt_grads(opt, grad_by_id, filled_param_ids=None):
+def _fill_opt_grads(opt, grad_by_id, filled_param_ids=None, create_graph=False):
     # Replicate the grad-storage half of jittor's Optimizer.backward() but
     # from an already-computed {id(param): grad} map (so a SINGLE jt.grad
     # pass feeds every optimizer + every leaf — no N-times-repeated backward).
@@ -147,15 +147,21 @@ def _fill_opt_grads(opt, grad_by_id, filled_param_ids=None):
                     grads_list.append(None)
                 grads_list[i] = getattr(p, "_torch_grad", None)
                 continue
-            g = g.stop_grad()
+            if not create_graph:
+                g = g.stop_grad()
             existing = grads_list[i] if i < len(grads_list) else None
             if not isinstance(existing, _NativeVar):
                 existing = getattr(p, "_torch_grad", None)
             if isinstance(existing, _NativeVar) and list(existing.shape) == list(g.shape):
                 if not zero:
                     g = g + existing
-                existing.update(g)
-                stored = existing
+                if create_graph:
+                    # An in-place slot update would sever the gradient graph.
+                    # Torch replaces .grad during higher-order accumulation.
+                    stored = g
+                else:
+                    existing.update(g)
+                    stored = existing
             else:
                 stored = g
             while len(grads_list) <= i:
@@ -350,7 +356,7 @@ def _backward_impl(self, gradient=None, retain_graph=None, create_graph=False, *
         if _fsdp2_backward is not None and id(o) in fsdp_opt_ids \
                 and not _fsdp2_backward.optimizer_has_non_fsdp_params(o):
             continue
-        _fill_opt_grads(o, grad_by_id, filled_param_ids)
+        _fill_opt_grads(o, grad_by_id, filled_param_ids, create_graph=create_graph)
     # DDP's synchronisation point, deliberately here rather than next to
     # grad_optional above: it has to average the *accumulated* gradient.
     # `no_sync()` exists so several micro-batches accumulate locally and
