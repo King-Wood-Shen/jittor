@@ -1,7 +1,6 @@
 """Native runtime round trips for the checkpoint implementation move."""
 
 import importlib
-import importlib.util
 import pickle
 import sys
 from types import ModuleType
@@ -11,6 +10,7 @@ import numpy as np
 import pytest
 
 from _helpers.child_process import run_python_child
+from _helpers.torch_runtime import modules_available
 
 
 @pytest.fixture(autouse=True)
@@ -29,8 +29,8 @@ def test_native_save_load_roundtrip(tmp_path):
 
 
 def test_torch_archive_save_load_roundtrip(tmp_path):
-    if importlib.util.find_spec("torch") is None:
-        pytest.skip("real PyTorch is not installed")
+    if not modules_available("torch"):
+        pytest.skip("independent PyTorch is not installed")
     source = """
 import sys
 import jittor as jt
@@ -47,8 +47,8 @@ for name in values:
     np.testing.assert_array_equal(restored[name].numpy(), values[name].numpy())
 """
     completed = run_python_child(
-        ["-c", source, str(tmp_path / "weights.pth")],
-        merge_stderr=True, without_torch_mode=True)
+        ["-c", source, str(tmp_path / "weights.pth")], merge_stderr=True, without_torch_mode=True
+    )
     assert completed.returncode == 0, completed.stdout[-3000:]
 
 
