@@ -54,6 +54,16 @@ print("env=" + ",".join(os.environ.get(k, "-") for k in
 # jittor in a rank would start NCCL, which needs a GPU per rank.
 _ENV_RENDEZVOUS = """
 import importlib.util
+import os
+import sys
+diagnostic_env = ("LD_LIBRARY_PATH", "PYTHONHOME", "PYTHONPATH",
+                  "REAL_TORCH_SITE", "JITTOR_TORCH_SHIM",
+                  "JITTOR_TORCH_INDEPENDENT", "JITTOR_TORCH_PROJECT_ROOT",
+                  "JITTOR_TORCH_RUNTIME_ROOT", "RANK", "WORLD_SIZE",
+                  "LOCAL_RANK", "MASTER_ADDR", "MASTER_PORT")
+print("runtime=" + repr({"executable": sys.executable,
+                         "env": {key: os.environ.get(key) for key in diagnostic_env}}),
+      flush=True)
 spec = importlib.util.spec_from_file_location("store", STORE_PATH)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
@@ -187,7 +197,16 @@ class TestLaunchFailurePropagation(unittest.TestCase):
         store = _REPO_ROOT / "python" / "jittor" / "distributed" / "store.py"
         done, _ = _launch(2, _ENV_RENDEZVOUS.replace("STORE_PATH", repr(os.fspath(store))),
                           self.tmp.name, timeout=120)
-        self.assertEqual(done.returncode, 0, done.stdout[-3000:])
+        failure = [done.stdout[-3000:]]
+        if done.returncode:
+            for rank in range(2):
+                path = Path(self.tmp.name, "rank%d.log" % rank)
+                if path.is_file():
+                    log = path.read_text(errors="replace")[-6000:]
+                    failure.append("rank %d log (%s):\n%s" % (rank, path.name, log))
+                else:
+                    failure.append("rank %d log missing (%s)" % (rank, path.name))
+        self.assertEqual(done.returncode, 0, "\n".join(failure))
         for rank in range(2):
             text = Path(self.tmp.name, "rank%d.log" % rank).read_text()
             self.assertIn("rendezvous %d/2" % rank, text)
