@@ -937,7 +937,7 @@ void throw_same_kind(const std::exception& like, const string& message, bool exe
 
 string user_error_message(const string& line, size_t body_start, const string& tail,
                           const char* fileline) {
-    auto body = strip_ansi_escapes(line.substr(std::min(body_start, line.size())));
+    auto body = strip_ansi_escapes(line.substr((std::min)(body_start, line.size())));
     size_t begin = body.find_first_not_of(" \n");
     if (begin == string::npos)
         return message_without_log_prefix(line + tail);
