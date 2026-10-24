@@ -414,8 +414,8 @@ parse_env_value(const string& s, T& out) {
     typename std::conditional<std::is_signed<T>::value,
                               long long, unsigned long long>::type v = 0;
     if (!parse_env_integer(s, v)) return false;
-    if (v > (decltype(v))std::numeric_limits<T>::max()) return false;
-    if (std::is_signed<T>::value && v < (decltype(v))std::numeric_limits<T>::min())
+    if (v > (decltype(v))(std::numeric_limits<T>::max)()) return false;
+    if (std::is_signed<T>::value && v < (decltype(v))(std::numeric_limits<T>::min)())
         return false;
     out = (T)v;
     return true;
