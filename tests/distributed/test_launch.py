@@ -70,6 +70,13 @@ spec.loader.exec_module(module)
 store, rank, world = next(module.rendezvous("env://"))
 store.set("rank%d" % rank, str(rank))
 store.wait(["rank%d" % r for r in range(world)])
+# `wait` makes the rank keys visible but does not guarantee every peer has
+# received its reply before the server rank exits. Confirm rank 1 returned
+# from that wait before rank 0 lets its TCPStore server close.
+if rank == 0:
+    store.wait(["rank1-rendezvous-returned"])
+else:
+    store.arrive("rank1-rendezvous-returned")
 print("rendezvous %d/%d" % (rank, world), flush=True)
 """
 
