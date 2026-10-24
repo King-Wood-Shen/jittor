@@ -128,6 +128,25 @@ def test_compat_working_directory_uses_repository_relative_execution_accounting(
     assert pytest_policy._relative_to_repo("tests/structure/test_factory_install_owners.py") == expected
 
 
+@pytest.mark.parametrize(("torch_mode", "native_file_is_selected"), [(True, False), (False, True)])
+def test_snapshot_selection_respects_torch_process_mode_ignores(
+    monkeypatch, torch_mode, native_file_is_selected
+):
+    monkeypatch.setattr(pytest_policy, "_SELECTED_FILES", set())
+    monkeypatch.setattr(pytest_policy, "_torch_mode_is_active", lambda: torch_mode)
+    config = SimpleNamespace(
+        args=["tests/structure"],
+        invocation_params=SimpleNamespace(dir=REPO_ROOT),
+        option=SimpleNamespace(ignore=[]),
+    )
+
+    pytest_policy._snapshot_selected_files(config)
+
+    native_file = "tests/structure/backends/acl/test_acl_dtype_preservation.py"
+    assert (native_file in pytest_policy._SELECTED_FILES) is native_file_is_selected
+    assert "tests/structure/test_test_layout_policy.py" in pytest_policy._SELECTED_FILES
+
+
 def test_sessionfinish_flushes_worker_survey_and_keeps_execution_gate(monkeypatch):
     flushed = []
     monkeypatch.setattr(pytest_policy, "_write_state_leak_report", lambda suffix: flushed.append(suffix))
