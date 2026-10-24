@@ -10,6 +10,8 @@ import torch
 from jittor.autograd._checkpoint_recorded import recorded_checkpoint as recorded
 from jittor._runtime.fallback import forbid_backend_fallbacks
 
+pytestmark = pytest.mark.cuda
+
 
 
 

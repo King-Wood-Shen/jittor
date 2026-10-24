@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import jittor as jt
+import pytest
 import torch
 
 from _helpers import capability
@@ -15,6 +16,8 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 from torch.distributed.fsdp.wrap import (
     ModuleWrapPolicy, transformer_auto_wrap_policy, lambda_auto_wrap_policy,
 )
+
+pytestmark = pytest.mark.cuda
 
 
 class _Block(torch.nn.Module):
