@@ -4,7 +4,7 @@
 # entries: 1133
 # Regenerate only after reviewing every path and content change.
 fb0d15cb73dc519400967b63b0091df66a8c4388e3cb7dd107b8fc40fcc5054f  jittor-2.0.0.dist-info/METADATA
-aa7c3e09720c551329a11d3520faf75fff08910683b25e43df17dd1d07aedc32  jittor-2.0.0.dist-info/RECORD
+fa409de8dc5d6b1d6909d8ee8f003a3d0c538293ccda57dc5bc449b81291b89b  jittor-2.0.0.dist-info/RECORD
 2b6eb4118ce7cd7b09601406aa623c553c4476265836f0d9c16f5c061f7efcc0  jittor-2.0.0.dist-info/WHEEL
 435a22ada7651633d681246096725d6b8a5d15b729df61706c5637cbc58c39c7  jittor-2.0.0.dist-info/entry_points.txt
 8b18f18c9c43b17e6e2bcdefc8df9d423c12e6769d5d13cf6a46fed31e7e1666  jittor-2.0.0.dist-info/licenses/LICENSE.txt
@@ -1124,7 +1124,7 @@ f1fe46e3818330805029ba3d200a462cc7c4ccd277fcf96722a0fdeddacf6360  jittor/src/uti
 53e7df990533cbc8f9903d6bbba7afb838d6792d7f9ebd058b69115a13ece195  jittor/src/utils/str_utils.cc
 2947992671d34416789742a1da47ce393f490394dfa9967f80aea6dc1b9f79f5  jittor/src/utils/str_utils.h
 b4f1eba1b7e6199650fe00edfbaa6adf3a8fb1d608abb20ad761b86e6e321319  jittor/src/utils/test.h
-70986be3eafdddce8eacf4354f2b38003c53345c3ded8f8372737dfd2f6fd6c4  jittor/src/utils/tracer.cc
+02f65881607acd77f425b3843676f5141916970fd42a6e752aaa89517758c614  jittor/src/utils/tracer.cc
 f040002ff8e0e1b5ade740586ecc61621a095045ad7293f4e76ba4c5735e3705  jittor/src/utils/tracer.h
 a897e6dfdce49d188e729b044bb80b48ae0b879a9674a4c35eba870deb863c69  jittor/tools/__init__.py
 21afd6bd56bc43d5d9e0543ebf2b169025d1b4f61c45e2ee78ee5bc5930d898b  jittor/tools/benchmarking.py
