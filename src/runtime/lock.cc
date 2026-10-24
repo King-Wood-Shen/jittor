@@ -18,6 +18,7 @@
 #else
 #include <unistd.h>
 #include <sys/file.h>
+#include <pthread.h>
 #endif
 #include <fcntl.h>
 #include <errno.h>
@@ -46,6 +47,39 @@ static HANDLE lock_handle = INVALID_HANDLE_VALUE;
 #endif
 static int lock_fd = -1;
 int _has_lock = 0;
+
+// A fork child must not inherit a stale reentrant scope or a mutex owned by
+// a thread that no longer exists. The prepare handler waits for any short
+// critical section in build_lock_enter/leave; the child then starts with an
+// empty guard stack. The parent keeps its original state and lock descriptor.
+static std::mutex guard_mutex;
+static int guard_depth = 0;
+
+#ifndef _WIN32
+static void lock_before_fork() {
+    guard_mutex.lock();
+}
+
+static void lock_after_fork_parent() {
+    guard_mutex.unlock();
+}
+
+static void lock_after_fork_child() {
+    guard_depth = 0;
+    _has_lock = 0;
+    guard_mutex.unlock();
+}
+
+static bool lock_atfork_registered = false;
+
+static void register_lock_atfork_handlers() {
+    if (lock_atfork_registered) return;
+    int result = pthread_atfork(
+        lock_before_fork, lock_after_fork_parent, lock_after_fork_child);
+    ASSERT(result == 0);
+    lock_atfork_registered = true;
+}
+#endif
 
 DEFINE_FLAG(bool, disable_lock, 0, "Disable file lock");
 
@@ -118,6 +152,7 @@ void set_lock_fd(int64 fd, bool has_lock) {
 #ifdef _WIN32
     lock_handle = (HANDLE)fd;
 #else
+    register_lock_atfork_handlers();
     lock_fd = (int)fd;
 #endif
     _has_lock = has_lock ? 1 : 0;
@@ -174,10 +209,6 @@ void unlock() {
     _has_lock = 0;
     LOGvv << "UNLOCK Pid:" << getpid();
 }
-
-// Guarded by guard_mutex; see the comment on lock_guard in lock.h.
-static std::mutex guard_mutex;
-static int guard_depth = 0;
 
 bool build_lock_enter() {
     std::lock_guard<std::mutex> hold(guard_mutex);

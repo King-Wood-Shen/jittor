@@ -8,7 +8,11 @@
 # file 'LICENSE.txt', which is part of this source code package.
 # ***************************************************************
 import unittest
-import os, subprocess, tempfile
+import os
+import subprocess
+import tempfile
+import time
+import traceback
 import jittor as jt
 import jittor_utils as jit_utils
 from jittor_utils import lock as jit_lock
@@ -155,6 +159,178 @@ class TestBuildLockIsShared(unittest.TestCase):
             with jit_lock.lock_scope():
                 pass
             self.assertEqual(_lock_state(self.lock.filename), "busy")
+
+    @unittest.skipUnless(hasattr(os, "fork"), "fork is required")
+    def test_forked_children_get_independent_lock_descriptions(self):
+        """Inherited flock descriptors must be reopened before worker locks."""
+        if self.lock.is_locked:
+            self.skipTest("the parent already holds the session build lock")
+
+        original_fd = self.lock.fd
+        original_path = self.lock.filename
+        children = []
+        child_statuses = []
+        with tempfile.TemporaryDirectory() as directory:
+            lock_path = os.path.join(directory, "jittor.lock")
+            start_path = os.path.join(directory, "start")
+            release_path = os.path.join(directory, "release")
+            new_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+            self.lock.fd = new_fd
+            self.lock.filename = lock_path
+            self.lock.core.set_lock_fd(new_fd, False)
+
+            def wait_for(path, timeout=10):
+                deadline = time.monotonic() + timeout
+                while time.monotonic() < deadline:
+                    if os.path.exists(path):
+                        return True
+                    time.sleep(0.01)
+                return False
+
+            try:
+                for worker_id in range(2):
+                    pid = os.fork()
+                    if pid == 0:
+                        try:
+                            import jittor_utils
+                            jittor_utils.cc.init_subprocess()
+                            jt.jt_init_subprocess()
+                            if self.lock.fd == new_fd:
+                                raise AssertionError("child kept the inherited fd")
+                            open(os.path.join(directory, f"ready-{worker_id}"), "w").close()
+                            if not wait_for(start_path):
+                                raise TimeoutError("parent did not start the workers")
+                            with jit_lock.lock_scope():
+                                with jit_lock.lock_scope():
+                                    pass
+                                with open(os.path.join(directory, f"state-{worker_id}"), "w") as state:
+                                    state.write("held=%s disable=%s fd=%s inode=%s\n" % (
+                                        jt.core.lock_is_held(), jt.flags.disable_lock,
+                                        self.lock.fd, os.fstat(self.lock.fd).st_ino))
+                                open(os.path.join(directory, f"acquired-{worker_id}"), "w").close()
+                                if not wait_for(release_path):
+                                    raise TimeoutError("parent did not release workers")
+                        except BaseException:
+                            with open(os.path.join(directory, f"error-{worker_id}"), "w") as error:
+                                error.write(traceback.format_exc())
+                            os._exit(1)
+                        os._exit(0)
+                    children.append(pid)
+
+                self.assertTrue(all(wait_for(os.path.join(directory, f"ready-{i}"))
+                                    for i in range(2)), "children did not initialize")
+                open(start_path, "w").close()
+                self.assertTrue(wait_for(os.path.join(directory, "acquired-0")) or
+                                wait_for(os.path.join(directory, "acquired-1")),
+                                "no child acquired the lock")
+                # Keep the first holder inside the scope while the sibling
+                # attempts acquisition. Shared OFDs incorrectly let both in.
+                overlap_deadline = time.monotonic() + 1.0
+                while time.monotonic() < overlap_deadline:
+                    if all(os.path.exists(os.path.join(directory, f"acquired-{i}"))
+                           for i in range(2)):
+                        break
+                    time.sleep(0.01)
+                states = {
+                    i: (open(os.path.join(directory, f"state-{i}")).read().strip()
+                        if os.path.exists(os.path.join(directory, f"state-{i}"))
+                        else "not acquired")
+                    for i in range(2)
+                }
+                self.assertEqual(
+                    sum(os.path.exists(os.path.join(directory, f"acquired-{i}"))
+                        for i in range(2)),
+                    1,
+                    "forked workers entered the build critical section together: " +
+                    repr(states),
+                )
+            finally:
+                open(start_path, "a").close()
+                open(release_path, "a").close()
+                if self.lock.is_locked:
+                    self.lock.unlock()
+                for pid in children:
+                    _, status = os.waitpid(pid, 0)
+                    child_statuses.append((pid, status))
+                self.lock.fd = original_fd
+                self.lock.filename = original_path
+                self.lock.core.set_lock_fd(original_fd, False)
+                os.close(new_fd)
+            for pid, status in child_statuses:
+                self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0,
+                                f"worker {pid} failed: " +
+                                next((open(os.path.join(directory, f"error-{i}")).read()
+                                      for i, child_pid in enumerate(children)
+                                      if child_pid == pid and
+                                      os.path.exists(os.path.join(directory, f"error-{i}"))),
+                                     "no child traceback"))
+
+    @unittest.skipUnless(hasattr(os, "fork"), "fork is required")
+    def test_fork_child_does_not_release_parent_held_lock(self):
+        if self.lock.is_locked:
+            self.skipTest("the parent already holds the session build lock")
+
+        original_fd = self.lock.fd
+        original_path = self.lock.filename
+        with tempfile.TemporaryDirectory() as directory:
+            lock_path = os.path.join(directory, "jittor.lock")
+            ready_path = os.path.join(directory, "ready")
+            acquired_path = os.path.join(directory, "acquired")
+            error_path = os.path.join(directory, "error")
+            new_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+            self.lock.fd = new_fd
+            self.lock.filename = lock_path
+            self.lock.core.set_lock_fd(new_fd, False)
+            self.lock.lock()
+            pid = os.fork()
+            if pid == 0:
+                try:
+                    import jittor_utils
+                    jittor_utils.cc.init_subprocess()
+                    jt.jt_init_subprocess()
+                    if self.lock.fd == new_fd:
+                        raise AssertionError("child kept the inherited fd")
+                    open(ready_path, "w").close()
+                    self.lock.lock()
+                    open(acquired_path, "w").close()
+                    self.lock.unlock()
+                except BaseException:
+                    with open(error_path, "w") as error:
+                        error.write(traceback.format_exc())
+                    os._exit(1)
+                os._exit(0)
+
+            try:
+                self.assertTrue(
+                    self._wait_for_path(ready_path), "child did not initialize")
+                self.assertTrue(self.lock.is_locked)
+                self.assertEqual(_lock_state(lock_path), "busy")
+                self.assertFalse(os.path.exists(acquired_path),
+                                 "child entered while the parent still held the lock")
+                self.lock.unlock()
+                self.assertTrue(
+                    self._wait_for_path(acquired_path), "child did not acquire after release")
+            finally:
+                if self.lock.is_locked:
+                    self.lock.unlock()
+                _, status = os.waitpid(pid, 0)
+                self.lock.fd = original_fd
+                self.lock.filename = original_path
+                self.lock.core.set_lock_fd(original_fd, False)
+                os.close(new_fd)
+            self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0,
+                            "child failed: " +
+                            (open(error_path).read() if os.path.exists(error_path)
+                             else "no child traceback"))
+
+    @staticmethod
+    def _wait_for_path(path, timeout=10):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if os.path.exists(path):
+                return True
+            time.sleep(0.01)
+        return False
 
 
 @unittest.skipIf(os.name == 'nt', "flock semantics are POSIX only")
