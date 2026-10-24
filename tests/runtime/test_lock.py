@@ -276,9 +276,12 @@ class TestBuildLockIsShared(unittest.TestCase):
         original_open = os.open
         parent_pid = os.getpid()
         pid = None
+        child_reaped = False
         with tempfile.TemporaryDirectory() as directory:
             lock_path = os.path.join(directory, "jittor.lock")
             result_path = os.path.join(directory, "child-result.json")
+            ready_path = os.path.join(directory, "child-failed-closed")
+            release_path = os.path.join(directory, "parent-released")
             new_fd = original_open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
             self.lock.fd = new_fd
             self.lock.filename = lock_path
@@ -308,18 +311,38 @@ class TestBuildLockIsShared(unittest.TestCase):
                             core_result = "unexpected success"
                         result = {"python_lock": python_error or "no Python error",
                                   "core_lock_acquire": core_result}
+                        with open(result_path, "w") as output:
+                            json.dump(result, output)
+                        open(ready_path, "w").close()
+                        if not self._wait_for_path(release_path):
+                            raise TimeoutError("parent did not release the original lock")
+
+                        # Bypass the injected reopen failure with a genuinely
+                        # new description, then prove set_lock_fd clears the
+                        # fail-closed child state only after rebinding.
+                        recovery_fd = original_open(lock_path, os.O_RDWR)
+                        self.lock.core.set_lock_fd(recovery_fd, False)
+                        self.lock.core.lock_acquire()
+                        recovered = self.lock.core.lock_is_held()
+                        self.lock.core.lock_release()
+                        result["rebound_lock_acquire"] = "succeeded"
+                        result["rebound_lock_was_held"] = recovered
+                        with open(result_path, "w") as output:
+                            json.dump(result, output)
                     except BaseException:
                         result = {"child_error": traceback.format_exc()}
-                    with open(result_path, "w") as output:
-                        json.dump(result, output)
+                        with open(result_path, "w") as output:
+                            json.dump(result, output)
+                        if not os.path.exists(ready_path):
+                            open(ready_path, "w").close()
+                        os._exit(1)
                     os._exit(0)
 
                 os.open = original_open
-                _, status = os.waitpid(pid, 0)
+                self.assertTrue(self._wait_for_path(ready_path),
+                                "child did not report its failed-rebind state")
                 result_text = open(result_path).read() if os.path.exists(result_path) else \
                     "child result file missing"
-                self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0,
-                                f"fork child failed with wait status {status}: {result_text}")
                 result = json.loads(result_text)
                 self.assertNotIn("child_error", result, result.get("child_error", ""))
                 self.assertIn("could not reopen the build lock after fork",
@@ -342,13 +365,33 @@ class TestBuildLockIsShared(unittest.TestCase):
                     os.close(probe_fd)
                 self.assertTrue(parent_kernel_lock_held,
                                 "child failure released the parent's kernel lock")
+
+                # The child may acquire on its fresh descriptor only after the
+                # parent releases the original OFD.
+                self.lock.unlock()
+                open(release_path, "w").close()
+                _, status = os.waitpid(pid, 0)
+                child_reaped = True
+                result_text = open(result_path).read() if os.path.exists(result_path) else \
+                    "child result file missing"
+                self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0,
+                                f"fork child failed with wait status {status}: {result_text}")
+                result = json.loads(result_text)
+                self.assertNotIn("child_error", result, result.get("child_error", ""))
+                self.assertEqual(result.get("rebound_lock_acquire"), "succeeded")
+                self.assertTrue(result.get("rebound_lock_was_held"), result)
             finally:
                 os.open = original_open
-                if pid is not None:
+                if pid is not None and not child_reaped:
+                    open(release_path, "w").close()
+                    if self.lock.is_locked:
+                        self.lock.unlock()
                     try:
-                        os.waitpid(pid, 0)
+                        _, status = os.waitpid(pid, 0)
                     except ChildProcessError:
                         pass
+                    else:
+                        child_reaped = True
                 if self.lock.is_locked:
                     self.lock.unlock()
                 self.lock.fd = original_fd
