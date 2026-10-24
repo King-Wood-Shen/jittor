@@ -296,24 +296,24 @@ public:
     // report written in place the steps were calls. The report -- the same
     // assertion, condition and message -- runs out of line, only when the
     // condition has already failed.
-    __attribute__((always_inline)) bool own() {
+    JITTOR_FORCE_INLINE bool own() {
         if (PREDICT_BRANCH_NOT_TAKEN(!(value_ >= 0 && value_ < std::numeric_limits<int>::max())))
             report_own();
         return ++value_ == 1;
     }
 
-    __attribute__((always_inline)) bool release() {
+    JITTOR_FORCE_INLINE bool release() {
         if (PREDICT_BRANCH_NOT_TAKEN(!(value_ > 0))) report_release();
         return --value_ == 0;
     }
 
 private:
-    __attribute__((noinline, cold)) void report_own() const {
+    JITTOR_NOINLINE JITTOR_COLD void report_own() const {
         ASSERT(value_ >= 0 && value_ < std::numeric_limits<int>::max())
             << kind_name() << "liveness own overflow";
     }
 
-    __attribute__((noinline, cold)) void report_release() const {
+    JITTOR_NOINLINE JITTOR_COLD void report_release() const {
         ASSERT(value_ > 0) << kind_name()
             << "liveness release without a matching owner";
     }

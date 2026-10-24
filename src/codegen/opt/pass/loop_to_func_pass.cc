@@ -26,6 +26,8 @@ void LoopToFuncPass::run() {
     if ((cc_type=="icc" || cc_type=="g++") && choice)
         // icc will failed if not inline when parallel
         ir->push_back("#define INLINE_FUNC inline static void ", &ir->before);
+    else if (cc_type=="cl")
+        ir->push_back("#define INLINE_FUNC __forceinline static void ", &ir->before);
     else
         ir->push_back("#define INLINE_FUNC __attribute__((always_inline)) static void ", &ir->before);
     for (uint i=0; i<ir->children.size(); i++) {

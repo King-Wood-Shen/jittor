@@ -35,6 +35,17 @@ void expect_error(std::function<void()> func);
 
 #ifdef _MSC_VER
 #define __builtin_popcount __popcnt
+#define JITTOR_FORCE_INLINE __forceinline
+#define JITTOR_NOINLINE __declspec(noinline)
+#define JITTOR_COLD
+#elif defined(__GNUC__) || defined(__clang__)
+#define JITTOR_FORCE_INLINE __attribute__((always_inline))
+#define JITTOR_NOINLINE __attribute__((noinline))
+#define JITTOR_COLD __attribute__((cold))
+#else
+#define JITTOR_FORCE_INLINE inline
+#define JITTOR_NOINLINE
+#define JITTOR_COLD
 #endif
 
 #if defined(HAS_CUDA) && !defined(HAS_ACCELERATOR)

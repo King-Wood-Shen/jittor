@@ -120,7 +120,7 @@ struct LivenessEntry {
 class LivenessQueue {
     LivenessEntry* data_ = nullptr;
     size_t size_ = 0, capacity_ = 0;
-    __attribute__((noinline)) void grow() {
+    JITTOR_NOINLINE void grow() {
         size_t capacity = capacity_ ? capacity_ * 2 : 256;
         auto* data = (LivenessEntry*)realloc(data_, capacity * sizeof(LivenessEntry));
         CHECK(data) << "out of memory growing the liveness queue";
