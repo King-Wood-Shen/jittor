@@ -46,6 +46,9 @@ namespace jittor {
 static HANDLE lock_handle = INVALID_HANDLE_VALUE;
 #endif
 static int lock_fd = -1;
+#ifndef _WIN32
+static int lock_rebind_required = 0;
+#endif
 int _has_lock = 0;
 
 // A fork child must not inherit a stale reentrant scope or a mutex owned by
@@ -67,6 +70,7 @@ static void lock_after_fork_parent() {
 static void lock_after_fork_child() {
     guard_depth = 0;
     _has_lock = 0;
+    lock_rebind_required = 1;
     guard_mutex.unlock();
 }
 
@@ -152,8 +156,11 @@ void set_lock_fd(int64 fd, bool has_lock) {
 #ifdef _WIN32
     lock_handle = (HANDLE)fd;
 #else
+    ASSERT(fd >= 0);
+    ASSERT(fcntl((int)fd, F_GETFD) != -1) << "cannot bind an invalid build lock fd";
     register_lock_atfork_handlers();
     lock_fd = (int)fd;
+    lock_rebind_required = 0;
 #endif
     _has_lock = has_lock ? 1 : 0;
     LOGv << "SHARE LOCK fd:" << fd << "has_lock:" << _has_lock
@@ -167,6 +174,8 @@ void lock() {
     OVERLAPPED offset = {0, 0, 0, 0, NULL};
     ASSERT(LockFileEx(lock_handle, 2, 0, -0x10000, 0, &offset));
 #else
+    ASSERT(!lock_rebind_required)
+        << "POSIX build lock must be rebound in the fork child before use";
     ASSERT(lock_fd >= 0);
     auto start = std::chrono::steady_clock::now();
     bool reported = false;

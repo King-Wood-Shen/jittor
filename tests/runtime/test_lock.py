@@ -9,6 +9,7 @@
 # ***************************************************************
 import unittest
 import os
+import json
 import subprocess
 import tempfile
 import time
@@ -264,6 +265,96 @@ class TestBuildLockIsShared(unittest.TestCase):
                                       if child_pid == pid and
                                       os.path.exists(os.path.join(directory, f"error-{i}"))),
                                      "no child traceback"))
+
+    @unittest.skipUnless(hasattr(os, "fork"), "fork is required")
+    def test_fork_child_fails_closed_when_lock_reopen_fails(self):
+        if self.lock.is_locked:
+            self.skipTest("the parent already holds the session build lock")
+
+        original_fd = self.lock.fd
+        original_path = self.lock.filename
+        original_open = os.open
+        parent_pid = os.getpid()
+        pid = None
+        with tempfile.TemporaryDirectory() as directory:
+            lock_path = os.path.join(directory, "jittor.lock")
+            result_path = os.path.join(directory, "child-result.json")
+            new_fd = original_open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+            self.lock.fd = new_fd
+            self.lock.filename = lock_path
+            self.lock.core.set_lock_fd(new_fd, False)
+            self.lock.lock()
+
+            def fail_child_reopen(path, flags, *args, **kwargs):
+                if os.getpid() != parent_pid and os.fspath(path) == lock_path:
+                    raise OSError(24, "injected fork-child lock reopen failure")
+                return original_open(path, flags, *args, **kwargs)
+
+            try:
+                os.open = fail_child_reopen
+                pid = os.fork()
+                if pid == 0:
+                    try:
+                        python_error = None
+                        try:
+                            self.lock.lock()
+                        except RuntimeError as error:
+                            python_error = str(error)
+                        try:
+                            self.lock.core.lock_acquire()
+                        except BaseException as error:
+                            core_result = type(error).__name__ + ": " + str(error)
+                        else:
+                            core_result = "unexpected success"
+                        result = {"python_lock": python_error or "no Python error",
+                                  "core_lock_acquire": core_result}
+                    except BaseException:
+                        result = {"child_error": traceback.format_exc()}
+                    with open(result_path, "w") as output:
+                        json.dump(result, output)
+                    os._exit(0)
+
+                os.open = original_open
+                _, status = os.waitpid(pid, 0)
+                result_text = open(result_path).read() if os.path.exists(result_path) else \
+                    "child result file missing"
+                self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0,
+                                f"fork child failed with wait status {status}: {result_text}")
+                result = json.loads(result_text)
+                self.assertNotIn("child_error", result, result.get("child_error", ""))
+                self.assertIn("could not reopen the build lock after fork",
+                              result["python_lock"])
+                self.assertIn("must be rebound in the fork child",
+                              result["core_lock_acquire"])
+                self.assertTrue(self.lock.core.lock_is_held(),
+                                "child failure changed the parent's in-process lock state")
+                probe_fd = original_open(lock_path, os.O_RDWR)
+                try:
+                    try:
+                        jit_lock.fcntl.flock(
+                            probe_fd, jit_lock.fcntl.LOCK_EX | jit_lock.fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        parent_kernel_lock_held = True
+                    else:
+                        parent_kernel_lock_held = False
+                        jit_lock.fcntl.flock(probe_fd, jit_lock.fcntl.LOCK_UN)
+                finally:
+                    os.close(probe_fd)
+                self.assertTrue(parent_kernel_lock_held,
+                                "child failure released the parent's kernel lock")
+            finally:
+                os.open = original_open
+                if pid is not None:
+                    try:
+                        os.waitpid(pid, 0)
+                    except ChildProcessError:
+                        pass
+                if self.lock.is_locked:
+                    self.lock.unlock()
+                self.lock.fd = original_fd
+                self.lock.filename = original_path
+                self.lock.core.set_lock_fd(original_fd, False)
+                os.close(new_fd)
 
     @unittest.skipUnless(hasattr(os, "fork"), "fork is required")
     def test_fork_child_does_not_release_parent_held_lock(self):
