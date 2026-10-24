@@ -34,6 +34,9 @@ from _helpers.process_modes import is_torch_mode_path  # noqa: E402
 _NATIVE_TARGET = "tests/runtime/test_flags.py"
 _TORCH_TARGET = "compat/tests/torch/test_torch_compiler_fidelity.py"
 _TORCH_TRITON_BACKEND_TARGET = "compat/tests/triton/test_triton_backend.py"
+_TORCH_SERIALIZATION_TARGET = "tests/serialization/test_torch_serialization_ownership.py"
+_NATIVE_SERIALIZATION_TARGET = "tests/serialization/test_native_serialization_ownership.py"
+_SHARDED_CHECKPOINT_TARGET = "tests/serialization/test_sharded_checkpoint.py"
 
 
 #: ``compiler.JIT_UTILS_UPDATED_EXIT_CODE``. Duplicated rather than imported
@@ -46,6 +49,13 @@ def test_triton_backend_compat_tests_are_torch_mode():
     """Host-only bridge checks still import the Torch compatibility frontend."""
     assert is_torch_mode_path(_TORCH_TRITON_BACKEND_TARGET)
     assert not is_torch_mode_path(_NATIVE_TARGET)
+
+
+def test_torch_archive_interop_isolated_from_native_serialization():
+    """The optional real-Torch import must not pollute native workers."""
+    assert is_torch_mode_path(_TORCH_SERIALIZATION_TARGET)
+    assert not is_torch_mode_path(_NATIVE_SERIALIZATION_TARGET)
+    assert not is_torch_mode_path(_SHARDED_CHECKPOINT_TARGET)
 
 
 def _collect(targets, torch_mode=None, attempts=3):

@@ -36,6 +36,9 @@ TORCH_MODE_PATHS = (
     "tests/core/test_regression.py",
     "tests/type/test_type_system.py",
     "tests/structure",
+    # This archive round trip imports Torch in the test process; keep that
+    # optional interoperability check out of native xdist workers.
+    "tests/serialization/test_torch_serialization_ownership.py",
     "compat/tests/triton/test_triton_torch_compat.py",
     # The backend contract suite imports jittor.compat.triton from host-only
     # test methods too; keep that frontend import out of native workers.
