@@ -28,16 +28,24 @@ if str(TEST_ROOT) not in sys.path:
     sys.path.insert(0, str(TEST_ROOT))
 
 from _helpers.child_process import run_python_child  # noqa: E402
+from _helpers.process_modes import is_torch_mode_path  # noqa: E402
 
 #: A native file, and a Torch-mode file that is cheap to collect.
 _NATIVE_TARGET = "tests/runtime/test_flags.py"
 _TORCH_TARGET = "compat/tests/torch/test_torch_compiler_fidelity.py"
+_TORCH_TRITON_BACKEND_TARGET = "compat/tests/triton/test_triton_backend.py"
 
 
 #: ``compiler.JIT_UTILS_UPDATED_EXIT_CODE``. Duplicated rather than imported
 #: because importing it means importing jittor, and this module is collected in
 #: Torch mode where that is the thing under test.
 _JIT_UTILS_UPDATED_EXIT_CODE = 3
+
+
+def test_triton_backend_compat_tests_are_torch_mode():
+    """Host-only bridge checks still import the Torch compatibility frontend."""
+    assert is_torch_mode_path(_TORCH_TRITON_BACKEND_TARGET)
+    assert not is_torch_mode_path(_NATIVE_TARGET)
 
 
 def _collect(targets, torch_mode=None, attempts=3):
