@@ -923,16 +923,20 @@ def _snapshot_selected_files(config):
         # must not be reported as a file the session proved nothing about
         # either. Otherwise refusing it would only move its red from
         # "collection error" to "collected 0 tests".
+        ignored = [
+            "--ignore=" + _relative_to_repo(_absolute_selection(item, invocation))
+            for item in getattr(config.option, "ignore", []) or []
+        ]
+        # Mirror pytest_ignore_collect: a Torch-mode selection can deliberately
+        # traverse tests/structure while leaving explicitly native files to the
+        # native session. Keep the execution audit's static selection aligned
+        # with that process-mode boundary instead of counting those files as
+        # uncollected failures.
+        if _torch_mode_is_active():
+            ignored.extend("--ignore=" + path for path in NATIVE_MODE_PATHS)
         _SELECTED_FILES.update(
             path
-            for path in selected_files(
-                TEST_ROOT.parent,
-                arguments
-                + [
-                    "--ignore=" + _relative_to_repo(_absolute_selection(item, invocation))
-                    for item in getattr(config.option, "ignore", []) or []
-                ],
-            )
+            for path in selected_files(TEST_ROOT.parent, arguments + ignored)
             if not _refuses_collection(REPO_ROOT / path)
         )
     except Exception:
