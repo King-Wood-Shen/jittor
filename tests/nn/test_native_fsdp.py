@@ -10,12 +10,30 @@ from jittor.distributed.fsdp import FullyShardedDataParallel, MixedPrecisionPoli
 from _helpers.native_fsdp import model, optimizer, run_step, equal
 
 
+_TORCH_FRONTEND_MODULES = (
+    "jittor.compat.torch",
+    "jittor.compat.shim",
+    "jittor.compat.fsdp2",
+    "jittor.compat.triton",
+    "jittor.torch_compat",
+    "jittor.torch_shim",
+    "jittor.torch_fsdp2_compat",
+    "jittor.triton_shim",
+)
+
+
+def _torch_frontend_is_loaded():
+    return any(
+        name == prefix or name.startswith(prefix + ".")
+        for name in sys.modules
+        for prefix in _TORCH_FRONTEND_MODULES
+    )
+
+
 @pytest.mark.parametrize("kind", ["sgd", "adamw"])
 @pytest.mark.parametrize("accumulate", [1, 2])
 def test_complete_gradient_update_accumulation_and_resume(kind, accumulate, tmp_path):
-    assert "torch" not in sys.modules and not any(
-        n.startswith("jittor.compat") for n in sys.modules
-    )
+    assert "torch" not in sys.modules and not _torch_frontend_is_loaded()
     module = FullyShardedDataParallel(model(jt, native=True))
     opt = optimizer(jt, module, kind)
     baseline = model(jt, native=True)
