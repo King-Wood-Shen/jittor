@@ -37,4 +37,7 @@ TORCH_MODE_PATHS = (
     "tests/type/test_type_system.py",
     "tests/structure",
     "compat/tests/triton/test_triton_torch_compat.py",
+    # The backend contract suite imports jittor.compat.triton from host-only
+    # test methods too; keep that frontend import out of native workers.
+    "compat/tests/triton/test_triton_backend.py",
 )
