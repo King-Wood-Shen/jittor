@@ -1808,6 +1808,17 @@ _CPU_PROBE = (
 def _cpu_gate_env(session):
     """The environment both CPU tiers run in, and what it refuses to inherit."""
     _root, env = _session_env(session, "cpu")
+    # safe.directory is multi-valued. Reset an inherited wildcard before
+    # trusting only this checkout for CPU-gate subprocesses.
+    env.update(
+        {
+            "GIT_CONFIG_COUNT": "2",
+            "GIT_CONFIG_KEY_0": "safe.directory",
+            "GIT_CONFIG_VALUE_0": "",
+            "GIT_CONFIG_KEY_1": "safe.directory",
+            "GIT_CONFIG_VALUE_1": str(REPO_ROOT),
+        }
+    )
     # Nox overlays this mapping on the parent environment, so removing the key
     # would still leak a caller-provided real Torch into ordinary Jittor tests.
     env["REAL_TORCH_SITE"] = ""
