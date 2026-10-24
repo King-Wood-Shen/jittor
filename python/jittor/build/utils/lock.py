@@ -80,6 +80,66 @@ lock_report_after = _env_seconds("JT_LOCK_REPORT_AFTER", 30.0)
 _HOLDER_RECORD_SIZE = 4096
 
 
+def _pwrite(fd, data, offset):
+    """Write at ``offset`` without changing ``fd``'s position.
+
+    ``os.pwrite`` is not available on every platform (notably Windows). The
+    build lock is held while its holder record is updated, so a seek/write/
+    restore sequence is safe there and keeps the same positional-I/O contract.
+    """
+    positional_write = getattr(os, "pwrite", None)
+    if positional_write is not None:
+        written = 0
+        while written < len(data):
+            count = positional_write(fd, data[written:], offset + written)
+            if count <= 0:
+                raise OSError("positional write made no progress")
+            written += count
+        return
+
+    position = os.lseek(fd, 0, os.SEEK_CUR)
+    try:
+        os.lseek(fd, offset, os.SEEK_SET)
+        written = 0
+        while written < len(data):
+            count = os.write(fd, data[written:])
+            if count <= 0:
+                raise OSError("write made no progress")
+            written += count
+    finally:
+        os.lseek(fd, position, os.SEEK_SET)
+
+
+def _pread(fd, size, offset):
+    """Read from ``offset`` without changing ``fd``'s position."""
+    positional_read = getattr(os, "pread", None)
+    if positional_read is not None:
+        chunks = []
+        read = 0
+        while read < size:
+            chunk = positional_read(fd, size - read, offset + read)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            read += len(chunk)
+        return b"".join(chunks)
+
+    position = os.lseek(fd, 0, os.SEEK_CUR)
+    try:
+        os.lseek(fd, offset, os.SEEK_SET)
+        chunks = []
+        read = 0
+        while read < size:
+            chunk = os.read(fd, size - read)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            read += len(chunk)
+        return b"".join(chunks)
+    finally:
+        os.lseek(fd, position, os.SEEK_SET)
+
+
 def _self_cmdline():
     try:
         with open("/proc/self/cmdline", "rb") as f:
@@ -100,7 +160,7 @@ def _write_holder(fd):
     blob = record.encode("utf8")[:_HOLDER_RECORD_SIZE - 1] + b"\n"
     try:
         os.ftruncate(fd, 0)
-        os.pwrite(fd, blob, 0)
+        _pwrite(fd, blob, 0)
     except OSError as e:
         # A read-only or full filesystem must not stop us from building; the
         # only thing lost is the diagnostic.
@@ -120,8 +180,8 @@ def _pid_alive(pid):
 def describe_holder(fd):
     '''Human readable description of whoever wrote the holder record.'''
     try:
-        raw = os.pread(fd, _HOLDER_RECORD_SIZE, 0)
-    except (OSError, AttributeError):
+        raw = _pread(fd, _HOLDER_RECORD_SIZE, 0)
+    except OSError:
         return "holder unknown"
     text = raw.split(b"\0", 1)[0].decode("utf8", "replace").strip()
     if not text:
