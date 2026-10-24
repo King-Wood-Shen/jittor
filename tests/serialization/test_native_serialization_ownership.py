@@ -1,6 +1,7 @@
 """Native runtime round trips for the checkpoint implementation move."""
 
 import importlib
+import importlib.util
 import pickle
 import sys
 from types import ModuleType
@@ -8,6 +9,8 @@ from types import ModuleType
 import jittor as jt
 import numpy as np
 import pytest
+
+from _helpers.child_process import run_python_child
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +26,30 @@ def test_native_save_load_roundtrip(tmp_path):
     restored = jt.load(path)
     assert restored["epoch"] == 3
     np.testing.assert_array_equal(restored["weight"].numpy(), source["weight"].numpy())
+
+
+def test_torch_archive_save_load_roundtrip(tmp_path):
+    if importlib.util.find_spec("torch") is None:
+        pytest.skip("real PyTorch is not installed")
+    source = """
+import sys
+import jittor as jt
+import numpy as np
+import torch
+assert not hasattr(torch, "_torch_compat_install_context")
+path = sys.argv[1]
+values = {"weight": jt.array([[1.25, -2.0], [3.5, 4.0]]),
+          "steps": jt.array([1, 3, 7]).int32()}
+jt.save(values, path)
+restored = jt.load(path)
+for name in values:
+    assert restored[name].dtype == values[name].dtype
+    np.testing.assert_array_equal(restored[name].numpy(), values[name].numpy())
+"""
+    completed = run_python_child(
+        ["-c", source, str(tmp_path / "weights.pth")],
+        merge_stderr=True, without_torch_mode=True)
+    assert completed.returncode == 0, completed.stdout[-3000:]
 
 
 def test_torch_archive_does_not_require_preloaded_torch_utils(tmp_path, monkeypatch):

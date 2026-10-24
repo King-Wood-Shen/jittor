@@ -34,7 +34,6 @@ from _helpers.process_modes import is_torch_mode_path  # noqa: E402
 _NATIVE_TARGET = "tests/runtime/test_flags.py"
 _TORCH_TARGET = "compat/tests/torch/test_torch_compiler_fidelity.py"
 _TORCH_TRITON_BACKEND_TARGET = "compat/tests/triton/test_triton_backend.py"
-_TORCH_SERIALIZATION_TARGET = "tests/serialization/test_torch_serialization_ownership.py"
 _NATIVE_SERIALIZATION_TARGET = "tests/serialization/test_native_serialization_ownership.py"
 _SHARDED_CHECKPOINT_TARGET = "tests/serialization/test_sharded_checkpoint.py"
 
@@ -51,11 +50,30 @@ def test_triton_backend_compat_tests_are_torch_mode():
     assert not is_torch_mode_path(_NATIVE_TARGET)
 
 
-def test_torch_archive_interop_isolated_from_native_serialization():
-    """The optional real-Torch import must not pollute native workers."""
-    assert is_torch_mode_path(_TORCH_SERIALIZATION_TARGET)
+def test_torch_archive_oracle_runs_in_an_isolated_native_child():
+    """Keep real-Torch imports out of native xdist workers."""
     assert not is_torch_mode_path(_NATIVE_SERIALIZATION_TARGET)
     assert not is_torch_mode_path(_SHARDED_CHECKPOINT_TARGET)
+    source = (TEST_ROOT / "serialization/test_native_serialization_ownership.py").read_text(
+        encoding="utf-8")
+    tree = ast.parse(source)
+    test = next(node for node in tree.body
+                if isinstance(node, ast.FunctionDef)
+                and node.name == "test_torch_archive_save_load_roundtrip")
+    calls = [node for node in ast.walk(test)
+             if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Name)
+             and node.func.id == "run_python_child"]
+    self_isolated = [call for call in calls if any(
+        keyword.arg == "without_torch_mode"
+        and isinstance(keyword.value, ast.Constant)
+        and keyword.value.value is True
+        for keyword in call.keywords)]
+    assert len(calls) == 1 and len(self_isolated) == 1
+    assert any(isinstance(node, ast.Call)
+               and isinstance(node.func, ast.Attribute)
+               and node.func.attr == "find_spec"
+               for node in ast.walk(test))
 
 
 def _collect(targets, torch_mode=None, attempts=3):
