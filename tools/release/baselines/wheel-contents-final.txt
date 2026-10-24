@@ -1,10 +1,10 @@
 # Jittor wheel contents baseline (SHA-256 and exact archive member paths)
 # source-wheel: jittor-2.0.0-py3-none-any.whl
-# source-wheel-sha256: 42c87a18f7303101eb595a3c017c16e6aa6eb41b7009a1b763e7039b77170451
+# source-wheel-sha256: ecece67d56aa3380004631940ca049035473761fed9eec2a8afc0976e00e9bbd
 # entries: 1133
 # Regenerate only after reviewing every path and content change.
 fb0d15cb73dc519400967b63b0091df66a8c4388e3cb7dd107b8fc40fcc5054f  jittor-2.0.0.dist-info/METADATA
-57cebf7941ac7739508ac972f712dae93fca91227b30e2ed38c19d4792f9a766  jittor-2.0.0.dist-info/RECORD
+7c3261354c375158e7e169f9b311456ea7aa8edd340fa16bcd0be1d7c1e82693  jittor-2.0.0.dist-info/RECORD
 2b6eb4118ce7cd7b09601406aa623c553c4476265836f0d9c16f5c061f7efcc0  jittor-2.0.0.dist-info/WHEEL
 435a22ada7651633d681246096725d6b8a5d15b729df61706c5637cbc58c39c7  jittor-2.0.0.dist-info/entry_points.txt
 8b18f18c9c43b17e6e2bcdefc8df9d423c12e6769d5d13cf6a46fed31e7e1666  jittor-2.0.0.dist-info/licenses/LICENSE.txt
@@ -687,7 +687,7 @@ b5c2e1f0a6023fbe6db58e7c101cb72813e2314cdb9aed7a3e1f359792f9062e  jittor/optim/_
 0279efb74f0ea98760aab03cdf86ca123a341be500195ea9807b5595d786cd02  jittor/optim/algorithms/adam.py
 25ffaf7ca4dff2151ec90aeb33bc27426d5b79d2aac3a646000a4a9f7f638907  jittor/optim/algorithms/adan.py
 f4ed486d3dfb8275dec1709ddd1f5b4281b2d1a1dc790c46276579367a4285fd  jittor/optim/algorithms/rmsprop.py
-56c48e8e9bd3fc2fd865ba1f8ee23fdedd355050f3f19eafdb421a7a8fd59caf  jittor/optim/algorithms/sgd.py
+1a72b38e1fb05448084bbdd2aea5d56f4a130748429295b3712e640216d1f7e7  jittor/optim/algorithms/sgd.py
 0b96dd54f327fb20a27dfc617a5da80c1998fbf209b228d7a03444cfd8d5e2fd  jittor/optim/base.py
 7018811072915c4871ffde94c020cb8e4cea70102cde93d4a8bce97243e1e725  jittor/optim/legacy_schedulers.py
 e8a00ebeb119d7c28ba366e184c7d913c28814ce41393a6d4c8e48ee15f9d97d  jittor/optim/schedulers.py
