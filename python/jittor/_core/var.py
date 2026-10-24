@@ -113,6 +113,8 @@ class amp_flags:
     reduce16_no_fp32_acc = 32
     #: force bfloat16 even when every input is float32
     prefer_bfloat16 = 64
+    #: empty mask for scopes that must disable all AMP policy flags
+    no_flags = 0
 
 def _amp_array_preference(ret):
     """Apply the array-like AMP preference to a freshly produced Var.

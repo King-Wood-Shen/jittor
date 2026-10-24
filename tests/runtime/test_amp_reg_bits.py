@@ -112,6 +112,9 @@ class TestTheRewrittenLiteralsAreTheSameNumbers(unittest.TestCase):
     float16 reduce path. So pin the arithmetic directly.
     """
 
+    def test_no_flags_is_the_empty_register_mask(self):
+        self.assertEqual(jt.amp_flags.no_flags, 0)
+
     def test_conv_and_matmul_used_thirty_six(self):
         f = jt.amp_flags
         self.assertEqual(f.keep_reduce | f.reduce16_no_fp32_acc, 36)
