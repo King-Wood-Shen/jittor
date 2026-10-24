@@ -1,10 +1,10 @@
 # Jittor wheel contents baseline (SHA-256 and exact archive member paths)
 # source-wheel: jittor-2.0.0-py3-none-any.whl
-# source-wheel-sha256: ec2aa37cf05fe19ee7cdf69076204fd84c46feb2c8046693fe4a874cf5885d52
+# source-wheel-sha256: a94649ef438fb61ea03ec0fcb2e0f3c6d49e5c9860a980f0e7cef705b4bc9733
 # entries: 1133
 # Regenerate only after reviewing every path and content change.
 fb0d15cb73dc519400967b63b0091df66a8c4388e3cb7dd107b8fc40fcc5054f  jittor-2.0.0.dist-info/METADATA
-6304ede6c4b2c25e46e097c2508dfdba3a9b8802a6e38e2e9c9d5e836f8d5521  jittor-2.0.0.dist-info/RECORD
+aa7c3e09720c551329a11d3520faf75fff08910683b25e43df17dd1d07aedc32  jittor-2.0.0.dist-info/RECORD
 2b6eb4118ce7cd7b09601406aa623c553c4476265836f0d9c16f5c061f7efcc0  jittor-2.0.0.dist-info/WHEEL
 435a22ada7651633d681246096725d6b8a5d15b729df61706c5637cbc58c39c7  jittor-2.0.0.dist-info/entry_points.txt
 8b18f18c9c43b17e6e2bcdefc8df9d423c12e6769d5d13cf6a46fed31e7e1666  jittor-2.0.0.dist-info/licenses/LICENSE.txt
@@ -1116,7 +1116,7 @@ d20e3240cdf3aa6c30881f70af2eb38a6fe58e91aa22cbccd6d4ab20326c27de  jittor/src/uti
 2077cb1d4e3b65a53f4c1616e518e4170c5bac733d349a55e55dc886ad8e6be8  jittor/src/utils/jit_cache_map.h
 c01a6fb226a6c8da1bc8f1a326abb145bc78da833c3d2f6683976f74a90270fb  jittor/src/utils/jit_utils.cc
 246f9297f94db3e37093f61bb84ffd3a47387fe3a3c1479564bbcc006f0c7e51  jittor/src/utils/log.cc
-26b7115ab464547e1e309df2690650e3564624f7c41f3f1e3a12ef7a132ac1fa  jittor/src/utils/log.h
+96a69fdbff0e5c1c3018557d088f32f5e6cb0f820a24f861e9af5d11f03fa304  jittor/src/utils/log.h
 639997f80f7b47606a5d452eb3bc6100092348ab0c34eb326d2b84a3d5e9a7c4  jittor/src/utils/mwsr_list.cc
 0b410dc9bc53e4fa1e37d5f2f22293286aa6087370f051078c5f32012ae5356a  jittor/src/utils/mwsr_list.h
 f1fe46e3818330805029ba3d200a462cc7c4ccd277fcf96722a0fdeddacf6360  jittor/src/utils/seh.h
