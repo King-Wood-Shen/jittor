@@ -70,10 +70,17 @@ def test_torch_archive_oracle_runs_in_an_isolated_native_child():
         and keyword.value.value is True
         for keyword in call.keywords)]
     assert len(calls) == 1 and len(self_isolated) == 1
-    assert any(isinstance(node, ast.Call)
-               and isinstance(node.func, ast.Attribute)
-               and node.func.attr == "find_spec"
-               for node in ast.walk(test))
+    availability_calls = [
+        node
+        for node in ast.walk(test)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "modules_available"
+        and len(node.args) == 1
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == "torch"
+    ]
+    assert len(availability_calls) == 1
 
 
 def _collect(targets, torch_mode=None, attempts=3):
