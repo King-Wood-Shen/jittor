@@ -97,6 +97,16 @@ class TestErrorClasses(unittest.TestCase):
                 self.assertTrue(issubclass(cls, jt.JittorError))
         self.assertTrue(issubclass(jt.JittorError, RuntimeError))
 
+    def test_backward_probe_order_violation_is_an_internal_error(self):
+        outer = jt.core._begin_step_backward_probe()
+        inner = jt.core._begin_step_backward_probe()
+        try:
+            error = self._raised(lambda: jt.core._end_step_backward_probe(outer))
+            self.assertIsInstance(error, jt.JittorInternalError)
+        finally:
+            jt.core._end_step_backward_probe(inner)
+            jt.core._end_step_backward_probe(outer)
+
     def test_matmul_and_conv_raise_the_same_shape_error(self):
         """matmul raised RuntimeError and conv ValueError for the same kind of
         mistake. One class that is both keeps either `except` working."""

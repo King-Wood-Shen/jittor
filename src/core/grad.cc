@@ -39,7 +39,7 @@ uint64 begin_step_backward_probe() {
 }
 
 vector<int64> end_step_backward_probe(uint64 token) {
-    USER_CHECK(!step_backward_probes.empty() && step_backward_probes.back().token == token)
+    INTERNAL_ASSERT(!step_backward_probes.empty() && step_backward_probes.back().token == token)
         << "step backward probes must end on their creating thread in LIFO order";
     auto variables = move(step_backward_probes.back().variables);
     step_backward_probes.pop_back();
@@ -76,7 +76,7 @@ PyObject* step_leaf_holders(const vector<VarHolder*>& roots) {
 }
 
 VarHolder* snapshot_step_gradient(VarHolder* gradient) {
-    USER_CHECK(gradient && gradient->var) << "cannot snapshot an absent step gradient";
+    INTERNAL_ASSERT(gradient && gradient->var) << "cannot snapshot an absent step gradient";
     return new VarHolder(gradient->var);
 }
 
