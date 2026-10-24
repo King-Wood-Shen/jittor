@@ -1,10 +1,10 @@
 # Jittor wheel contents baseline (SHA-256 and exact archive member paths)
 # source-wheel: jittor-2.0.0-py3-none-any.whl
-# source-wheel-sha256: 28943cca18cf526995737f759a582f33461a3ed565aff012af1e4b1fb587c5ac
+# source-wheel-sha256: ec2aa37cf05fe19ee7cdf69076204fd84c46feb2c8046693fe4a874cf5885d52
 # entries: 1133
 # Regenerate only after reviewing every path and content change.
 fb0d15cb73dc519400967b63b0091df66a8c4388e3cb7dd107b8fc40fcc5054f  jittor-2.0.0.dist-info/METADATA
-bc2513401511f4d11ca62d832abb8a47621c1e31d08fe63b8f8ac5dc61ed8a2a  jittor-2.0.0.dist-info/RECORD
+6304ede6c4b2c25e46e097c2508dfdba3a9b8802a6e38e2e9c9d5e836f8d5521  jittor-2.0.0.dist-info/RECORD
 2b6eb4118ce7cd7b09601406aa623c553c4476265836f0d9c16f5c061f7efcc0  jittor-2.0.0.dist-info/WHEEL
 435a22ada7651633d681246096725d6b8a5d15b729df61706c5637cbc58c39c7  jittor-2.0.0.dist-info/entry_points.txt
 8b18f18c9c43b17e6e2bcdefc8df9d423c12e6769d5d13cf6a46fed31e7e1666  jittor-2.0.0.dist-info/licenses/LICENSE.txt
@@ -687,7 +687,7 @@ b5c2e1f0a6023fbe6db58e7c101cb72813e2314cdb9aed7a3e1f359792f9062e  jittor/optim/_
 0279efb74f0ea98760aab03cdf86ca123a341be500195ea9807b5595d786cd02  jittor/optim/algorithms/adam.py
 25ffaf7ca4dff2151ec90aeb33bc27426d5b79d2aac3a646000a4a9f7f638907  jittor/optim/algorithms/adan.py
 f4ed486d3dfb8275dec1709ddd1f5b4281b2d1a1dc790c46276579367a4285fd  jittor/optim/algorithms/rmsprop.py
-56c48e8e9bd3fc2fd865ba1f8ee23fdedd355050f3f19eafdb421a7a8fd59caf  jittor/optim/algorithms/sgd.py
+f7dcd020316a61bc5338742ccb1a4f78b45b6665d11ec7f47cdf178434eae253  jittor/optim/algorithms/sgd.py
 0b96dd54f327fb20a27dfc617a5da80c1998fbf209b228d7a03444cfd8d5e2fd  jittor/optim/base.py
 7018811072915c4871ffde94c020cb8e4cea70102cde93d4a8bce97243e1e725  jittor/optim/legacy_schedulers.py
 e8a00ebeb119d7c28ba366e184c7d913c28814ce41393a6d4c8e48ee15f9d97d  jittor/optim/schedulers.py
@@ -1115,7 +1115,7 @@ d20e3240cdf3aa6c30881f70af2eb38a6fe58e91aa22cbccd6d4ab20326c27de  jittor/src/uti
 448063ba6ce7966c1b6d4882c85158d5019ca46874ce2e13d151e0de111e12a8  jittor/src/utils/hash.h
 2077cb1d4e3b65a53f4c1616e518e4170c5bac733d349a55e55dc886ad8e6be8  jittor/src/utils/jit_cache_map.h
 c01a6fb226a6c8da1bc8f1a326abb145bc78da833c3d2f6683976f74a90270fb  jittor/src/utils/jit_utils.cc
-6e814e783b2ac4e6a62f308c1bdfeeea3a7bf08dc5de9f422e4ba7e5d54f0c63  jittor/src/utils/log.cc
+246f9297f94db3e37093f61bb84ffd3a47387fe3a3c1479564bbcc006f0c7e51  jittor/src/utils/log.cc
 26b7115ab464547e1e309df2690650e3564624f7c41f3f1e3a12ef7a132ac1fa  jittor/src/utils/log.h
 639997f80f7b47606a5d452eb3bc6100092348ab0c34eb326d2b84a3d5e9a7c4  jittor/src/utils/mwsr_list.cc
 0b410dc9bc53e4fa1e37d5f2f22293286aa6087370f051078c5f32012ae5356a  jittor/src/utils/mwsr_list.h
