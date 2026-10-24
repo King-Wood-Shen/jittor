@@ -10,13 +10,13 @@
 #include <vector>
 #ifndef _WIN32
 #include <signal.h>
-#endif
-#include "utils/cross_platform.h"
 #include <fcntl.h>
 #include <poll.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
+#include "utils/cross_platform.h"
 #include <string>
 #include "utils/tracer.h"
 
@@ -155,6 +155,7 @@ void breakpoint() {
     setter_gdb_attach(gdb_attach, 1);
 }
 
+#ifndef _WIN32
 // ---------------------------------------------------------------------------
 // Pre-forked symbolizer
 // ---------------------------------------------------------------------------
@@ -469,6 +470,7 @@ void print_trace_from_signal(int signal, void* fault_pc, void* caller_pc) {
         trace_write(2, "[bt] symbolizer helper timed out\n");
     }
 }
+#endif  // !_WIN32
 
 void print_trace() {
     if (gdb_path.size()) {
