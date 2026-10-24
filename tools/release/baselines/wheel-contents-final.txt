@@ -4,7 +4,7 @@
 # entries: 1139
 # Regenerate only after reviewing every path and content change.
 fb0d15cb73dc519400967b63b0091df66a8c4388e3cb7dd107b8fc40fcc5054f  jittor-2.0.0.dist-info/METADATA
-1939605e7bccd39214e34384a1340e029f37a43296f6ed640e5d0dc58a3eec40  jittor-2.0.0.dist-info/RECORD
+becb9271c6a7a725e6d40a17fb45f359b384e64db147b51f19b51de273cc690f  jittor-2.0.0.dist-info/RECORD
 2b6eb4118ce7cd7b09601406aa623c553c4476265836f0d9c16f5c061f7efcc0  jittor-2.0.0.dist-info/WHEEL
 435a22ada7651633d681246096725d6b8a5d15b729df61706c5637cbc58c39c7  jittor-2.0.0.dist-info/entry_points.txt
 8b18f18c9c43b17e6e2bcdefc8df9d423c12e6769d5d13cf6a46fed31e7e1666  jittor-2.0.0.dist-info/licenses/LICENSE.txt
@@ -438,7 +438,7 @@ bda14165e2422633dfb9a2b46390dbe10d450a6d1990776defee9cc64097f44a  jittor/backend
 981a1d789ca00b127fd9b5ba7e93ec5dd15c359ea7828970a903615bd8500029  jittor/build/codegen.py
 53d32ca47284f6d51c08a6b8d07f2314cbfa4c8532c6d388fa12ad2ead40926d  jittor/build/compilation.py
 335187eb00e983326ca2aee9f8922b86ab66203f6f0ad49e5d3ce08a80e7d25f  jittor/build/compile_extern.py
-0c4ef249f5260798dba1528dbb943b5319ea312b5ef09f12e6e657008dd6313c  jittor/build/compiler.py
+396209dbbc8440e269e4cf0da4229ed5a8c84fe234ab9564e25c97c27c07fe0d  jittor/build/compiler.py
 00890b33eddd8caebf95e83b22dd16536df1e527e4e29ee6337d314f2c369d51  jittor/build/dlink_compiler.py
 550a826e1ba31aae33995bdeb58d9e8b9ddc3c71d81ee98d605974ad4681805c  jittor/build/dumpdef.py
 144d66a82341bb69ad1d76f271f886b1d19affe916c5d185095dc09185e68967  jittor/build/init_cupy.py
