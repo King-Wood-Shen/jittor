@@ -33,8 +33,8 @@ struct Profiler {
 
         void update(int c, uint64_t t, uint64_t in, uint64_t out, uint64_t comp) {
             count += 1<<c;
-            time_max = std::max(time_max, t>>c);
-            time_min = std::min(time_min, t>>c);
+            time_max = (std::max)(time_max, t>>c);
+            time_min = (std::min)(time_min, t>>c);
             time_total += t;
             in_total += in<<c;
             out_total += out<<c;

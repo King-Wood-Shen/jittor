@@ -39,7 +39,7 @@ struct ProfilerGuard {
 
         auto total_ns =  (int64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(stop_time-start_time).count();
         // 24ns function call overhead
-        total_ns = std::max((int64_t)1, total_ns-24);
+        total_ns = (std::max)((int64_t)1, total_ns-24);
         iter->second.update(1, total_ns, 0, 0, 0);
     }
     

@@ -20,13 +20,13 @@ struct Slice {
             else if (stop<0)
                 stop += size;
             else
-                stop = std::min(size, stop);
+                stop = (std::min)(size, stop);
         } else {
             if (mask&1) start = size-1;
             if (mask&2)
                 stop = -1;
             else if (stop<0)
-                stop = std::max((int64)0, stop+size);
+                stop = (std::max)((int64)0, stop+size);
         }
         if (start<0) {
             start += size;
@@ -206,7 +206,7 @@ struct NanoVector {
         if (is_spilled() && heap()->refcount.load(std::memory_order_acquire) == 1
             && heap()->capacity >= capacity)
             return heap();
-        int new_capacity = std::max(capacity, std::max(16, s*2));
+        int new_capacity = (std::max)(capacity, (std::max)(16, s*2));
         auto* h = NanoVectorHeap::create(new_capacity);
         for (int i=0; i<s; i++) h->values[i] = at(i);
         h->size = s;

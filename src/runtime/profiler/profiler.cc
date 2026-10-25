@@ -152,7 +152,7 @@ static void stat_peek_bandwidth(uint64 in, uint64 out, uint64 loop, uint64& peek
     auto temp1 = runtime_executor().alloc_temp(size);
     auto temp2 = runtime_executor().alloc_temp(size);
     loop = 1 << loop;
-    int warmup = std::max(loop/8, (uint64)1);
+    int warmup = (std::max)(loop/8, (uint64)1);
     for (int i=0; i<warmup; i++)
     #ifdef HAS_ACCELERATOR
         if (runtime_use_cuda())
@@ -304,7 +304,7 @@ void Profiler::record_and_run(
         }
         int64_t warmup = profiler.warmup;
         int64_t rerun = profiler.rerun + 1;
-        rerun = std::max(NanoVector::get_nbits(rerun) - 2, 0);
+        rerun = (std::max)(NanoVector::get_nbits(rerun) - 2, 0);
         int loop = 0;
         Deleter _d;
         if (is_fused) {
@@ -350,7 +350,7 @@ void Profiler::record_and_run(
             total_ns -= profiler.relay_extra_cost;
         }
         // 24ns function call overhead
-        total_ns = std::max((int64_t)1, total_ns-24);
+        total_ns = (std::max)((int64_t)1, total_ns-24);
         iter->second.update(rerun, total_ns, in, out, compute);
         if (shape_time) shape_time[0] += total_ns;
         

@@ -332,10 +332,10 @@ inline NanoString int_dtype_promote(NanoString x, NanoString y) {
     if (y.is_bool()) return x;
     bool xu = x.is_unsigned(), yu = y.is_unsigned();
     if (xu == yu)
-        return int_dtype(std::max(x.dsize_(), y.dsize_()), xu);
+        return int_dtype((std::max)(x.dsize_(), y.dsize_()), xu);
     int unsigned_size = (int)(xu ? x.dsize_() : y.dsize_());
     int signed_size = (int)(xu ? y.dsize_() : x.dsize_());
-    int size = std::max(signed_size, unsigned_size + 1);
+    int size = (std::max)(signed_size, unsigned_size + 1);
     if (size > ns_max_int_dsize) return ns_float64;
     return int_dtype(size, false);
 }
@@ -369,7 +369,7 @@ inline NanoString int_binary_dtype(NanoString op, NanoString x, NanoString y,
     if (yscalar && !xscalar) return int_dtype(x.dsize_(), x.is_unsigned());
     auto promoted = int_dtype_promote(x, y);
     if (promoted.is_float() && ns_is_integral_only(op))
-        return int_dtype(std::max(x.dsize_(), y.dsize_()),
+        return int_dtype((std::max)(x.dsize_(), y.dsize_()),
                          x.is_unsigned() && y.is_unsigned());
     return promoted;
 }
@@ -417,7 +417,7 @@ inline NanoString complex_promote(NanoString x, NanoString y) {
 inline  NanoString dtype_infer(NanoString x, NanoString y, bool xscalar=false, bool yscalar=false) {
     if (x.is_complex() || y.is_complex()) return complex_promote(x, y);  // complex propagates
     if (x.is_bool() && y.is_bool()) return ns_bool;
-    int dsize_ = std::max(x.dsize_(), y.dsize_());
+    int dsize_ = (std::max)(x.dsize_(), y.dsize_());
     // A lone scalar adopts the tensor width. Two scalars must retain the
     // widest width, rather than letting operand order choose the result.
     if (xscalar && !yscalar) dsize_ = y.dsize_();
@@ -436,7 +436,7 @@ inline  NanoString dtype_infer(NanoString x, NanoString y, bool xscalar=false, b
 inline NanoString binary_dtype_infer(NanoString op, NanoString x, NanoString y, bool xscalar=false, bool yscalar=false) {
     if (op.is_bool()) return ns_bool;   // comparisons -> bool even for complex
     if (x.is_complex() || y.is_complex()) return complex_promote(x, y);  // complex arithmetic
-    int dsize_ = std::max(x.dsize_(), y.dsize_());
+    int dsize_ = (std::max)(x.dsize_(), y.dsize_());
     // A reduction to rank 0 also carries _is_scalar. For 3 * sum(float64),
     // both flags are set; neither operand is a tensor whose width should win.
     if (xscalar && !yscalar) dsize_ = y.dsize_();
