@@ -64,10 +64,6 @@ def compile(compiler, flags, inputs, output, combind_build=False, cuda_flags="",
         if return_cmd:
             return _compiler_state.fix_cl_flags(cmd)
         return do_compile(_compiler_state.fix_cl_flags(cmd))
-    if return_cmd:
-        # The split compile/link path runs several commands; there is no single
-        # one to hand back, and silently compiling instead would be worse.
-        raise ValueError("return_cmd requires a single-command build")
     # split compile object file and link
     # remove -l -L flags when compile object files
     oflags = _compiler_state.remove_flags(flags, ['-l', '-L', '-Wl,', '.lib', '-shared'])
@@ -98,7 +94,11 @@ def compile(compiler, flags, inputs, output, combind_build=False, cuda_flags="",
             if "-Ofast" in cmd:
                 cmd = cmd.replace("-Ofast", "-O2")
         cmds.append(cmd)
-    _compiler_state.jit_utils.run_cmds(cmds, _compiler_state.cache_path, _compiler_state.jittor_path, "Compiling "+base_output)
+    # ``return_cmd`` is used by the caller that records the final output's
+    # cache key.  In a split build, each object already has its own cache key;
+    # the command associated with ``output`` is only the final link step.
+    if not return_cmd:
+        _compiler_state.jit_utils.run_cmds(cmds, _compiler_state.cache_path, _compiler_state.jittor_path, "Compiling "+base_output)
     obj_files += ex_obj_files
     if _compiler_state.os.name == 'nt':
         # dumpdef is a Windows build resource and ships with the build package.
@@ -106,9 +106,13 @@ def compile(compiler, flags, inputs, output, combind_build=False, cuda_flags="",
         # not depend on repository-only tools/ files.
         dumpdef_path = _compiler_state.os.path.join(_compiler_state.jittor_path, "build", "dumpdef.py")
         cmd = f"\"{_compiler_state.sys.executable}\" \"{dumpdef_path}\" {' '.join(cms(obj_files))} -Fo: \"{output}.def\""
-        do_compile(_compiler_state.fix_cl_flags(cmd))
+        if not return_cmd:
+            do_compile(_compiler_state.fix_cl_flags(cmd))
     cmd = f"\"{compiler}\" {' '.join(cms(obj_files))} -o {cm(output)} {flags} {_compiler_state.lto_flags}"
-    return do_compile(_compiler_state.fix_cl_flags(cmd))
+    cmd = _compiler_state.fix_cl_flags(cmd)
+    if return_cmd:
+        return cmd
+    return do_compile(cmd)
 
 
 @lock.lock_scope()
