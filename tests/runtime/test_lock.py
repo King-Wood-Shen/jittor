@@ -221,15 +221,44 @@ class TestBuildLockIsShared(unittest.TestCase):
                 self.assertTrue(all(wait_for(os.path.join(directory, f"ready-{i}"))
                                     for i in range(2)), "children did not initialize")
                 open(start_path, "w").close()
-                self.assertTrue(wait_for(os.path.join(directory, "acquired-0")) or
-                                wait_for(os.path.join(directory, "acquired-1")),
-                                "no child acquired the lock")
-                # Keep the first holder inside the scope while the sibling
-                # attempts acquisition. Shared OFDs incorrectly let both in.
+                acquired_paths = [os.path.join(directory, f"acquired-{i}")
+                                  for i in range(2)]
+                error_paths = [os.path.join(directory, f"error-{i}")
+                               for i in range(2)]
+
+                def acquired_workers():
+                    return [i for i, path in enumerate(acquired_paths)
+                            if os.path.exists(path)]
+
+                def child_errors():
+                    return [(i, open(path).read()) for i, path in enumerate(error_paths)
+                            if os.path.exists(path)]
+
+                # Observe either worker against one deadline. Serially waiting
+                # for acquired-0 before checking acquired-1 can consume the
+                # child's whole release timeout when worker 1 wins first.
+                acquisition_deadline = time.monotonic() + 10
+                while True:
+                    errors = child_errors()
+                    if errors:
+                        self.fail("forked worker failed before acquisition: " + repr(errors))
+                    acquired = acquired_workers()
+                    if acquired:
+                        break
+                    remaining = acquisition_deadline - time.monotonic()
+                    if remaining <= 0:
+                        self.fail("no child acquired the lock before the deadline")
+                    time.sleep(min(0.01, remaining))
+
+                # Keep whichever child acquired first inside lock_scope while
+                # its sibling attempts acquisition. The parent publishes
+                # release_path only in finally, after checking both markers.
                 overlap_deadline = time.monotonic() + 1.0
                 while time.monotonic() < overlap_deadline:
-                    if all(os.path.exists(os.path.join(directory, f"acquired-{i}"))
-                           for i in range(2)):
+                    errors = child_errors()
+                    if errors:
+                        self.fail("forked worker failed while lock was held: " + repr(errors))
+                    if len(acquired_workers()) == 2:
                         break
                     time.sleep(0.01)
                 states = {
