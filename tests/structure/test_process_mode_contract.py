@@ -34,6 +34,8 @@ from _helpers.process_modes import is_torch_mode_path  # noqa: E402
 _NATIVE_TARGET = "tests/runtime/test_flags.py"
 _TORCH_TARGET = "compat/tests/torch/test_torch_compiler_fidelity.py"
 _TORCH_TRITON_BACKEND_TARGET = "compat/tests/triton/test_triton_backend.py"
+_TORCH_FSDP_FLAT_POLICY_TARGET = "compat/tests/fsdp2/test_fsdp2_flat_policy.py"
+_NATIVE_SERIALIZATION_TARGET = "tests/serialization/test_native_serialization_ownership.py"
 
 
 #: ``compiler.JIT_UTILS_UPDATED_EXIT_CODE``. Duplicated rather than imported
@@ -46,6 +48,35 @@ def test_triton_backend_compat_tests_are_torch_mode():
     """Host-only bridge checks still import the Torch compatibility frontend."""
     assert is_torch_mode_path(_TORCH_TRITON_BACKEND_TARGET)
     assert not is_torch_mode_path(_NATIVE_TARGET)
+
+
+def test_fsdp_flat_policy_collection_is_torch_mode():
+    assert is_torch_mode_path(_TORCH_FSDP_FLAT_POLICY_TARGET)
+    assert not is_torch_mode_path(_NATIVE_TARGET)
+
+
+def test_torch_archive_roundtrip_runs_in_an_isolated_native_child():
+    assert not is_torch_mode_path(_NATIVE_SERIALIZATION_TARGET)
+    source = (TEST_ROOT / "serialization/test_native_serialization_ownership.py").read_text(
+        encoding="utf-8")
+    tree = ast.parse(source)
+    test = next(node for node in tree.body
+                if isinstance(node, ast.FunctionDef)
+                and node.name == "test_torch_archive_save_load_roundtrip")
+    calls = [node for node in ast.walk(test)
+             if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Name)
+             and node.func.id == "run_python_child"]
+    isolated = [call for call in calls if any(
+        keyword.arg == "without_torch_mode"
+        and isinstance(keyword.value, ast.Constant)
+        and keyword.value.value is True
+        for keyword in call.keywords)]
+    assert len(calls) == 1 and len(isolated) == 1
+    assert not any(isinstance(node, ast.Call)
+                   and isinstance(node.func, ast.Attribute)
+                   and node.func.attr == "skip"
+                   for node in ast.walk(test))
 
 
 def _collect(targets, torch_mode=None, attempts=3):
