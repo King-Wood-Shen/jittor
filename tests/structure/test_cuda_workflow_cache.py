@@ -10,7 +10,10 @@ def test_cuda_jobs_restore_and_save_a_configuration_partitioned_jittor_cache():
 
     assert workflow.count("actions/cache/restore@v4") >= 2
     assert workflow.count("actions/cache/save@v4") >= 2
-    assert workflow.count("../jittor-lab/_state/nox/cache") >= 4
+    assert workflow.count("path: ${{ runner.temp }}/jittor-lab/_state/nox/cache") >= 4
+    assert workflow.count(
+        'run: echo "JITTOR_LAB_ROOT=${RUNNER_TEMP}/jittor-lab" >> "$GITHUB_ENV"'
+    ) == 2
     assert "needs.baseline.outputs.cuda_version" in workflow
     assert "cuda_archs-${{ steps.cuda-config.outputs.cuda_archs }}" in workflow
     assert "nvcc_flags-${{ steps.cuda-config.outputs.nvcc_flags_hash }}" in workflow
