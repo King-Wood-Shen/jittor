@@ -7,6 +7,8 @@
 #include <fstream>
 #include <streambuf>
 #include <stdlib.h>
+#include <cerrno>
+#include <cstdio>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -214,6 +216,7 @@ jit_op_entry_t load_jit_lib(
     string name, string symbol_name="jit_entry", const string& extra_flags="") {
     std::lock_guard<std::mutex> lock(dl_open_mutex);
     const char* msg = "";
+    string error_message;
     LOGvv << "Opening jit lib:" << name;
     #ifdef _WIN32
     void* handle = (void*)LoadLibraryExA(_to_winstr(name).c_str(), nullptr,
@@ -247,10 +250,25 @@ jit_op_entry_t load_jit_lib(
     //dlerror();
     auto jit_entry = (jit_op_entry_t)dlsym(handle, symbol_name.c_str());
     msg = dlerror();
+    error_message = msg ? msg : "";
     #endif
-    CHECK(jit_entry) << "Loading symbol" << symbol_name << "from" << name << "failed:" << msg;
+    if (!jit_entry) {
+        #ifdef _WIN32
+        FreeLibrary((HINSTANCE)handle);
+        #else
+        dlclose(handle);
+        #endif
+    }
+    CHECK(jit_entry) << "Loading symbol" << symbol_name << "from" << name << "failed:" << error_message;
     
     return jit_entry;
+}
+
+static void invalidate_jit_cache_key(const string& jit_lib_path) {
+    const string key_path = jit_lib_path + ".key";
+    errno = 0;
+    if (std::remove(key_path.c_str()) != 0 && errno != ENOENT)
+        CHECK(false) << "Cannot invalidate failed JIT library cache key" << key_path;
 }
 
 void run_cmd(string cmd, string cwd="") {
@@ -354,11 +372,18 @@ jit_op_entry_t compile(const string& jit_key, const string& src, const bool is_c
     // no build committed in between, because a build always republishes it.
     // The second is why the whole attempt is inside a try: any failure just
     // falls through to the locked path, which rebuilds and reports properly.
+    bool cached_library_failed_to_load = false;
     try {
         auto probe = jit_compiler::cache_compile_probe(
             cmd, would_write_source ? jit_src_path : string(), src);
         if (probe.up_to_date) {
-            auto jit_entry = load_jit_lib(jit_lib_path, symbol_name, extra_flags);
+            jit_op_entry_t jit_entry;
+            try {
+                jit_entry = load_jit_lib(jit_lib_path, symbol_name, extra_flags);
+            } catch (const std::exception&) {
+                cached_library_failed_to_load = true;
+                throw;
+            }
             if (read_all(probe.key_name) == probe.cache_key) {
                 LOGvv << "Cached op, no build lock taken:" << jit_key;
                 return jit_entry;
@@ -376,11 +401,32 @@ jit_op_entry_t compile(const string& jit_key, const string& src, const bool is_c
     // product while we waited, in which case it does nothing but the key
     // comparison.
     jittor::lock_guard lg;
+    if (cached_library_failed_to_load) {
+        // Another process may have repaired the product while this process
+        // waited for the build lock. Prefer that completed product before
+        // invalidating its key; if it still cannot provide the requested
+        // entrypoint, make cache_compile() rebuild rather than trusting a key
+        // that only proves the command/source pair, not the library contents.
+        try {
+            return load_jit_lib(jit_lib_path, symbol_name, extra_flags);
+        } catch (const std::exception& e) {
+            LOGvv << "Cached op" << jit_lib_path
+                << "still failed to load under the build lock:" << e.what();
+            invalidate_jit_cache_key(jit_lib_path);
+        }
+    }
     if (would_write_source)
         write(jit_src_path2, src);
     cache_compile(cmd, cache_path, jittor_path);
-    auto jit_entry = load_jit_lib(jit_lib_path, symbol_name, extra_flags);
-    return jit_entry;
+    try {
+        return load_jit_lib(jit_lib_path, symbol_name, extra_flags);
+    } catch (const std::exception&) {
+        // Do not leave a newly published key that blesses a product which
+        // failed its entrypoint check. A later process must get one chance to
+        // rebuild it instead of repeating the same locked cache hit.
+        invalidate_jit_cache_key(jit_lib_path);
+        throw;
+    }
 }
 
 } // jit_compiler
