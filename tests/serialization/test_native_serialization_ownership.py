@@ -10,7 +10,6 @@ import numpy as np
 import pytest
 
 from _helpers.child_process import run_python_child
-from _helpers.torch_runtime import modules_available
 
 
 @pytest.fixture(autouse=True)
@@ -29,14 +28,10 @@ def test_native_save_load_roundtrip(tmp_path):
 
 
 def test_torch_archive_save_load_roundtrip(tmp_path):
-    if not modules_available("torch"):
-        pytest.skip("independent PyTorch is not installed")
     source = """
 import sys
 import jittor as jt
 import numpy as np
-import torch
-assert not hasattr(torch, "_torch_compat_install_context")
 path = sys.argv[1]
 values = {"weight": jt.array([[1.25, -2.0], [3.5, 4.0]]),
           "steps": jt.array([1, 3, 7]).int32()}
@@ -47,8 +42,8 @@ for name in values:
     np.testing.assert_array_equal(restored[name].numpy(), values[name].numpy())
 """
     completed = run_python_child(
-        ["-c", source, str(tmp_path / "weights.pth")], merge_stderr=True, without_torch_mode=True
-    )
+        ["-c", source, str(tmp_path / "weights.pth")],
+        merge_stderr=True, without_torch_mode=True)
     assert completed.returncode == 0, completed.stdout[-3000:]
 
 

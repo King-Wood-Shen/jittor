@@ -34,6 +34,7 @@ from _helpers.process_modes import is_torch_mode_path  # noqa: E402
 _NATIVE_TARGET = "tests/runtime/test_flags.py"
 _TORCH_TARGET = "compat/tests/torch/test_torch_compiler_fidelity.py"
 _TORCH_TRITON_BACKEND_TARGET = "compat/tests/triton/test_triton_backend.py"
+_TORCH_FSDP_FLAT_POLICY_TARGET = "compat/tests/fsdp2/test_fsdp2_flat_policy.py"
 _NATIVE_SERIALIZATION_TARGET = "tests/serialization/test_native_serialization_ownership.py"
 _SHARDED_CHECKPOINT_TARGET = "tests/serialization/test_sharded_checkpoint.py"
 
@@ -50,8 +51,12 @@ def test_triton_backend_compat_tests_are_torch_mode():
     assert not is_torch_mode_path(_NATIVE_TARGET)
 
 
-def test_torch_archive_oracle_runs_in_an_isolated_native_child():
-    """Keep real-Torch imports out of native xdist workers."""
+def test_fsdp_flat_policy_collection_is_torch_mode():
+    assert is_torch_mode_path(_TORCH_FSDP_FLAT_POLICY_TARGET)
+    assert not is_torch_mode_path(_NATIVE_TARGET)
+
+
+def test_torch_archive_roundtrip_runs_in_an_isolated_native_child():
     assert not is_torch_mode_path(_NATIVE_SERIALIZATION_TARGET)
     assert not is_torch_mode_path(_SHARDED_CHECKPOINT_TARGET)
     source = (TEST_ROOT / "serialization/test_native_serialization_ownership.py").read_text(
@@ -64,23 +69,16 @@ def test_torch_archive_oracle_runs_in_an_isolated_native_child():
              if isinstance(node, ast.Call)
              and isinstance(node.func, ast.Name)
              and node.func.id == "run_python_child"]
-    self_isolated = [call for call in calls if any(
+    isolated = [call for call in calls if any(
         keyword.arg == "without_torch_mode"
         and isinstance(keyword.value, ast.Constant)
         and keyword.value.value is True
         for keyword in call.keywords)]
-    assert len(calls) == 1 and len(self_isolated) == 1
-    availability_calls = [
-        node
-        for node in ast.walk(test)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "modules_available"
-        and len(node.args) == 1
-        and isinstance(node.args[0], ast.Constant)
-        and node.args[0].value == "torch"
-    ]
-    assert len(availability_calls) == 1
+    assert len(calls) == 1 and len(isolated) == 1
+    assert not any(isinstance(node, ast.Call)
+                   and isinstance(node.func, ast.Attribute)
+                   and node.func.attr == "skip"
+                   for node in ast.walk(test))
 
 
 def _collect(targets, torch_mode=None, attempts=3):
