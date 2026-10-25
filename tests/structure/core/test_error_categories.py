@@ -403,6 +403,8 @@ MIGRATED_GRAD_DTYPE_USER_BOUNDARIES = {
     # .data can replace storage shape while preserving a recorded producer:
     # validate returned gradient rank and broadcast-compatible extents against
     # that recorded contract. Both are caller-controlled shape boundaries.
+    # Replay-probe token order and published-holder presence are internal
+    # invariants, not caller-controlled dtype/shape boundaries.
     "src/core/grad.cc": 8,
 }
 
@@ -427,6 +429,12 @@ def test_item_size_boundary_is_a_user_error():
 
 def test_grad_dtype_boundaries_are_user_errors():
     source = (ROOT / "src/core/grad.cc").read_text()
+    assert 'INTERNAL_ASSERT(!step_backward_probes.empty()' in source
+    assert 'USER_CHECK(!step_backward_probes.empty()' not in source
+    assert 'step backward probes must end on their creating thread in LIFO order' in source
+    assert 'cannot snapshot an absent step gradient' in source
+    assert 'INTERNAL_ASSERT(gradient && gradient->var)' in source
+    assert 'USER_CHECK(gradient && gradient->var)' not in source
     assert 'USER_CHECK(loss->is_float())' in source
     assert 'USER_CHECK(var->is_float() || var->dtype().is_complex())' in source
     assert '\n    CHECK(loss->is_float())' not in source
