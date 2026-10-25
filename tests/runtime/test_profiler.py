@@ -28,8 +28,11 @@ def _columns(report):
 class TestProfiler(unittest.TestCase):
     def test_profiler(self):
         warmup, rerun = 10, 100
-        a = jt.rand(1000,1000)
-        b = jt.rand(1000,1000)
+        # This test checks profiler aggregation, not matmul throughput. Keep
+        # the workload small so the profiler's adaptive sample count stays a
+        # unit-test cost on CPU-only CI as well as on accelerator runners.
+        a = jt.rand(128, 128)
+        b = jt.rand(128, 128)
         jt.sync_all()
         with jt.profile_scope(warmup, rerun, profiler_record_peek=1) as rep:
             jt.matmul(a, b).sync()
