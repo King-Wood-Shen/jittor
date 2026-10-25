@@ -76,13 +76,17 @@ ENVIRONMENT_SKIP_PATTERNS = (
     # names around it).
     "cuda", "cudnn", "cublas", "cutt", "cusparse", "cufft", "curand",
     "nvcc",
+    # A CPU-only runner can still collect capability tests that need the
+    # device nodes themselves to distinguish an absent device from a hidden
+    # one. This is a machine limitation, not an unexplained test skip.
+    "needs /dev/nvidia",
     "gpu", "accelerator", "acl", "npu", "ascend", "cann", "rocm", "hip",
     "triton",
     # an independent PyTorch build, which only the oracle sessions have.
     # Withdrawn when JITTOR_REQUIRE_REAL_TORCH=1 -- see REAL_TORCH_PATTERNS.
     "torch",
     # multi-rank launchers
-    "mpi", "nccl", "world size",
+    "mpi", "nccl", "world size", "launcher-owned store subgroup transport",
     # opt-in assets and probes
     "download", "dataset", "network", "manual probe",
     # Optional third-party libraries the shim is validated against. Absence is a

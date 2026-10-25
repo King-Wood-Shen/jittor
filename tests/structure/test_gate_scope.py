@@ -295,6 +295,19 @@ def test_skip_reason_buckets_are_stable_and_other_is_counted(monkeypatch):
         policy._SKIP_REASON_BUCKETS.update(previous)
 
 
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "needs /dev/nvidia* nodes to be meaningful",
+        "requires launcher-owned Store subgroup transport",
+    ],
+)
+def test_cpu_runner_environment_skip_reasons_are_explained(reason):
+    from _helpers import pytest_policy as policy
+
+    assert policy.classify_skip_reason_bucket(reason) == "environment"
+
+
 def test_skip_reason_summary_and_threshold_are_wired():
     """10.05: CI summary prints buckets and the execution gate rejects other>0."""
     source = (REPO_ROOT / "tests/_helpers/pytest_policy.py").read_text(encoding="utf-8")
