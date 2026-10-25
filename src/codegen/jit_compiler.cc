@@ -259,7 +259,8 @@ jit_op_entry_t load_jit_lib(
         dlclose(handle);
         #endif
     }
-    CHECK(jit_entry) << "Loading symbol" << symbol_name << "from" << name << "failed:" << error_message;
+    CHECK(jit_entry) << "Loading symbol" << symbol_name << "from" << name
+        << "failed:" << error_message;
     
     return jit_entry;
 }
