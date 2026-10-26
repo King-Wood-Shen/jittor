@@ -8,6 +8,8 @@
 # file 'LICENSE.txt', which is part of this source code package.
 # ***************************************************************
 import unittest
+from unittest import mock
+import json
 import os, subprocess, tempfile
 import jittor as jt
 import jittor_utils as jit_utils
@@ -42,6 +44,28 @@ class TestDisableLockOptIn(unittest.TestCase):
             "JT_BUILD_DISABLE_LOCK=1: Jittor build locking is disabled",
             result.stdout.decode(),
         )
+
+
+class TestHolderRecordPortableIO(unittest.TestCase):
+    def test_missing_positioned_io_preserves_record_and_descriptor_offset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "holder.lock")
+            fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+            try:
+                os.lseek(fd, 17, os.SEEK_SET)
+                with mock.patch.object(jit_lock.os, "pwrite", None, create=True):
+                    jit_lock._write_holder(fd)
+                self.assertEqual(os.lseek(fd, 0, os.SEEK_CUR), 17)
+
+                with mock.patch.object(jit_lock.os, "pread", None, create=True):
+                    description = jit_lock.describe_holder(fd)
+                self.assertEqual(os.lseek(fd, 0, os.SEEK_CUR), 17)
+                self.assertIn("held by pid %d" % os.getpid(), description)
+
+                os.lseek(fd, 0, os.SEEK_SET)
+                self.assertEqual(json.loads(os.read(fd, 4096))["pid"], os.getpid())
+            finally:
+                os.close(fd)
 
 class TestLock(unittest.TestCase):
     def test(self):

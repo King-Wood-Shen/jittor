@@ -100,7 +100,23 @@ def _write_holder(fd):
     blob = record.encode("utf8")[:_HOLDER_RECORD_SIZE - 1] + b"\n"
     try:
         os.ftruncate(fd, 0)
-        os.pwrite(fd, blob, 0)
+        pwrite = getattr(os, "pwrite", None)
+        if pwrite is not None:
+            pwrite(fd, blob, 0)
+        else:
+            # Windows has lseek/write but no pwrite. Do not leave the shared
+            # descriptor at a different position after recording the holder.
+            position = os.lseek(fd, 0, os.SEEK_CUR)
+            try:
+                os.lseek(fd, 0, os.SEEK_SET)
+                remaining = memoryview(blob)
+                while remaining:
+                    written = os.write(fd, remaining)
+                    if not written:
+                        raise OSError(errno.EIO, "could not write lock holder")
+                    remaining = remaining[written:]
+            finally:
+                os.lseek(fd, position, os.SEEK_SET)
     except OSError as e:
         # A read-only or full filesystem must not stop us from building; the
         # only thing lost is the diagnostic.
@@ -120,7 +136,16 @@ def _pid_alive(pid):
 def describe_holder(fd):
     '''Human readable description of whoever wrote the holder record.'''
     try:
-        raw = os.pread(fd, _HOLDER_RECORD_SIZE, 0)
+        pread = getattr(os, "pread", None)
+        if pread is not None:
+            raw = pread(fd, _HOLDER_RECORD_SIZE, 0)
+        else:
+            position = os.lseek(fd, 0, os.SEEK_CUR)
+            try:
+                os.lseek(fd, 0, os.SEEK_SET)
+                raw = os.read(fd, _HOLDER_RECORD_SIZE)
+            finally:
+                os.lseek(fd, position, os.SEEK_SET)
     except (OSError, AttributeError):
         return "holder unknown"
     text = raw.split(b"\0", 1)[0].decode("utf8", "replace").strip()
