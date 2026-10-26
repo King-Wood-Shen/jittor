@@ -227,6 +227,9 @@ class OpenMMLabGateTests(unittest.TestCase):
         fake._enabled = lambda name: True
         fake._torch_shim_is_active = lambda: True
         fake._distributions_available = lambda names: True
+        fake._comparison_floor = mock.Mock()
+        fake._divergence = mock.Mock()
+        fake._run_command = mock.Mock()
         path = ROOT / "compat/tests/torch/test_ecosystem_openmmlab.py"
         spec = importlib.util.spec_from_file_location("openmmlab_admission_probe", path)
         module = importlib.util.module_from_spec(spec)
