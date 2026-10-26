@@ -30,6 +30,8 @@ import json
 import os
 import pathlib
 
+import pytest
+
 
 #: Printed on the terminal even when no sentinel path is configured, so a log
 #: kept by hand still carries the evidence.
@@ -92,6 +94,14 @@ def marker_line():
 
 def pytest_collection_finish(session):
     record_collected(len(session.items))
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_xdist_node_collection_finished(node, ids):
+    # The controller has no session.items: collection happens in each worker.
+    # xdist checks that workers collected the same nodeids. Each receipt is a
+    # replica of that selection, so replace the count rather than summing it.
+    record_collected(len(ids))
 
 
 def pytest_runtest_logreport(report):

@@ -23,6 +23,7 @@ nobody has checked.
 """
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -161,6 +162,73 @@ class TestThePluginRecordsCompletion(unittest.TestCase):
         session_completion.record_collected(999)
         session_completion.restore(before)
         self.assertEqual(session_completion.summary(), before)
+
+
+
+@pytest.mark.parametrize(
+    "parallel, expression, source, expected_count, expected_exit",
+    [
+        (False, "", "three", 3, 0),
+        (True, "", "three", 3, 0),
+        (True, "one", "three", 1, 0),
+        (True, "absent", "three", 0, 5),
+        (True, "", "empty", 0, 5),
+        (True, "", "failure", 3, 1),
+    ],
+)
+def test_real_pytest_collection_counts(
+        tmp_path, parallel, expression, source, expected_count, expected_exit):
+    """The sentinel describes the selected tests, not the worker replicas."""
+    if parallel:
+        pytest.importorskip(
+            "xdist",
+            reason="pytest-xdist (requirements/dev-tools.txt) is not installed here",
+        )
+    case = tmp_path / "case"
+    case.mkdir()
+    (case / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    tests = (
+        "import sys\n"
+        "def test_one(): assert 'jittor' not in sys.modules\n"
+        "def test_two(): assert 'jittor' not in sys.modules\n"
+        "def test_three(): assert 'jittor' not in sys.modules\n"
+    )
+    if source == "empty":
+        tests = "# No tests: finishing must retain the genuine zero count.\n"
+    elif source == "failure":
+        tests = tests.replace(
+            "def test_three(): assert 'jittor' not in sys.modules",
+            "def test_three(): assert False, 'intentional failure'",
+        )
+    (case / "test_sample.py").write_text(tests, encoding="utf-8")
+    sentinel = case / "sentinel.json"
+    env = dict(os.environ)
+    for key in ("PYTEST_ADDOPTS", "PYTEST_PLUGINS", "JITTOR_SESSION_SENTINEL"):
+        env.pop(key, None)
+    env.update({
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        "JITTOR_SESSION_SENTINEL": str(sentinel),
+        "PYTHONPATH": str(REPO_ROOT / "tests"),
+    })
+    args = [
+        "-m", "pytest", "--noconftest", "-p", "no:cacheprovider",
+        "-p", "_helpers.session_completion", "-q",
+    ]
+    if parallel:
+        args += ["-p", "xdist.plugin", "-n", "2"]
+    if expression:
+        args += ["-k", expression]
+    args += [str(case / "test_sample.py")]
+    result = run_python_child(
+        args, cwd=case, env=env, inherit=False, without_torch_mode=True,
+        merge_stderr=True,
+    )
+    assert result.returncode == expected_exit, result.stdout
+    data = json.loads(sentinel.read_text(encoding="utf-8"))
+    assert data["collected"] == expected_count, result.stdout
+    assert data["executed"] == expected_count, result.stdout
+    assert data["exitstatus"] == expected_exit, result.stdout
+    assert data["marker"] == session_completion.MARKER
 
 
 if __name__ == "__main__":
