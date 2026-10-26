@@ -54,6 +54,8 @@ print("env=" + ",".join(os.environ.get(k, "-") for k in
 # jittor in a rank would start NCCL, which needs a GPU per rank.
 _ENV_RENDEZVOUS = """
 import importlib.util
+from pathlib import Path
+import time
 spec = importlib.util.spec_from_file_location("store", STORE_PATH)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
@@ -61,6 +63,16 @@ store, rank, world = next(module.rendezvous("env://"))
 store.set("rank%d" % rank, str(rank))
 store.wait(["rank%d" % r for r in range(world)])
 print("rendezvous %d/%d" % (rank, world), flush=True)
+done_dir = Path(DONE_DIR)
+(done_dir / ("rank%d.returned" % rank)).write_text("returned")
+if rank == 0:
+    peer_done = done_dir / "rank1.returned"
+    deadline = time.monotonic() + 30.0
+    while not peer_done.exists():
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("rank 1 did not return from rendezvous")
+        time.sleep(min(0.01, remaining))
 """
 
 _PRINT_CACHE_NAME = """
@@ -185,12 +197,20 @@ class TestLaunchFailurePropagation(unittest.TestCase):
 
     def test_env_rendezvous_reaches_every_rank(self):
         store = _REPO_ROOT / "python" / "jittor" / "distributed" / "store.py"
-        done, _ = _launch(2, _ENV_RENDEZVOUS.replace("STORE_PATH", repr(os.fspath(store))),
-                          self.tmp.name, timeout=120)
-        self.assertEqual(done.returncode, 0, done.stdout[-3000:])
+        code = _ENV_RENDEZVOUS.replace("STORE_PATH", repr(os.fspath(store)))
+        code = code.replace("DONE_DIR", repr(self.tmp.name))
+        done, _ = _launch(2, code, self.tmp.name, timeout=120)
+        rank_logs = {}
         for rank in range(2):
-            text = Path(self.tmp.name, "rank%d.log" % rank).read_text()
-            self.assertIn("rendezvous %d/2" % rank, text)
+            path = Path(self.tmp.name, "rank%d.log" % rank)
+            rank_logs[rank] = path.read_text(errors="replace") if path.exists() else "<missing>"
+        self.assertEqual(
+            done.returncode,
+            0,
+            "{}\nrank logs: {}".format(done.stdout[-3000:], rank_logs),
+        )
+        for rank, text in rank_logs.items():
+            self.assertIn("rendezvous %d/2" % rank, text, text)
 
 
 if __name__ == "__main__":
