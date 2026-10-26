@@ -1,10 +1,10 @@
 # Jittor wheel contents baseline (SHA-256 and exact archive member paths)
 # source-wheel: jittor-2.0.0-py3-none-any.whl
-# source-wheel-sha256: cdaf23ccec4e87aaa7066173b0dded841228627266c71fc9cee3a7e37b5f0e9c
+# source-wheel-sha256: 97f08e71e9767e3db9c0267e35ac3a530b5c763b98650f393a43ac670ba93438
 # entries: 1139
 # Regenerate only after reviewing every path and content change.
 fb0d15cb73dc519400967b63b0091df66a8c4388e3cb7dd107b8fc40fcc5054f  jittor-2.0.0.dist-info/METADATA
-43f3eabd8da5331a8fe5e789a2d725947ba707e0621ea81060f823b9576957be  jittor-2.0.0.dist-info/RECORD
+d038a36a1c7adb12cd5aed8379afedf7e19bfc176952e4571a4d74f4e65fb596  jittor-2.0.0.dist-info/RECORD
 2b6eb4118ce7cd7b09601406aa623c553c4476265836f0d9c16f5c061f7efcc0  jittor-2.0.0.dist-info/WHEEL
 435a22ada7651633d681246096725d6b8a5d15b729df61706c5637cbc58c39c7  jittor-2.0.0.dist-info/entry_points.txt
 8b18f18c9c43b17e6e2bcdefc8df9d423c12e6769d5d13cf6a46fed31e7e1666  jittor-2.0.0.dist-info/licenses/LICENSE.txt
@@ -712,7 +712,7 @@ cadf41fa44cd657e2568161fc4068e6e310469e1549703b90d5e44360731de4b  jittor/profili
 9741e51de01cc17941e25fe10fa6bd820a083164f7fc4659fc0317f312e342ac  jittor/serialization/load_pytorch.py
 c1144165282311ae4455aa9acd2465d6326e3b5fc433cbed8c8e170df27152af  jittor/serialization/load_pytorch_old.py
 1d9e5b61e57b18de4d9bfc9223ed035bd4ff6ecc4364b1fce0b17bfca1b10a74  jittor/serialization/native.py
-ca54ef10d989ecd56d8f774beae4ac0c1ac7f90b36c980dae2c908911d163822  jittor/serialization/save_pytorch.py
+6766c8ca1b8314aa9a17ac6649a0447bb1bae92b0abad75c5d96b742feb72a7c  jittor/serialization/save_pytorch.py
 ccdb6bb86b592a28664645438124ce0f646f271e55a381f406d8de57b54942e0  jittor/serialization/sharded.py
 558c41b10afc9d90e67b7e386533b4378031f7a24d37d555acd7a3cfedccbda1  jittor/sparse/__init__.py
 da99342b6d9735dc12dbbbd7c0d853ef655ae1dcc3f4d3e6ca08688a01a41e22  jittor/sparse/convolution.py
