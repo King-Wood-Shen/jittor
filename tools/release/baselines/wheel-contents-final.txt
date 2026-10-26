@@ -1,10 +1,10 @@
 # Jittor wheel contents baseline (SHA-256 and exact archive member paths)
 # source-wheel: jittor-2.0.0-py3-none-any.whl
-# source-wheel-sha256: de4b305249f71150fcf0a96098d746a9186eb02621a02f4b129fc7cc5727abc9
+# source-wheel-sha256: cdaf23ccec4e87aaa7066173b0dded841228627266c71fc9cee3a7e37b5f0e9c
 # entries: 1139
 # Regenerate only after reviewing every path and content change.
 fb0d15cb73dc519400967b63b0091df66a8c4388e3cb7dd107b8fc40fcc5054f  jittor-2.0.0.dist-info/METADATA
-49791d899b874f5302daca363e350f9b391ff210ca7738f7945871b492cf1de6  jittor-2.0.0.dist-info/RECORD
+43f3eabd8da5331a8fe5e789a2d725947ba707e0621ea81060f823b9576957be  jittor-2.0.0.dist-info/RECORD
 2b6eb4118ce7cd7b09601406aa623c553c4476265836f0d9c16f5c061f7efcc0  jittor-2.0.0.dist-info/WHEEL
 435a22ada7651633d681246096725d6b8a5d15b729df61706c5637cbc58c39c7  jittor-2.0.0.dist-info/entry_points.txt
 8b18f18c9c43b17e6e2bcdefc8df9d423c12e6769d5d13cf6a46fed31e7e1666  jittor-2.0.0.dist-info/licenses/LICENSE.txt
@@ -751,7 +751,7 @@ f2f59d118ff4852978df9adf23bb127e394c0ec36cf71dc093f10e661f9b622f  jittor/src/bin
 bee3ae6e63e11d2ebff142473b564141ff48bc4abc8af7facb8b481b842935ea  jittor/src/bindings/pyjt/py_type_lifetime.cc
 2eae63b865a6026156b69be1739e0a7b459a538210292cffb8183df60e7a7b61  jittor/src/bindings/pyjt/py_type_lifetime.h
 67eb7394599ef66a7d6e9461a53ff642a325100bb663f5f052bacf55b6c21dac  jittor/src/bindings/pyjt/pyjt_console.h
-46f72adb346df352014b277edebcfc0acbeff588e9e7a6992c5cae5bd310eb43  jittor/src/codegen/jit_compiler.cc
+7cf3749b0cd9f482aa03646c4eb18dbbe558acd29a92a8994df02a0cef3ada60  jittor/src/codegen/jit_compiler.cc
 fa32e0fbc9591f66e10ec6e097c69360c84a53943b581acc861ac8089cb0dffa  jittor/src/codegen/jit_compiler.h
 666ca40593b824a9d1a4701c86a389ecf275d9e493cf83ce607582ea899ad715  jittor/src/codegen/jit_key.cc
 216175419bd402b0025dca59e154444c8c018cb717bee71ee920227290d09b3d  jittor/src/codegen/jit_key.h
