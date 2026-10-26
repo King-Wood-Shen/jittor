@@ -1,4 +1,6 @@
-# Exact function excerpts from verl 0.9.1 commit 1876b06d.
+"""Pinned upstream excerpt carrier; the source itself uses Python 3.8 syntax."""
+
+UPSTREAM_SOURCE = r'''# Exact function excerpts from verl 0.9.1 commit 1876b06d.
 # Host-test imports are supplied by the fixture loader; not an implementation.
 
 def nested_tensor_from_tensor_list(tensors: list[torch.Tensor], ragged_idx: int | None = None) -> torch.Tensor:
@@ -104,3 +106,4 @@ def left_right_2_no_padding(data: TensorDict) -> TensorDict:
         data["teacher_ids"] = teacher_ids_nested
 
     return data
+'''
