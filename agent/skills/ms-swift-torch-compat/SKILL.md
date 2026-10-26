@@ -5,20 +5,6 @@ description: 在 Jittor torch shim 与独立原生 Torch 两侧验证 ms-swift�
 
 # ms-swift × Jittor torch shim
 
-## CUDA 推理轴（2026-10-19）
-
-[当前树推理与优化开关矩阵](../../../docs/results/2026-10-19-ms-swift-cuda-inference-axis.md)
-首轮固定 Qwen2-0.5B、真实 `TransformersEngine.infer` 的原生 PyTorch/CUDA shim
-对照：greedy、`do_sample=true`、batch、PEFT adapter 加载与实际非零权重合并均执行，
-两侧短输出 token 一致，shim fallback 为 0。ms-swift 当前 `RequestConfig` 未暴露
-`use_cache`；直接修改引擎配置后真实调用仍为 cache-on，因此 cache-off 未验。
-同一模型的直接 Transformers `model.generate(use_cache=False)` 已在两侧 CUDA
-实际执行并对齐，但不能代替 Swift 公开推理入口的开关验收。
-vLLM/SGLang/LMDeploy 和 speculative 参数只完成执行归属审计，未授予 JTorch 内核覆盖。
-后续扩大推理规格或接外部引擎时须重新绑定上游 SHA、设备与实际计算归属。
-六场景完整矩阵绑定 Jittor HEAD `f6fe012b1`；远端前进并合入 `5a120a315` 后，
-仅在合并树 `7131681d` 补跑真实 CUDA greedy 与 core 回归，不把该单格外推为完整矩阵。
-
 ## 当前验收入口（2026-10-15）
 
 [注册 FULL SFT 与完整安装来源报告](../../../docs/results/2026-10-15-swift-trainer-installed-source.md)
@@ -270,15 +256,3 @@ transformers,peft,swift；仓库名里的 `-` 由工具归一化）；`_ecosyste
 ms-swift/peft 版本组合问题，与 jittor 无关；换成报告用的 **ms-swift 4.5.2 + peft 0.17.1 +
 transformers 4.56.2** 即跑通。原始报告见
 `$JITTOR_LAB_ROOT/_state/verify-ml/{ms-swift.unpinned-peft0.20.log,ms-swift.pinned.log}`。
-
-## 完整 CLI 恢复与新实验存储
-
-本 Skill 的 Swift LoRA tuner 组件对拍不等于 stock Trainer 的 L3。CUDA 公开 CLI 的恢复验收与
-checkpoint 峰值按各自已核验结果的固定 profile 解释；
-不得把旧运行的步骤、模型或设备范围合并扩大。
-
-新运行的持久化和 worker 临时目录必须遵循
-[`ms-swift-artifact-storage`](../../../docs/notes/ms-swift-artifact-storage.md)：从 Slurm worker
-调用 `tools/ms_swift_storage_worker.sh`，预声明保留 checkpoint 完整文件契约与最大并发容量，
-用 SHA-256 校验后发布；发布后的相同文件由策略复用内容，不要再手动复制 checkpoint 或驱动日志。
-策略版本为 `msw-storage-v2`。历史运行保持原运行键和证据，不迁移、不覆盖。

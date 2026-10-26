@@ -17,8 +17,9 @@ def test_cpu_gate_trusts_only_its_checkout_with_isolated_home(monkeypatch, tmp_p
     assert env["GIT_CONFIG_VALUE_0"] == ""
     assert env["GIT_CONFIG_KEY_1"] == "safe.directory"
     assert env["GIT_CONFIG_VALUE_1"] == str(module["REPO_ROOT"])
-    # Nox overlays this environment on its parent. A global wildcard must not
-    # survive the empty multi-value reset above.
+    # Nox uses None entries to remove inherited variables; make that
+    # overlay concrete before passing it to subprocess.run. A global wildcard
+    # must not survive the empty multi-value reset above.
     owner_probe = {key: value for key, value in env.items() if value is not None}
     owner_probe["GIT_TEST_ASSUME_DIFFERENT_OWNER"] = "1"
     global_config = Path(env["HOME"]) / ".gitconfig"
@@ -54,6 +55,23 @@ def test_session_env_uses_the_session_interpreters_python_config(monkeypatch, tm
 
     assert env["python_config_path"] == expected
     assert session.calls[0][0][:2] == ("python", "-c")
+
+
+def test_structure_session_installs_xdist_for_execution_recorder(monkeypatch, tmp_path):
+    module = _load_noxfile(monkeypatch, tmp_path)
+
+    class Session(_FakeSession):
+        def __init__(self, root, python_config):
+            super().__init__(root, python_config)
+            self.installs = []
+
+        def install(self, *packages):
+            self.installs.extend(packages)
+
+    session = Session(tmp_path, "/usr/bin/python3.11-config")
+    module["structure"](session)
+
+    assert module["PYTEST_XDIST"] in session.installs
 
 
 def test_nccl_warms_serially_then_launches_native_and_torch_modes(monkeypatch, tmp_path):

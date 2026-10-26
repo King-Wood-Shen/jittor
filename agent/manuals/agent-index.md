@@ -90,7 +90,6 @@ GitHub issue 与 PR 中。原始日志、缓存和大体积产物放在 `$JITTOR
 - [diffusers-torch-compat](../skills/diffusers-torch-compat/SKILL.md)：diffusers。
 - [peft-torch-compat](../skills/peft-torch-compat/SKILL.md)：PEFT（LoRA）。
 - [ms-swift-torch-compat](../skills/ms-swift-torch-compat/SKILL.md)：ms-swift 自带 LoRA tuner。
-- [lab-capacity-recovery](../skills/lab-capacity-recovery/SKILL.md)：长作业容量不足时核验并回收可删的实验产物。
 - [deepspeed-torch-compat](../skills/deepspeed-torch-compat/SKILL.md)：固定上游版本的真实 Engine 训练与检查点门禁。
 - [mmcv-torch-compat](../skills/mmcv-torch-compat/SKILL.md)：mmcv（mmcv-lite 的 `mmcv.cnn`）。
 - [mmengine-torch-compat](../skills/mmengine-torch-compat/SKILL.md)：MMEngine 的模型基类。
@@ -100,5 +99,6 @@ GitHub issue 与 PR 中。原始日志、缓存和大体积产物放在 `$JITTOR
 - [vllm-torch-compat](../skills/vllm-torch-compat/SKILL.md)：vLLM。
 - [vllm-omni-torch-compat](../skills/vllm-omni-torch-compat/SKILL.md)：vLLM-Omni 的 MiniMax-H3 推理。
 - [verl-torch-compat](../skills/verl-torch-compat/SKILL.md)：verl（PPO、FSDP2、权重传输）。
+- [datatrove-torch-compat](../skills/datatrove-torch-compat/SKILL.md)：DataTrove CPU token dataset 与本地 JSONL 管线验证。
 - [trellis-torch-compat](../skills/trellis-torch-compat/SKILL.md)：TRELLIS.2 3D 生成 pipeline。
 - [torchquantum-readme-validation](../skills/torchquantum-readme-validation/SKILL.md)：TorchQuantum README 用法验证。

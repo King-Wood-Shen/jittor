@@ -11,6 +11,8 @@
 ```{toctree}
 :maxdepth: 1
 
+2026-10-25-recent-pr-integration
+2026-10-24-datatrove-cpu-compatibility
 2026-10-16-diffusers-maintained-cpu-nightly
 2026-10-16-h3-upstream-gradient-components
 2026-10-16-native-alias-lifecycle
@@ -61,7 +63,6 @@
 2026-09-25-profiling-tools
 2026-10-05-high-rank-and-downstream-core-gaps
 2026-10-09-downstream-p1-allocator-protocol-transpose
-2026-10-13-cuda-dpo-slice-bounds
 2026-10-14-benchmark-coverage
 2026-10-14-downstream-coverage-audit
 2026-10-14-optimizer-checkpoint-continuation
@@ -69,8 +70,6 @@
 2026-10-14-amp-bfloat16-gradscaler
 2026-10-15-distribution-constraint-publication
 2026-10-15-training-registry-denominators
-2026-10-15-ms-swift-artifact-lifecycle
-2026-10-19-ms-swift-cuda-inference-axis
 2026-10-14-cuda-sdpa-mask-coverage
 2026-10-15-sdpa-opmath
 2026-10-15-like-factory-leaves
@@ -147,7 +146,6 @@
 | [性能/显存分析工具：审计与重写](2026-09-25-profiling-tools.md) | 已实现，RTX 4090 上验证；未合入 | 2026-09-25 |
 | [张量维度上限 10 → 32 与下游评测的核心缺口](2026-10-05-high-rank-and-downstream-core-gaps.md) | 已修复，CPU 与 RTX 4090 验证 | 2026-10-05 |
 | [下游 P1：分配器并存上限、数值协议与 transpose 的运行时置换](2026-10-09-downstream-p1-allocator-protocol-transpose.md) | 已修复，CPU 验证，transpose/协议另在 RTX 4090 验证 | 2026-10-09 |
-| [CUDA DPO 反向传播中的越界切片归一化](2026-10-13-cuda-dpo-slice-bounds.md) | 旧基线的 CUDA DPO 单步证据；新基线定向复验见报告 | 2026-10-13 |
 | [Benchmark 覆盖与比较协议补齐](2026-10-14-benchmark-coverage.md) | 卷积 CPU/CUDA、Accelerate CPU、模型 CPU harness 已验；其余设备与场景缺口保留 | 2026-10-14 |
 | [下游注册表、门禁与覆盖审计](2026-10-14-downstream-coverage-audit.md) | 已审计 13 个 runbook 与五个上游注册表；未授予新的设备验证级别 | 2026-10-14 |
 | [优化器 FQN checkpoint 与确定性续训](2026-10-14-optimizer-checkpoint-continuation.md) | 单进程确定性数值续训已验；RNG/双卡验收见后续报告，ACL 待验 | 2026-10-14 |
@@ -155,8 +153,6 @@
 | [bf16 autocast 与 GradScaler 边界](2026-10-14-amp-bfloat16-gradscaler.md) | CPU/CUDA 实际 dtype 与边界对拍通过；fidelity 保持 APPROXIMATE | 2026-10-14 |
 | [分布约束命名空间发布](2026-10-15-distribution-constraint-publication.md) | 原生属性与工厂发布已修；CPU/CUDA 边界检查对拍通过 | 2026-10-15 |
 | [训练注册表分母补齐](2026-10-15-training-registry-denominators.md) | 补 ms-swift/verl 训练轴与 vLLM/Omni 分母、SCM wheel 源码身份校验；枚举不授予数值覆盖 | 2026-10-15 |
-| [ms-swift checkpoint 生命周期与 L3 容量](2026-10-15-ms-swift-artifact-lifecycle.md) | 已测重复副本的清理与 storage v2 验证；完整 L3 峰值仍按具体 profile 预检 | 2026-10-15 |
-| [ms-swift CUDA 推理与优化开关矩阵](2026-10-19-ms-swift-cuda-inference-axis.md) | TransformersEngine greedy/采样/adapter/cache 与同步后 SDPA CUDA；外部引擎及投机解码未执行 | 2026-10-20 |
 | [CUDA SDPA 掩码覆盖](2026-10-14-cuda-sdpa-mask-coverage.md) | 180 个真实 CUDA 场景对拍；融合路径扩展，边界保持显式 | 2026-10-14 |
 | [图重放保留预算](2026-10-14-graph-replay-retain-budget.md) | 动态预算约束已缓存的 replay；默认预算保留，CPU/CUDA 实测 | 2026-10-14 |
 | [下游独立 oracle 与训练 scorecard](2026-10-14-downstream-oracle-scorecards.md) | 四库 CPU/CUDA 代表场景已验；LoRA/component 范围限定，未授予 L4/L5 | 2026-10-14 |

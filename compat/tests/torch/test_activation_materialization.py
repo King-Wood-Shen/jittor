@@ -1,6 +1,5 @@
 """Device-ready storage boundaries for native activation rematerialization."""
 
-import os
 import textwrap
 
 import jittor as jt
@@ -8,7 +7,6 @@ import numpy as np
 import pytest
 from _helpers.checkpoint_cuda import accelerator, snapshot, curand_position as _curand_position
 import torch
-from jittor._runtime.fallback import forbid_backend_fallbacks
 
 
 def materialize(*values):
