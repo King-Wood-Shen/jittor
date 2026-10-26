@@ -47,6 +47,19 @@ for name in values:
     assert completed.returncode == 0, completed.stdout[-3000:]
 
 
+def test_importing_native_torch_archive_helpers_does_not_import_torch():
+    source = """
+import sys
+import jittor
+assert "torch" not in sys.modules
+import jittor.serialization.save_pytorch
+assert "torch" not in sys.modules
+"""
+    completed = run_python_child(
+        ["-c", source], merge_stderr=True, without_torch_mode=True)
+    assert completed.returncode == 0, completed.stdout[-3000:]
+
+
 def test_torch_archive_does_not_require_preloaded_torch_utils(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "torch", ModuleType("torch"))
     monkeypatch.delitem(sys.modules, "torch._utils", raising=False)
