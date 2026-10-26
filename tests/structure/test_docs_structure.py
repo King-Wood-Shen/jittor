@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import subprocess
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 
 from _helpers.child_process import run_python_child
@@ -188,6 +189,46 @@ class TestDocsStructure(unittest.TestCase):
         self.assertEqual(len(objects), len(set(objects)))
         index = (self.docs_root / "api" / "index.md").read_text(encoding="utf-8")
         self.assertIn(":::{autosummary}", index)
+
+    def test_translated_api_pages_share_the_canonical_inventory(self):
+        adapter_path = self.docs_root / "_myst_autodoc.py"
+        tree = ast.parse(adapter_path.read_text(encoding="utf-8"))
+        bridge = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "PublicAutomoduleBridge"
+        )
+        method = next(
+            node
+            for node in bridge.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_rich_objects"
+        )
+        namespace = {"Path": Path, "json": json}
+        exec(
+            compile(ast.Module(body=[method], type_ignores=[]), str(adapter_path), "exec"),
+            namespace,
+        )
+        lookup = namespace["_rich_objects"]
+        inventory = json.loads(
+            (self.docs_root / "api" / "inventory.json").read_text(encoding="utf-8")
+        )
+        dependencies = []
+        env = SimpleNamespace(
+            srcdir=str(self.docs_root), docname="", note_dependency=dependencies.append
+        )
+        directive = SimpleNamespace(env=env)
+        for page in inventory["pages"]:
+            modules = {name.rsplit(".", 1)[0] for name in page["objects"]}
+            for module in modules:
+                expected = {name for name in page["objects"] if name.rsplit(".", 1)[0] == module}
+                for docname in (page["docname"], page["docname"] + ".en"):
+                    with self.subTest(docname=docname, module=module):
+                        env.docname = docname
+                        self.assertEqual(lookup(directive, module), expected)
+        env.docname = "api/missing.en"
+        with self.assertRaisesRegex(RuntimeError, "API inventory has no page"):
+            lookup(directive, "jittor")
+        self.assertTrue(dependencies)
 
     def test_api_build_checker_rejects_duplicate_html_ids(self):
         checker_path = self.repo_root / "tools" / "docs" / "check_build.py"

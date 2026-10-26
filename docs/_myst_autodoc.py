@@ -102,8 +102,11 @@ class PublicAutomoduleBridge(RstDirectiveBridge):
         inventory_path = Path(self.env.srcdir) / "api" / "inventory.json"
         self.env.note_dependency(str(inventory_path))
         inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+        docname = self.env.docname
+        if docname.endswith(".en"):
+            docname = docname[:-3]
         for page in inventory["pages"]:
-            if page["docname"] == self.env.docname:
+            if page["docname"] == docname:
                 return {name for name in page["objects"] if name.rsplit(".", 1)[0] == module_name}
         raise RuntimeError("API inventory has no page for {}".format(self.env.docname))
 
