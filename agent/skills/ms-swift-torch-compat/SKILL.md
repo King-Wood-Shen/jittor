@@ -5,11 +5,6 @@ description: 在 Jittor torch shim 与独立原生 Torch 两侧验证 ms-swift�
 
 # ms-swift × Jittor torch shim
 
-
-## 本轮主要优化与开关
-
-按[主要优化与开关的验收路径](references/priority-optimizations.md)选择代表场景；本轮记录训练收敛、功能正确性、零 fallback 和设备峰值显存，不把耗时或吞吐作为验收门槛。旧性能数据只按原基线解释。
-
 ## 当前验收入口（2026-10-15）
 
 [注册 FULL SFT 与完整安装来源报告](../../../docs/results/2026-10-15-swift-trainer-installed-source.md)
@@ -261,23 +256,3 @@ transformers,peft,swift；仓库名里的 `-` 由工具归一化）；`_ecosyste
 ms-swift/peft 版本组合问题，与 jittor 无关；换成报告用的 **ms-swift 4.5.2 + peft 0.17.1 +
 transformers 4.56.2** 即跑通。原始报告见
 `$JITTOR_LAB_ROOT/_state/verify-ml/{ms-swift.unpinned-peft0.20.log,ms-swift.pinned.log}`。
-
-## 完整 CLI 恢复与新实验存储
-
-本 Skill 的 Swift LoRA tuner 组件对拍不等于 stock Trainer 的 L3。CUDA 公开 CLI 的恢复验收与
-checkpoint 峰值按各自已核验结果的固定 profile 解释；
-不得把旧运行的步骤、模型或设备范围合并扩大。
-
-### SimPO CUDA 新进程恢复（2026-10-20）
-
-[固定 Qwen2-0.5B 单卡 SimPO profile 报告](../../../docs/results/2026-10-20-ms-swift-simpo-cuda-resume.md)
-记录真实公开 `swift rlhf --rlhf_type simpo` 的 step 1 保存及独立新进程恢复至 step 3。该次
-运行绑定 Jittor SHA、ms-swift SHA、模型/数据哈希、单卡 RTX 4090、loss 轨迹、8 条零 fallback
-runtime 记录和 50 ms NVML-backed 设备峰值采样。结论仅适用于报告中的固定 profile；不授予 CPO、
-其他 RLHF 算法、其他数据游标或分布式覆盖。
-
-新运行的持久化和 worker 临时目录必须遵循
-[`ms-swift-artifact-storage`](../../../docs/notes/ms-swift-artifact-storage.md)：从 Slurm worker
-调用 `tools/ms_swift_storage_worker.sh`，预声明保留 checkpoint 完整文件契约与最大并发容量，
-用 SHA-256 校验后发布；发布后的相同文件由策略复用内容，不要再手动复制 checkpoint 或驱动日志。
-策略版本为 `msw-storage-v2`。历史运行保持原运行键和证据，不迁移、不覆盖。

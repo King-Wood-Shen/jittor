@@ -439,17 +439,10 @@ def query_cuda_archs():
 
 
 def _read_cuda_archs():
+    query_script = os.path.join(os.path.dirname(__file__), "utils", "query_cuda_cc.py")
     try:
-        # This interpreter is a tool probe, not another copy of the
-        # application. Inheriting PYTHONPATH can run an application's
-        # sitecustomize (for example, a Torch shim that imports Jittor) while
-        # this process still holds jittor.lock and is waiting for the probe.
-        # Start isolated, skip site initialization, and execute the small
-        # stdlib-only helper by path so the probe cannot re-enter Jittor.
-        probe = os.path.join(os.path.dirname(__file__), "utils", "query_cuda_cc.py")
-        probe = os.path.abspath(probe)
         child = sp.run(
-            [sys.executable, "-I", "-S", probe],
+            [sys.executable, "-I", "-S", os.path.abspath(query_script)],
             stdout=sp.PIPE, stderr=sp.PIPE,
             env=env_config.child_env(log_v=0, log_silent=1))
     except OSError as error:

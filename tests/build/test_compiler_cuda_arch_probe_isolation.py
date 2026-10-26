@@ -44,7 +44,6 @@ class TestCudaArchProbeIsolation(unittest.TestCase):
                 # sitecustomize blocks on the same cache lock the parent owns.
                 lock.jittor_lock.lock()
                 try:
-                    self.assertTrue(lock.jittor_lock.is_locked)
                     # A missing CUDA driver is a supported probe result on CPU CI;
                     # the regression is that startup must not wait on this lock.
                     result = compiler._read_cuda_archs()

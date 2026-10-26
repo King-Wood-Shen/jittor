@@ -551,17 +551,21 @@ def _load_state_dict(self, state_dict, strict=True, assign=False):
         # Torch snapshots do. Synchronization orders execution without a host
         # device wait before the subsequent native buffer writes.
         jt.sync_all()
-        copied = dict(load_state)
+        remaining = {}
         for key, value in load_state.items():
             target = _find_state_target(self, key)
             if isinstance(target, jt.Var) and isinstance(value, jt.Var):
                 # Loading copies values, without recording a differentiable
-                # in-place update of this existing leaf. Keep the public copy
-                # owner's placement, alias/version and storage semantics.
+                # in-place update of this existing leaf. Native Module
+                # parameters are plain Vars and have no Torch ``copy_`` method.
                 with jt.no_grad():
-                    target.copy_(value)
-                copied[key] = target
-        load_state = copied
+                    if not target._copy_view_into(value):
+                        target._copy_into(value)
+            else:
+                remaining[key] = value
+        # Passing a copied target to the native loader would call update() on
+        # that same holder and rebind its storage, losing detached aliases.
+        load_state = remaining
     # Pre-hooks have already run, before validation and storage-preserving
     # copies. The native loader must not invoke them a second time.
     with self._state_dict_hook_scope(False):
@@ -926,6 +930,21 @@ def _module_to_conversion(ds, dev, copy, v):
     Split out of ``_module_to`` so this file holds no closures; ``_module_to``
     hands the decoded (dtype, device, copy) triple over with a partial.
     """
+    frontend_base = next(
+        (base for base in reversed(type(v).__mro__)
+         if "_frontend_backend" in vars(base)), jt.Var)
+    if type(v).to is not frontend_base.to:
+        # Module.to applies each parameter's own Tensor.to protocol. Parameter
+        # subtypes can convert their storage (for example, quantize it) there;
+        # a direct native residency move would bypass that conversion.
+        requested = {}
+        if dev is not None:
+            requested["device"] = dev
+        if ds is not None:
+            requested["dtype"] = dtype._registry[ds]
+        if copy:
+            requested["copy"] = True
+        return v.to(**requested)
     out = v
     if ds is not None and ds in _MODULE_FLOAT_DTYPES:
         is_float = v.dtype.is_float() if hasattr(v.dtype, "is_float") else ("float" in _jittor_dtype_name(v.dtype))
