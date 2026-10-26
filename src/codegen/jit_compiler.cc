@@ -212,6 +212,34 @@ namespace jit_compiler {
 
 std::mutex dl_open_mutex;
 
+#ifdef _WIN32
+static string windows_error_message(DWORD error_code) {
+    LPSTR message_buffer = nullptr;
+    DWORD length = FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER |
+            FORMAT_MESSAGE_FROM_SYSTEM |
+            FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr,
+        error_code,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        reinterpret_cast<LPSTR>(&message_buffer),
+        0,
+        nullptr);
+    if (length == 0 || !message_buffer) {
+        if (message_buffer)
+            LocalFree(message_buffer);
+        return "Windows error " + std::to_string(error_code);
+    }
+
+    while (length > 0 &&
+            (message_buffer[length-1] == '\r' || message_buffer[length-1] == '\n'))
+        message_buffer[--length] = '\0';
+    string message(message_buffer, length);
+    LocalFree(message_buffer);
+    return message;
+}
+#endif
+
 jit_op_entry_t load_jit_lib(
     string name, string symbol_name="jit_entry", const string& extra_flags="") {
     std::lock_guard<std::mutex> lock(dl_open_mutex);
@@ -246,6 +274,12 @@ jit_op_entry_t load_jit_lib(
     
     #ifdef _WIN32
     auto jit_entry = (jit_op_entry_t)GetProcAddress((HINSTANCE)handle, symbol_name.c_str());
+    if (!jit_entry) {
+        // Capture the API error before FreeLibrary or any other Win32 call can
+        // overwrite the calling thread's last-error value.
+        DWORD symbol_error = GetLastError();
+        error_message = windows_error_message(symbol_error);
+    }
     #else
     //dlerror();
     auto jit_entry = (jit_op_entry_t)dlsym(handle, symbol_name.c_str());
