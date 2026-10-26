@@ -1,10 +1,10 @@
 # Jittor wheel contents baseline (SHA-256 and exact archive member paths)
 # source-wheel: jittor-2.0.0-py3-none-any.whl
-# source-wheel-sha256: 0aaefa01f9c850c47fc4fb3a8991750365c92f395cf810f7260c3246e1212108
+# source-wheel-sha256: 5729a8dde7e71c4a51db3327a392da5d6dbccd066c30311679fd0e6e3120dfb3
 # entries: 1133
 # Regenerate only after reviewing every path and content change.
 fb0d15cb73dc519400967b63b0091df66a8c4388e3cb7dd107b8fc40fcc5054f  jittor-2.0.0.dist-info/METADATA
-813a94b2443e4db500fc77d23a3e484eb55fb80eb83e556aa7b70f87fcd0a877  jittor-2.0.0.dist-info/RECORD
+3189f26b4c7e16e8d3b53f9b8b6a7385373ff0cb20c994972d53d03fcc16fdde  jittor-2.0.0.dist-info/RECORD
 2b6eb4118ce7cd7b09601406aa623c553c4476265836f0d9c16f5c061f7efcc0  jittor-2.0.0.dist-info/WHEEL
 435a22ada7651633d681246096725d6b8a5d15b729df61706c5637cbc58c39c7  jittor-2.0.0.dist-info/entry_points.txt
 8b18f18c9c43b17e6e2bcdefc8df9d423c12e6769d5d13cf6a46fed31e7e1666  jittor-2.0.0.dist-info/licenses/LICENSE.txt
@@ -496,7 +496,7 @@ b24db5e7cfc079c6d051f8942cf8e78ee8a6c52c269e01364be4cd22b0da0c42  jittor/contrib
 f7747c36855f3adbbc51d652e8aa6ad3ddd8ab031ae16d51aadca42670ae65d8  jittor/contrib/math_util/src/igamma.h
 2f7dc6f037353e2b69bdff02639ec63aa387666d5be7312db05ba5de73cf6a9d  jittor/dataset/__init__.py
 51d896b0383a8a4ef747e39cdee5db745913026c9f5e9f593debc4172e0edc45  jittor/dataset/cifar.py
-51cd544f65a0430505e3bb977c8bfa38cea5d0831f67af45227b049affed8214  jittor/dataset/dataset.py
+9a27ae460068736e7f87d3efc806c40dea3f7467fb94ac399a2fea9b4db979b6  jittor/dataset/dataset.py
 4baa85edb5003f71f4b3b5b9e66306cf19c92c4bdad1e61f3627e3d25adad065  jittor/dataset/mnist.py
 f6d831846a083985f92232caf63ac6064f1fc6434aacedad2ac8610ac4bfc4f2  jittor/dataset/sampler.py
 fa9908f6bec2d5b4370f83e70bc7b1ab3f0b6e1fdb092c5c6a3045783860fa49  jittor/dataset/utils.py
@@ -1032,9 +1032,9 @@ acdc3e162a1cf765c758c91797e062c48d2704967a5b6dcebac1293aa0638dec  jittor/src/run
 686eb4eae2183069aae4f0979aa522bf38ecdc870363bc56db03ec813fe7ed73  jittor/src/runtime/profiler/cache_info.h
 5c772a6f49e19ef369779e65834f19156630e4e22fa6d1e85477afb31fe5b655  jittor/src/runtime/profiler/memory_checker.cc
 55a7fe908e0ee1110e455149e3326864f5701620bf0d40c5af6c1ad9700a4e5e  jittor/src/runtime/profiler/memory_checker.h
-ab6363462fec753bff94e5da4f4232f407bb8e46d7a4705ec1dfd8051b704f11  jittor/src/runtime/profiler/profiler.cc
-0d8203d9f5616f07bef191643b10d2bb348dbfa4ce9176a0b827c0f4606faa4e  jittor/src/runtime/profiler/profiler.h
-df7d6f403923253116a49f42c13b8c514c0adfcf68a592f895589c54476392fe  jittor/src/runtime/profiler/profiler_guard.h
+1a8a9ae3bf964c338b9bc5acd0283456103949c46e71ca8b445170b5601c9ce4  jittor/src/runtime/profiler/profiler.cc
+65c795f84110152358e2bf31b235856e4d0af5dc8695a9e02e4f968e6e22666c  jittor/src/runtime/profiler/profiler.h
+4d313650d96ef814e15a51945817f3a026956c3c6e9516974d8bd6f2e49afab3  jittor/src/runtime/profiler/profiler_guard.h
 464ab2b84da2a1c86860d01ad7f2ecc49a5c81911402d769442a34a12af8531a  jittor/src/runtime/profiler/replacement.cc
 1e7a13a8e1c7425b13536557333c49ecc16f5257ee43ea4b75229b129b740755  jittor/src/runtime/profiler/replacement.h
 82f76e3533e35f3e30ab219592100128e8fa8ebd4634a9e1752f135b03e6db1d  jittor/src/runtime/profiler/simple_profiler.h
@@ -1099,8 +1099,8 @@ b089f296fdba9ebec80286d2176ece5e0645726771e291445d833a133bad467d  jittor/src/typ
 517b2a3760a475010c40b7d0cf35d55435960b3d2a8eaee4b04555723f5f6762  jittor/src/type/intrin.h
 828282d74192462be33fef495feb4b05c362e066d4d3bb7a9cb8cc29616c7fc7  jittor/src/type/minmax_compute.h
 57b12e683d3b0285e8d0360cbf74bddc16c9e34c092bbe8a58a8489a16ccd8c7  jittor/src/type/nano_string.cc
-1721b669f761e5ceafd0f2b3cf20b91c6f600b9ffa7882553a15c27be5b2a484  jittor/src/type/nano_string.h
-2918a369bebe987f3d93073f2c3808b244dfe9840f8521f94f31949b168ed7d2  jittor/src/type/nano_vector.h
+7e07b908dcdc7cfadb052c74453896a56a55d428316d9c1a264d2b19d95ffdf6  jittor/src/type/nano_string.h
+cbac123b2acd29050d2c523ed73f4d02bc8108de711f496f17f247fc2e717ac7  jittor/src/type/nano_vector.h
 46eebe1b92d4c838fc54d733d7d29cdd523725ea25d3170243df91a2f99e6e67  jittor/src/type/pow_compute.h
 af59b698be4e49c68e51f404b6e0db90c1644237fc64cfe55530cefaa752ca3a  jittor/src/type/stream_load.h
 9bb22c7ade07c1e8e4c83976bc872f6c51530641f7a5f38132a3529d65ed0d23  jittor/src/utils/cache_compile.cc
