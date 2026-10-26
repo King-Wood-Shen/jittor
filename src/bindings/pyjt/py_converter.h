@@ -703,7 +703,7 @@ DEF_IS(RandomGenerator*, T) from_py_object(PyObject* obj) {
 
 struct DataView;
 struct VarHolder;
-EXTERN_LIB PyObject* new_var_data_owner(VarHolder* vh);
+PyObject* new_var_data_owner(VarHolder* vh);
 DEF_IS(DataView, PyObject*) to_py_object(T a) {
     vector<int64_t> byte_strides;
     for (auto stride : a.storage_strides)
