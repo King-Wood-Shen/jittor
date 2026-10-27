@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 from .. import fsdp_hooks as _fsdp_hooks
 from .optimizer_state import (
     _OptState, _ParamState, _TORCH_TO_NATIVE_STATE, _NATIVE_TO_TORCH_STATE,
-    _adagrad_step_tensor, _torch_optimizer_kind,
+    _adagrad_step_tensor, _native_optimizer_buffer, _torch_optimizer_kind,
 )
 from jittor.optim.algorithms.sgd import (
     MOMENTUM_INITIALIZED as _MOMENTUM_INITIALIZED,
@@ -191,6 +191,7 @@ def _state_dict_torch(self):
 
 def _load_state_dict_torch(self, state_dict):
     _context = get_install_context(jt)
+    g = _context.target_namespace
     _native_load_state_dict = _context.state["optimizer_native_api"]['_native_load_state_dict']
     if not isinstance(state_dict, Mapping) or "param_groups" not in state_dict:
         return _native_load_state_dict(self, state_dict)
@@ -273,7 +274,11 @@ def _load_state_dict_torch(self, state_dict):
                 continue
             for i, buffer in enumerate(buffers):
                 if isinstance(buffer, jt.Var):
-                    buffers[i] = jt.zeros_like(buffer).stop_grad()
+                    # Keep the buffer's public type: SGD's momentum is a
+                    # frontend Tensor, Adam's slots are native Vars.
+                    zero = (jt.zeros_like(buffer) if type(buffer) is jt.Var
+                            else g.zeros_like(buffer))
+                    buffers[i] = zero.stop_grad()
     for gi, (saved_pg, slots) in enumerate(load_plan):
         pg = self.param_groups[gi]
         steps = _torch_param_steps(pg)
@@ -289,10 +294,12 @@ def _load_state_dict_torch(self, state_dict):
                     continue
                 if i >= len(pg.get(native, ())):
                     continue
+                existing = pg[native][i]
+                value = _native_optimizer_buffer(st[torch_key], existing)
                 if kind == "adagrad":
-                    pg[native][i] = st[torch_key].clone().stop_grad()
+                    pg[native][i] = value.clone().stop_grad()
                 else:
-                    pg[native][i] = st[torch_key]
+                    pg[native][i] = value
                     if kind == "sgd" and torch_key == "momentum_buffer":
                         _momentum_initialized_flags(pg)[i] = True
             if kind == "adagrad":

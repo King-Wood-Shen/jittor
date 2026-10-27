@@ -47,6 +47,23 @@ def _native_state_key(kind, torch):
     return _TORCH_TO_NATIVE_STATE.get(kind, {}).get(torch)
 
 
+def _native_optimizer_buffer(value, existing=None):
+    """Give a loaded buffer the same base type as the one it replaces.
+
+    ``load_state_dict`` materialises state through the Torch facade, whose
+    Tensor is a ``jt.Var`` subclass with its own promotion rules. Native
+    algorithms (Adam, AdamW, Adagrad) keep native Vars in ``param_groups``;
+    loading a frontend Tensor there makes the next update take the frontend
+    operator path and drift in the last bits. Algorithms whose buffers are
+    frontend Tensors (SGD's momentum) must keep that type, because the public
+    ``state`` view exposes the object and callers read ``.device`` from it.
+    """
+    if (existing is not None and type(existing) is jt.Var
+            and isinstance(value, jt.Var) and type(value) is not jt.Var):
+        return jt.Var(value)
+    return value
+
+
 def _adagrad_step_tensor(value):
     """Create Torch's host step scalar through its placement-aware factory."""
     torch_owner = get_install_context(jt).target_namespace
@@ -147,6 +164,9 @@ class _OptState:
             _momentum_initialized_flags(pg)[i] = False
             return
         if isinstance(buffers, list) and i < len(buffers):
+            # A live `state[p][key] = value` keeps the caller's object: the
+            # Torch contract exposes that exact tensor. Only checkpoint
+            # loading has to restore the native base type.
             buffers[i] = value
             if kind == "sgd" and key == "momentum_buffer":
                 _momentum_initialized_flags(pg)[i] = True
