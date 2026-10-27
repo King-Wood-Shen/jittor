@@ -70,6 +70,25 @@ def _run(layer, x_np, h_np, c_np, use_cuda):
 @_test_preserve_policy(jt, 'float32_cudnn_precision')
 @unittest.skipIf(not _test_capability.check_accelerator('cuda', backend=jt).enabled, "No CUDA found")
 class TestCudnnRnnMatchesTheRecurrence(unittest.TestCase):
+
+    def test_weight_query_before_first_executor_batch(self):
+        from _helpers.child_process import run_python_child
+
+        # A fresh child must answer the shape query without an earlier
+        # convolution or fetch having populated the executor's allocator.
+        probe = (
+            "from jittor._runtime.backend_libraries import get_library; "
+            "library = get_library('cudnn', load=True); "
+            "offsets = library.cudnn_rnn_weight_offset("
+            "'lstm', 32, 64, 1, 0, True, False, 'float32'); "
+            "assert len(offsets) > 1 and offsets[0] > 0; "
+            "assert all(0 <= item < offsets[0] for item in offsets[1:]); "
+            "print('RNN_COLD_WEIGHT_QUERY_OK')"
+        )
+        result = run_python_child(["-c", probe], text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("RNN_COLD_WEIGHT_QUERY_OK", result.stdout)
+
     SEQ, BATCH, INPUT, HIDDEN = 5, 3, 4, 6
 
     def setUp(self):
