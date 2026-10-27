@@ -9,6 +9,8 @@ import jittor as jt
 import numpy as np
 import pytest
 
+from _helpers.child_process import run_python_child
+
 
 @pytest.fixture(autouse=True)
 def restore_execution_mode():
@@ -26,15 +28,36 @@ def test_native_save_load_roundtrip(tmp_path):
 
 
 def test_torch_archive_save_load_roundtrip(tmp_path):
-    pytest.importorskip("torch")
-    path = str(tmp_path / "weights.pth")
-    source = {"weight": jt.array([[1.25, -2.0], [3.5, 4.0]]),
-              "steps": jt.array([1, 3, 7]).int32()}
-    jt.save(source, path)
-    restored = jt.load(path)
-    for name in source:
-        assert restored[name].dtype == source[name].dtype
-        np.testing.assert_array_equal(restored[name].numpy(), source[name].numpy())
+    source = """
+import sys
+import jittor as jt
+import numpy as np
+path = sys.argv[1]
+values = {"weight": jt.array([[1.25, -2.0], [3.5, 4.0]]),
+          "steps": jt.array([1, 3, 7]).int32()}
+jt.save(values, path)
+restored = jt.load(path)
+for name in values:
+    assert restored[name].dtype == values[name].dtype
+    np.testing.assert_array_equal(restored[name].numpy(), values[name].numpy())
+"""
+    completed = run_python_child(
+        ["-c", source, str(tmp_path / "weights.pth")],
+        merge_stderr=True, without_torch_mode=True)
+    assert completed.returncode == 0, completed.stdout[-3000:]
+
+
+def test_importing_native_torch_archive_helpers_does_not_import_torch():
+    source = """
+import sys
+import jittor
+assert "torch" not in sys.modules
+import jittor.serialization.save_pytorch
+assert "torch" not in sys.modules
+"""
+    completed = run_python_child(
+        ["-c", source], merge_stderr=True, without_torch_mode=True)
+    assert completed.returncode == 0, completed.stdout[-3000:]
 
 
 def test_torch_archive_does_not_require_preloaded_torch_utils(tmp_path, monkeypatch):
