@@ -7,6 +7,7 @@
 # file 'LICENSE.txt', which is part of this source code package.
 # ***************************************************************
 import unittest
+import pytest
 import jittor as jt
 import numpy as np
 skip_this_test = False
@@ -298,82 +299,6 @@ class TestSetitem(unittest.TestCase):
         np.testing.assert_allclose(d.data,
             np.concatenate([b.data,c.data]))
         
-    def test_concat_random(self):
-        def check(backward=False):
-            n1, n2, n3 = 1000, 20, 10
-            # n1, n2, n3 = 3, 2, 3
-            import random
-            data = []
-            back = []
-            for i in range(n1):
-                if len(data) > n2:
-                    v = random.randint(0,len(data)-1)
-                    # print("del", v)
-                    del data[v]
-                x1 = random.randint(0,9)
-                # print(i, x1)
-                if len(data) == 0:
-                    # a = jt.random((random.randint(10,20),))
-                    a = jt.array(np.random.rand(random.randint(n3,n3*2)))
-                    data.append(a)
-                if x1 == 0:
-                    a = data[random.randint(0,len(data)-1)]
-                    a = a.copy()
-                    data.append(a)
-                elif x1 == 1:
-                    a = data[random.randint(0,len(data)-1)]
-                    a = a.clone()
-                    data.append(a)
-                elif x1 == 2:
-                    a = data[random.randint(0,len(data)-1)]
-                    b = np.random.permutation(np.arange(a.numel()))
-                    # print("permutation", b)
-                    a = a[b]
-                    data.append(a)
-                elif x1 == 3:
-                    a = data[random.randint(0,len(data)-1)]
-                    a = a[:100]
-                    # print(a.shape)
-                    data.append(a)
-                elif x1 == 4:
-                    # a = jt.random((random.randint(10,20),))
-                    a = jt.array(np.random.rand(random.randint(n3,n3*2)))
-                    if backward and random.randint(0,1):
-                        back.append(a)
-                    data.append(a)
-                elif x1 == 5:
-                    v = random.randint(0,len(data)-1)
-                    a = data[v]
-                    # print("split", v, a.shape)
-                    arr = a.split(n3-1)
-                    data += arr
-                else:
-                    if not len(data): continue
-                    n = random.randint(1,3)
-                    a = [ data[random.randint(0,len(data)-1)] for i in range(n) ]
-                    a = jt.concat(a)
-                    if a.numel() > 1000:
-                        b = np.random.permutation(np.arange(a.numel()))
-                        a = a[b][:100]
-                    data.append(a)
-            ret = jt.concat(data)
-            if backward and len(back):
-                grads = jt.grad(jt.rand_like(ret)*ret, back)
-                return jt.concat(grads).numpy()
-            return ret.numpy()
-
-        for s in range(100):
-            print("check", s)
-            for check_grad in [True, False]:
-                jt.set_global_seed(s)
-                data = check(check_grad)
-                jt.gc()
-                jt.set_global_seed(s)
-                with jt.flag_scope(gopt_disable=1):
-                    data2 = check(check_grad)
-                jt.gc()
-                np.testing.assert_allclose(data, data2, atol=1e-5, rtol=1e-5)
-
     def test_concat_grad(self):
         n = 30000
         m = 100
@@ -467,6 +392,85 @@ class TestSetitem(unittest.TestCase):
         value = jt.array(1.0)
         value[jt.array(True)] = jt.array(2.0)
         self.assertEqual(float(value.item()), 2.0)
+
+# Each seed and gradient mode is an independent optimized/unoptimized
+# comparison. Keep all 100 seeds and both modes, with the ordinary per-case
+# timeout, instead of charging all 400 graph executions to one timeout.
+@pytest.mark.parametrize("seed", range(100))
+@pytest.mark.parametrize("check_grad", [True, False], ids=["backward", "forward"])
+def test_concat_random(seed, check_grad):
+    def check(backward=False):
+        n1, n2, n3 = 1000, 20, 10
+        # n1, n2, n3 = 3, 2, 3
+        import random
+        data = []
+        back = []
+        for i in range(n1):
+            if len(data) > n2:
+                v = random.randint(0,len(data)-1)
+                # print("del", v)
+                del data[v]
+            x1 = random.randint(0,9)
+            # print(i, x1)
+            if len(data) == 0:
+                # a = jt.random((random.randint(10,20),))
+                a = jt.array(np.random.rand(random.randint(n3,n3*2)))
+                data.append(a)
+            if x1 == 0:
+                a = data[random.randint(0,len(data)-1)]
+                a = a.copy()
+                data.append(a)
+            elif x1 == 1:
+                a = data[random.randint(0,len(data)-1)]
+                a = a.clone()
+                data.append(a)
+            elif x1 == 2:
+                a = data[random.randint(0,len(data)-1)]
+                b = np.random.permutation(np.arange(a.numel()))
+                # print("permutation", b)
+                a = a[b]
+                data.append(a)
+            elif x1 == 3:
+                a = data[random.randint(0,len(data)-1)]
+                a = a[:100]
+                # print(a.shape)
+                data.append(a)
+            elif x1 == 4:
+                # a = jt.random((random.randint(10,20),))
+                a = jt.array(np.random.rand(random.randint(n3,n3*2)))
+                if backward and random.randint(0,1):
+                    back.append(a)
+                data.append(a)
+            elif x1 == 5:
+                v = random.randint(0,len(data)-1)
+                a = data[v]
+                # print("split", v, a.shape)
+                arr = a.split(n3-1)
+                data += arr
+            else:
+                if not len(data): continue
+                n = random.randint(1,3)
+                a = [ data[random.randint(0,len(data)-1)] for i in range(n) ]
+                a = jt.concat(a)
+                if a.numel() > 1000:
+                    b = np.random.permutation(np.arange(a.numel()))
+                    a = a[b][:100]
+                data.append(a)
+        ret = jt.concat(data)
+        if backward and len(back):
+            grads = jt.grad(jt.rand_like(ret)*ret, back)
+            return jt.concat(grads).numpy()
+        return ret.numpy()
+
+    jt.set_global_seed(seed)
+    data = check(check_grad)
+    jt.gc()
+    jt.set_global_seed(seed)
+    with jt.flag_scope(gopt_disable=1):
+        data2 = check(check_grad)
+    jt.gc()
+    np.testing.assert_allclose(data, data2, atol=1e-5, rtol=1e-5)
+
 
 if __name__ == "__main__":
     unittest.main()
