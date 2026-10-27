@@ -1,10 +1,10 @@
 # Jittor wheel contents baseline (SHA-256 and exact archive member paths)
 # source-wheel: jittor-2.0.0-py3-none-any.whl
-# source-wheel-sha256: 8ef4f7cc592708c9a9d68aa549ac576c28839b716f6cb0edbf2851f328bbcb58
+# source-wheel-sha256: 8cfdbe84d9bd566703a36da9026386296de494789aa5776b5745026e0bc446ac
 # entries: 1152
 # Regenerate only after reviewing every path and content change.
 c4fbfa98ca3970ad557b639bc54ca832f90ec343841a6725dc000c692e7f3c4f  jittor-2.0.0.dist-info/METADATA
-3f4b53fc8bbe23cc94a7d7baac59e482ca3b7167c705054d4a298ad6b3d86399  jittor-2.0.0.dist-info/RECORD
+b395ac4a8a95e23ba48c2854149fed584aff871360733e1461b8e3daa5d9f189  jittor-2.0.0.dist-info/RECORD
 2b6eb4118ce7cd7b09601406aa623c553c4476265836f0d9c16f5c061f7efcc0  jittor-2.0.0.dist-info/WHEEL
 435a22ada7651633d681246096725d6b8a5d15b729df61706c5637cbc58c39c7  jittor-2.0.0.dist-info/entry_points.txt
 8b18f18c9c43b17e6e2bcdefc8df9d423c12e6769d5d13cf6a46fed31e7e1666  jittor-2.0.0.dist-info/licenses/LICENSE.txt
@@ -873,7 +873,7 @@ adcd99d99087a8bd40f2468e9650d1245e5876af04377d9eab82e6d2a3df3f31  jittor/src/cor
 bb6e7dadc2204fa6828dc12f1cc541ef81757ec176d6ef96a25562d245d8c035  jittor/src/core/memory_profiler.cc
 9d544475de7d688a7aca27e7dcbf146ccfd69d7065983c25dd15391243152dfb  jittor/src/core/memory_profiler.h
 b7671eb4c31352eb104dcf9d72faa0a0031c7c19f39675a1c42d68e2560f6142  jittor/src/core/node.cc
-6cb6c6b5874302f2ad5aae7df93937827dfb40654f9bb535fd137667cbc0d227  jittor/src/core/node.h
+83f1f932c48a7439268b49838286b2180fcedbff7760acf33859249179018ae7  jittor/src/core/node.h
 90b4b010f4516f8d70a16ea4fd5489839c5ce74da4beccc0836d0a44740c7301  jittor/src/core/numpy_func.h
 612b4dc3199040ba9354e6ba94f1605d16a0c6048a87661025d54ce68b17cacc  jittor/src/core/op.cc
 1d09e8635129beb405b0bb5998466f00768601fac0163b3fae149c435beb22e7  jittor/src/core/op.h
