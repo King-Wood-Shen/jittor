@@ -12,11 +12,13 @@
 #include <signal.h>
 #endif
 #include "utils/cross_platform.h"
+#ifndef _WIN32
 #include <fcntl.h>
 #include <poll.h>
-#include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
+#include <string.h>
 #include <string>
 #include "utils/tracer.h"
 
@@ -181,6 +183,8 @@ void breakpoint() {
 // frame to module+offset, which is also the form `addr2line -e <module> <off>`
 // wants.
 
+#ifndef _WIN32
+// The pre-forked symbolizer belongs to the POSIX signal-handler path.
 #define JT_TRACE_MAX 64
 #define JT_TRACE_MAGIC 0x6a747472  // "jttr"
 
@@ -469,6 +473,8 @@ void print_trace_from_signal(int signal, void* fault_pc, void* caller_pc) {
         trace_write(2, "[bt] symbolizer helper timed out\n");
     }
 }
+
+#endif  // !_WIN32
 
 void print_trace() {
     if (gdb_path.size()) {
