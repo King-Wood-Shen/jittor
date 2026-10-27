@@ -866,11 +866,13 @@ if os.name == 'nt':
         cc_flags = cc_flags.replace("-lstdc++", "")
         cc_flags = cc_flags.replace("-ldl", "")
         cc_flags += f" -L\"{py3_link_path}\" -lpython3{sys.version_info.minor} "
-        cc_flags += " -EHa -MD -utf-8 "
+        # System Visual Studio and the bundled toolchain both include
+        # Windows headers; neither may redefine C++ min/max APIs as macros.
+        cc_flags += " -EHa -MD -utf-8 -DNOMINMAX "
         import jittor_utils
         if jittor_utils.msvc_path:
             mp = jittor_utils.msvc_path
-            cc_flags += f' -nologo -I"{mp}\\VC\\include" -I"{mp}\\win10_kits\\include\\ucrt" -I"{mp}\\win10_kits\\include\\shared" -I"{mp}\\win10_kits\\include\\um" -DNOMINMAX '
+            cc_flags += f' -nologo -I"{mp}\\VC\\include" -I"{mp}\\win10_kits\\include\\ucrt" -I"{mp}\\win10_kits\\include\\shared" -I"{mp}\\win10_kits\\include\\um" '
             cc_flags += f' -L"{mp}\\VC\\lib" -L"{mp}\\win10_kits\\lib\\um\\x64" -L"{mp}\\win10_kits\\lib\\ucrt\\x64" '
         win_libpaths = {}
         def fix_cl_flags(cmd):
