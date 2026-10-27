@@ -285,6 +285,16 @@ inline void notify_node_destroyed(Node* node) {
 
 enum class LivenessKind { forward, backward, pending };
 
+// Keep liveness transitions inline and failure reporting out of line on both
+// supported compiler families. These macros are local to this counter.
+#ifdef _MSC_VER
+#define JT_LIVENESS_FORCEINLINE __forceinline
+#define JT_LIVENESS_COLD_NOINLINE __declspec(noinline)
+#else
+#define JT_LIVENESS_FORCEINLINE __attribute__((always_inline))
+#define JT_LIVENESS_COLD_NOINLINE __attribute__((noinline, cold))
+#endif
+
 template <LivenessKind Kind>
 class LivenessCounter {
     int value_ = 0;
@@ -306,24 +316,24 @@ public:
     // report written in place the steps were calls. The report -- the same
     // assertion, condition and message -- runs out of line, only when the
     // condition has already failed.
-    __attribute__((always_inline)) bool own() {
+    JT_LIVENESS_FORCEINLINE bool own() {
         if (PREDICT_BRANCH_NOT_TAKEN(!(value_ >= 0 && value_ < std::numeric_limits<int>::max())))
             report_own();
         return ++value_ == 1;
     }
 
-    __attribute__((always_inline)) bool release() {
+    JT_LIVENESS_FORCEINLINE bool release() {
         if (PREDICT_BRANCH_NOT_TAKEN(!(value_ > 0))) report_release();
         return --value_ == 0;
     }
 
 private:
-    __attribute__((noinline, cold)) void report_own() const {
+    JT_LIVENESS_COLD_NOINLINE void report_own() const {
         ASSERT(value_ >= 0 && value_ < std::numeric_limits<int>::max())
             << kind_name() << "liveness own overflow";
     }
 
-    __attribute__((noinline, cold)) void report_release() const {
+    JT_LIVENESS_COLD_NOINLINE void report_release() const {
         ASSERT(value_ > 0) << kind_name()
             << "liveness release without a matching owner";
     }
@@ -335,6 +345,9 @@ public:
             << "liveness mismatch for node" << owner;
     }
 };
+
+#undef JT_LIVENESS_FORCEINLINE
+#undef JT_LIVENESS_COLD_NOINLINE
 
 struct NodeLiveness {
     LivenessCounter<LivenessKind::forward> forward;
