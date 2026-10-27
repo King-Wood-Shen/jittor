@@ -169,12 +169,24 @@ def _run_lstm(frontend, x, weights, coefficient, is_torch, backward_tf32=None):
     from _helpers.logs import find_log_with_re
     model = frontend.nn.LSTM(x.shape[-1], weights[1].shape[-1], num_layers=1)
     names = ("weight_ih_l0", "weight_hh_l0", "bias_ih_l0", "bias_hh_l0")
-    creator = frontend.tensor if is_torch else jt.array
+    if is_torch:
+        # Torch factories default to CPU even inside a native CUDA scope.
+        # This probe requires cuDNN, so place both the module and its inputs
+        # explicitly on CUDA rather than accepting the generic CPU recurrence.
+        model = model.cuda()
+
+        def creator(value, **kwargs):
+            return frontend.tensor(value, device="cuda", **kwargs)
+    else:
+        creator = jt.array
     for name, value in zip(names, weights):
         getattr(model, name).assign(creator(value, dtype="float32"))
     value = creator(x, dtype="float32")
     value.start_grad()
     coefficient = creator(coefficient, dtype="float32")
+    if is_torch:
+        assert value.device.type == coefficient.device.type == "cuda"
+        assert all(getattr(model, name).device.type == "cuda" for name in names)
     with jt.log_capture_scope(log_silent=1, log_v=0, log_vprefix="cudnn_rnn_descriptor=100") as logs:
         output, _ = model(value)
         loss = (output * coefficient).sum()

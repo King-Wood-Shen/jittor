@@ -85,7 +85,10 @@ struct CudnnWorkspace {
     CudnnWorkspace() = default;
     explicit CudnnWorkspace(size_t bytes) : size(bytes) {
         if (!size) return;
-        allocator = runtime_executor().temp_allocator;
+        // Direct descriptor queries can allocate before an executor batch.
+        // Acquire the current device's allocator from its owner; the
+        // executor's cached pointer is null until that first batch runs.
+        allocator = get_allocator(true);
         ptr = allocator->alloc(size, allocation);
     }
     ~CudnnWorkspace() {
