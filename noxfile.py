@@ -1905,13 +1905,30 @@ def py313(session):
 
 #: One CPU probe for both tiers: the gate has to prove it is running the tree it
 #: thinks it is before it reports anything about the tree.
-_CPU_PROBE = (
-    "import jittor as jt; "
-    "assert not jt.compiler.has_cuda; "
-    "assert not getattr(jt.compiler, 'has_acl', 0); "
-    "x = (jt.array([1.0, 2.0]) * 2).sum(); x.sync(); "
-    "assert float(x.item()) == 6.0"
-)
+# The compiler deliberately exits before user code when a cached jit_utils
+# library must be rebuilt. Prepare the cache once under that exact protocol;
+# never retry pytest, a failed assertion, or an unrelated exit code 3.
+_CPU_PROBE = """\
+import subprocess
+import sys
+
+probe = "import jittor as jt; assert not jt.compiler.has_cuda; assert not getattr(jt.compiler, 'has_acl', 0); x = (jt.array([1.0, 2.0]) * 2).sum(); x.sync(); assert float(x.item()) == 6.0; print('JITTOR_CPU_PROBE_PASSED', flush=True)"
+rebuilt = "jit_utils was rebuilt and cannot be reloaded in this process. Nothing else has run: rerun the same command."
+ready = "JITTOR_CPU_PROBE_PASSED"
+for attempt in range(2):
+    child = subprocess.run(
+        [sys.executable, "-c", probe], stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, universal_newlines=True)
+    print(child.stdout, end="", flush=True)
+    if (attempt == 0 and child.returncode == 3
+            and rebuilt in child.stdout and ready not in child.stdout):
+        continue
+    if child.returncode:
+        raise SystemExit(child.returncode)
+    if ready not in child.stdout:
+        raise SystemExit("CPU readiness probe did not complete")
+    break
+"""
 
 
 def _cpu_gate_env(session):

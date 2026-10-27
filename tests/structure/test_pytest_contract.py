@@ -1131,3 +1131,51 @@ def test_the_collection_scanner_reaches_decorators_class_bodies_and_defaults():
         "blind_spot.py:29 imports triton during collection",
         "blind_spot.py:31 writes jt.flags.use_cuda during collection",
     ], found
+
+
+def test_cpu_readiness_bootstrap_restarts_only_the_compiler_protocol():
+    import contextlib
+    import io
+    import subprocess
+
+    tree = ast.parse((REPO_ROOT / "noxfile.py").read_text(encoding="utf8"))
+    assignment = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "_CPU_PROBE" for target in node.targets
+        )
+    )
+    script = ast.literal_eval(assignment.value)
+    rebuilt = (
+        "jit_utils was rebuilt and cannot be reloaded in this process. "
+        "Nothing else has run: rerun the same command."
+    )
+    ready = "JITTOR_CPU_PROBE_PASSED"
+    cases = [
+        ([(0, ready)], None, 1),
+        ([(3, rebuilt), (0, ready)], None, 2),
+        ([(3, "unrelated teardown failure")], 3, 1),
+        ([(1, "AssertionError")], 1, 1),
+        ([(3, rebuilt), (3, rebuilt)], 3, 2),
+        ([(0, "no readiness marker")], "CPU readiness probe did not complete", 1),
+        ([(3, rebuilt + ready)], 3, 1),
+    ]
+    for outcomes, expected, calls in cases:
+        responses = [SimpleNamespace(returncode=code, stdout=output) for code, output in outcomes]
+        with mock.patch.object(subprocess, "run", side_effect=responses) as run:
+            caught = None
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    exec(compile(script, "<cpu-readiness>", "exec"), {})
+            except SystemExit as error:
+                caught = error.code
+        assert caught == expected, (outcomes, caught)
+        assert run.call_count == calls
+        # Same unchanged backend and arithmetic assertions run in both children.
+        probes = [call.args[0][2] for call in run.call_args_list]
+        assert len(set(probes)) == 1
+        assert "assert not jt.compiler.has_cuda" in probes[0]
+        assert "assert not getattr(jt.compiler, 'has_acl', 0)" in probes[0]
+        assert "assert float(x.item()) == 6.0" in probes[0]
