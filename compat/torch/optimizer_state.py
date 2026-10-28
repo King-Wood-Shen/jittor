@@ -87,6 +87,8 @@ def _torch_optimizer_kind(opt):
 
     See jittor/compat/optimizer_kinds.py.
     """
+    if getattr(opt, "_torch_custom_optimizer_protocol", False):
+        return "custom"
     return (_optimizer_kinds.kind_of(opt)
             or type(opt).__name__.lower())
 

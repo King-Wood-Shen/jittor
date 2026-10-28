@@ -7,7 +7,16 @@ from .context import get_install_context
 import jittor as jt
 
 
-def initialize_base(self, params, lr, *args, **kwargs):
+_MISSING_DEFAULTS = object()
+
+
+def initialize_base(self, params, defaults=_MISSING_DEFAULTS, *args, **kwargs):
+    if "lr" in kwargs:
+        if defaults is not _MISSING_DEFAULTS:
+            raise TypeError("optimizer received both defaults and lr")
+        defaults = kwargs.pop("lr")
+    if defaults is _MISSING_DEFAULTS:
+        raise TypeError("optimizer is missing its defaults argument")
     state = get_install_context(jt).state["optimizer_frontend_native"]
     tensor_type = state["tensor_type"]
     if isinstance(params, tensor_type._frontend_backend.Var):
@@ -17,8 +26,33 @@ def initialize_base(self, params, lr, *args, **kwargs):
                                  if isinstance(group["params"], tensor_type._frontend_backend.Var)
                                  else list(group["params"])))
               if isinstance(group, Mapping) else group for group in params]
+    custom = isinstance(defaults, Mapping)
+    if custom:
+        from .optimizer_protocol import initialize_protocol, fill_group_defaults
+        initialize_protocol(self, defaults)
+        lr = defaults.get("lr", 0.0)
+    else:
+        lr = defaults
     with tensor_frontend(tensor_type):
         state["base_init"](self, params, lr, *args, **kwargs)
+    if custom:
+        for group in self.param_groups:
+            fill_group_defaults(self, group)
+
+
+def optimizer_defaults(self):
+    if getattr(self, "_torch_custom_optimizer_protocol", False):
+        return self._torch_custom_optimizer_defaults
+    state = get_install_context(jt).state["optimizer_frontend_native"]
+    return state["base_defaults"](self)
+
+
+def add_param_group(self, group):
+    if getattr(self, "_torch_custom_optimizer_protocol", False):
+        from .optimizer_protocol import add_group
+        return add_group(self, group)
+    state = get_install_context(jt).state["optimizer_frontend_native"]
+    return state["base_add_param_group"](self, group)
 
 
 def _initialize_algorithm(name, instance, args, kwargs):
@@ -85,6 +119,8 @@ def make_optimizer_frontend(native, tensor_type):
     get_install_context(tensor_type._frontend_backend).state["optimizer_frontend_native"] = MappingProxyType({
         "tensor_type": tensor_type,
         "base_init": native.Optimizer.__init__,
+        "base_defaults": native.Optimizer.defaults.fget,
+        "base_add_param_group": native.Optimizer.add_param_group,
         "algorithms": MappingProxyType({name: getattr(native, name).__init__
                                        for name in _ALGORITHM_INITIALIZERS if hasattr(native, name)}),
     })
@@ -92,6 +128,8 @@ def make_optimizer_frontend(native, tensor_type):
     base = type("Optimizer", (native.Optimizer,), {
         "__module__": "torch.optim",
         "__init__": initialize_base,
+        "defaults": property(optimizer_defaults),
+        "add_param_group": add_param_group,
     })
     setattr(module, "Optimizer", base)
     for name in ("SGD", "Adam", "AdamW", "RMSprop", "Adan", "Adagrad"):
