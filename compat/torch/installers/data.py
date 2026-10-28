@@ -535,16 +535,17 @@ def _generate_state(base_seed, worker_id):
 
 def _checkpoint(fn, *args, use_reentrant=None, preserve_rng_state=True,
                 context_fn=None, determinism_check="default", debug=False, **kwargs):
-    """Adapt Torch's reentrant checkpoint to native activation replay.
+    """Adapt Torch checkpoint to the shared native replay mechanisms.
 
-    Nested tensors and keyword arguments are supported. Non-reentrant replay,
-    custom context_fn and debug tracing are deliberately rejected until their
-    distinct contracts have native implementations.
+    Nested tensors and keyword arguments are supported. False records a
+    gradient-enabled native graph; True reexecutes the Python callable.
+    Custom context_fn, debug and nondefault determinism checks are unsupported.
     """
-    if use_reentrant is False:
-        raise NotImplementedError("non-reentrant activation checkpointing is not implemented")
     if context_fn is not None or debug or determinism_check != "default":
         raise NotImplementedError("checkpoint supports only default replay contexts and determinism checks")
+    if use_reentrant is False:
+        return jt.autograd.checkpoint(fn, *args, use_reentrant=False,
+                                      preserve_rng_state=preserve_rng_state, **kwargs)
     from ..amp import autocast, autocast_is_enabled, autocast_configured_dtype, autocast_cache_enabled
     device = "npu" if jt.flags.use_cuda and jt.compiler.has_acl else "cuda" if jt.flags.use_cuda else "cpu"
     enabled = autocast_is_enabled(device)

@@ -1,9 +1,10 @@
-"""First-order activation rematerialization shared by native and Torch APIs.
+"""Activation rematerialization shared by native and Torch APIs.
 
 The function must reproduce its tensor computation from its inputs and captured
 module parameters. Container structure is fixed between forward and replay.
 Registered buffers are replayed on copies; other Python side effects run twice.
-Higher-order differentiation and non-reentrant early-stop replay are unsupported.
+Reentrant replay is first-order only. Gradient-enabled native replay supports
+only default contexts; Python hooks run only during the recorded forward.
 """
 
 from contextlib import nullcontext
@@ -119,16 +120,26 @@ class _Rematerialize(Function):
                 _rng_restore(current_rng)
 
 
-def checkpoint(function, *args, preserve_rng_state=True, context_fn=None, **kwargs):
-    """Run an unrecorded forward and replay it during first-order backward.
+def checkpoint(function, *args, use_reentrant=True, preserve_rng_state=True,
+               context_fn=None, **kwargs):
+    """Checkpoint a callable using Python replay or native graph replay.
 
     Differentiable tensors in nested positional/keyword arguments, bound or
     closure-captured modules and Python function tensor captures are taped once
     per unique tensor. ``context_fn`` optionally creates a fresh context manager
     for each backward replay (e.g. a frontend's autocast context).
+
+    With ``use_reentrant=False``, forward records the gradient-enabled native
+    graph once, releases owned intermediate storage, and backward reexecutes
+    its original producers. This path supports only the default context.
     """
     import jittor as jt
 
+    if use_reentrant is False:
+        if context_fn is not None:
+            raise NotImplementedError("native graph checkpoint supports only the default context")
+        from ._checkpoint_recorded import recorded_checkpoint
+        return recorded_checkpoint(function, *args, preserve_rng_state=preserve_rng_state, **kwargs)
     if jt.flags.no_grad:
         return function(*args, **kwargs)
     capture = Capture(function, args, kwargs)
