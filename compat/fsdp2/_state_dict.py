@@ -8,6 +8,13 @@ from . import common, shard
 
 
 def _checkpoint_entries(module):
+    # Checkpoint hooks own the portable namespace. Match managed entries by
+    # identity, preserving ordinary user child names that resemble wrappers.
+    exported_names = {}
+    for name, parameter in module.state_dict().items():
+        state, entry = shard._fsdp_param_entry(parameter)
+        if state is not None:
+            exported_names.setdefault((id(state), id(entry)), name)
     module_names = {id(child): name for name, child in module.named_modules()}
     for child in shard._iter_fsdp_modules(module, recurse=True):
         state = getattr(child, "_fsdp_state", None)
@@ -16,6 +23,7 @@ def _checkpoint_entries(module):
         prefix = module_names.get(id(child), "")
         for entry in state.true_fsdp_params:
             name = "{}.{}".format(prefix, entry.name) if prefix else entry.name
+            name = exported_names.get((id(state), id(entry)), name)
             yield name, state, entry
 
 
