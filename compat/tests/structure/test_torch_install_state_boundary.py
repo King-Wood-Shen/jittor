@@ -3,7 +3,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
-# These prose assertions target the maintained English translation.
+# The tokens below are the guide's English contract text; the default page is
+# the Chinese translation (`torch-install-transactions.md`).
 GUIDE = ROOT / "docs/development/torch-install-transactions.en.md"
 HELPER = ROOT / "tests/_helpers/child_process.py"
 DIST_INSTALLER = ROOT / "compat/torch/installers/distributed.py"
