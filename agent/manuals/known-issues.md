@@ -1224,9 +1224,14 @@ workaround.
 - Owner: dtype, autograd and linear-algebra maintainers
 - Symptom: CUDA complex `prod`, second-order complex autograd/JVP, complex128,
   native complex linear-algebra kernels, and some CUDA eig environments are not
-  supported; the calls refuse explicitly.
+  supported; the calls refuse explicitly. On Ascend, `jt.fft.rfft` lowers to a
+  fused `unary/imag` variant the ACL backend does not register, so the call
+  refuses (`unregistered fused operator variant: unary/imag`) instead of
+  computing on the device.
 - Workaround: none beyond the supported complex64 surface.
-- Evidence: [native complex dtype decision](../../docs/notes/complex-dtype.md).
+- Evidence: [native complex dtype decision](../../docs/notes/complex-dtype.md);
+  `tests/backends/acl/test_acl_indexing.py::test_acl_rfft_keeps_lazy_dft_constants_alive`
+  on Ascend 910B3 with CANN 9.0.0 (2026-10-28).
 - Exit condition: remove each sub-item only with focused CPU and accelerator
   tests for its operation and derivative order.
 
