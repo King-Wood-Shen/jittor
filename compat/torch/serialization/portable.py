@@ -1,6 +1,7 @@
 """Public Torch save/load and portable tensor payload conversion."""
 import os as _os_pickle
 import pickle as _pickle
+from threading import Event as _Event
 import numpy as np
 import jittor as jt
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
@@ -117,10 +118,25 @@ def _snapshot_tensors(obj):
         operands = [tensor.contiguous() for tensor in snapshot.tensors]
         jt.sync(operands, device_sync=False, weak_sync=False)
         # Fetch copies to host without moving the source sharing group.
-        jt.fetch(*operands, snapshot.capture)
-        # Wait for pending fetch copies (including Copy0 for a nondefault GPU)
-        # without adding any other graph roots to the batch.
-        jt.sync([], device_sync=True, weak_sync=False)
+        callback_done = _Event()
+        callback_arrays = None
+
+        def capture(*arrays):
+            nonlocal callback_arrays
+            # The native converter gives these NumPy arrays owned buffers.
+            # Keep them alive after FetchResult releases its staging storage.
+            callback_arrays = arrays
+            callback_done.set()
+
+        # Synchronize the fetch output itself, rather than an empty root list.
+        from jittor._core.var import core as _core
+        fetch_op = _core.ops.fetch(operands, capture)
+        _core.submit_pending_fetches()
+        jt.sync([fetch_op], device_sync=True, weak_sync=False)
+        callback_done.wait()
+        # Do fallible snapshot copies in the saving caller. A failed copy must
+        # propagate without throwing through, or poisoning, the fetch queue.
+        snapshot.capture(*callback_arrays)
     if len(snapshot.values) != len(snapshot.tensors):
         raise RuntimeError("checkpoint tensor fetch did not complete")
     return snapshot.values

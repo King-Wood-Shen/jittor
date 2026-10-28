@@ -160,6 +160,57 @@ def test_portable_snapshot_fills_one_value_per_operand_including_views():
     assert (view.data_ptr(), tuple(view.stride())) == before
 
 
+def test_portable_snapshot_waits_for_fetch_callback(monkeypatch):
+    torch = compatibility_owner(jt)
+    value = torch.tensor(np.array([1.25, -2.5], dtype=np.float32))
+    queued = {}
+    event_instances = []
+    sync_calls = []
+    submit_calls = []
+    from jittor._core.var import core
+    fetch_node = object()
+
+    class DeferredEvent:
+        def __init__(self):
+            self.completed = False
+            self.waited = False
+            event_instances.append(self)
+
+        def set(self):
+            self.completed = True
+
+        def wait(self):
+            self.waited = True
+            queued["callback"](np.array([1.25, -2.5], dtype=np.float32))
+            assert self.completed
+            return True
+
+    def queue_fetch(*args):
+        queued["variables"], queued["callback"] = args
+        return fetch_node
+
+    def record_sync(variables, *, device_sync=False, weak_sync=True):
+        sync_calls.append((variables, device_sync, weak_sync))
+
+    monkeypatch.setattr(portable, "_Event", DeferredEvent)
+    monkeypatch.setattr(core.ops, "fetch", queue_fetch)
+    monkeypatch.setattr(core, "submit_pending_fetches", lambda: submit_calls.append(True))
+    monkeypatch.setattr(portable.jt, "sync", record_sync)
+
+    values = portable._snapshot_tensors(value)
+
+    assert len(queued["variables"]) == 1
+    assert queued["variables"][0] is sync_calls[0][0][0]
+    assert submit_calls == [True]
+    assert len(sync_calls) == 2
+    assert len(sync_calls[0][0]) == 1 and sync_calls[0][0][0] is value
+    assert sync_calls[0][1:] == (False, False)
+    assert len(sync_calls[1][0]) == 1 and sync_calls[1][0][0] is fetch_node
+    assert sync_calls[1][1:] == (True, False)
+    assert len(event_instances) == 1 and event_instances[0].waited
+    np.testing.assert_array_equal(values[id(value)], [1.25, -2.5])
+
+
 @pytest.mark.parametrize("extension", (".pt", ".pkl"))
 def test_weights_only_format_probe_never_executes_payload(tmp_path, extension):
     torch = compatibility_owner(jt)
@@ -262,3 +313,45 @@ def test_optional_patch_failure_restores_all_owners(monkeypatch):
     assert not hasattr(root, "_jittor_torch_compat")
     assert leaf.safe_open is leaf.load is leaf.load_file is original
     assert context.state.get("safetensors_native_api", sentinel) is before
+
+
+@pytest.mark.parametrize("error_type", (RuntimeError, MemoryError, NameError, SystemExit))
+@pytest.mark.parametrize("device", ("cpu", "cuda"))
+def test_snapshot_copy_failure_reaches_saving_caller_and_fetch_recovers(monkeypatch, error_type, device):
+    if device == "cuda" and not _test_capability.check_accelerator("cuda", backend=jt).enabled:
+        pytest.skip("requires CUDA snapshot source")
+    torch = compatibility_owner(jt)
+    value = torch.tensor(np.array([1.25, -2.5], dtype=np.float32), device=device)
+    assert value.device.type == device
+    stream = io.BytesIO()
+    failure = error_type("snapshot copy failed")
+    from jittor._core.var import core
+    from jittor._runtime.fallback import forbid_backend_fallbacks
+    original_fetch = core.ops.fetch
+    state = {"in_callback": False}
+
+    def tracked_fetch(operands, callback):
+        def tracked_callback(*arrays):
+            state["in_callback"] = True
+            try:
+                return callback(*arrays)
+            finally:
+                state["in_callback"] = False
+        return original_fetch(operands, tracked_callback)
+
+    def fail_copy(self, *arrays):
+        assert not state["in_callback"], "fallible copy ran in native fetch callback"
+        raise failure
+
+    monkeypatch.setattr(core.ops, "fetch", tracked_fetch)
+    with jt.runtime.scope(use_cuda=int(device == "cuda")), forbid_backend_fallbacks():
+        with monkeypatch.context() as scoped:
+            scoped.setattr(portable._TensorSnapshots, "capture", fail_copy)
+            with pytest.raises(error_type) as raised:
+                torch.save({"value": value}, stream)
+            assert raised.value is failure
+            assert stream.getvalue() == b""
+
+        # The failed save must leave no callback in the native fetch queue.
+        snapshots = portable._snapshot_tensors(value)
+        np.testing.assert_array_equal(snapshots[id(value)], [1.25, -2.5])
