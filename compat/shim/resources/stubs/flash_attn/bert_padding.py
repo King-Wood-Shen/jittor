@@ -10,6 +10,11 @@ from __future__ import annotations
 import torch
 
 
+def index_first_axis(hidden_states, indices):
+    """Select rows on the first axis, preserving the tensor's device and grad."""
+    return hidden_states[indices]
+
+
 def unpad_input(hidden_states, attention_mask, unused_mask=None):
     """Flatten valid positions and return their packed sequence metadata."""
     if hidden_states.ndim < 2 or attention_mask.ndim != 2:
@@ -44,4 +49,4 @@ def pad_input(hidden_states, indices, batch, seqlen):
     return output.reshape(batch, seqlen, *hidden_states.shape[1:])
 
 
-__all__ = ["pad_input", "unpad_input"]
+__all__ = ["index_first_axis", "pad_input", "unpad_input"]
