@@ -127,8 +127,9 @@ class Capture:
 
         # A materialized arithmetic copy owns storage even on native clone's
         # sharing path. The replay copy must not alias a mutable live buffer.
+        # Snapshot bookkeeping preserves dtype even inside an autocast region.
         self.buffers = {}
-        with jt.no_grad():
+        with jt.no_grad(), jt.flag_scope(amp_reg=0):
             for _, _, value in self.buffer_slots:
                 if value.id not in self.buffers:
                     copy = value + jt.zeros_like(value)
@@ -189,7 +190,7 @@ class Capture:
                 vars(owner)[name] = replacements[key]
             # Restore original objects afterwards, including any once-updated
             # running buffers from the first forward. Replay changes only copies.
-            with jt.no_grad():
+            with jt.no_grad(), jt.flag_scope(amp_reg=0):
                 buffers = {key: value + jt.zeros_like(value) for key, value in self.buffers.items()}
             for owner, name, original in self.buffer_slots:
                 saved.append((owner, name, vars(owner)[name]))
