@@ -152,6 +152,16 @@ def _standard_rms_norm(self, args, kwargs):
     if not isinstance(value, jt.Var) or not isinstance(weight, jt.Var):
         return None
     epsilon = self.__dict__["variance_epsilon"]
+    # The ACL BF16 shortcut can round differently from an explicit Torch
+    # forward (FP32 variance, BF16 cast, then affine multiply). A class name
+    # and epsilon field do not grant permission to replace that forward.
+    if (getattr(jt.compiler, "has_acl", 0)
+            and getattr(jt.flags, "use_acl", 0)
+            and jt.flags.use_cuda
+            and _jittor_dtype_name(value.dtype) == "bfloat16"
+            and _jittor_dtype_name(weight.dtype) == "bfloat16"
+            and _prefer_forward(type(self))):
+        return None
     pytorch_order = _acl_bfloat16_rms_norm(value, weight, epsilon)
     if pytorch_order is not None:
         return pytorch_order
