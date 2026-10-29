@@ -52,3 +52,20 @@ def test_cuda_seed_rewinds_real_default_stream(api, seed):
         assert again.device.type == "cuda"
         np.testing.assert_array_equal(again.detach().cpu().numpy(), first)
         np.testing.assert_array_equal(torch.get_rng_state().numpy(), cpu_before)
+
+
+def test_cuda_seed_facade_uses_acl_counter_stream():
+    if getattr(getattr(jt.compiler, "build_config", None), "backend", None) != "acl":
+        pytest.skip("requires an ACL build")
+    with jt.runtime.scope(use_acl=1, use_cuda=1, backend_fallback="error"), forbid_backend_fallbacks():
+        assert torch.cuda.device_count() > 0
+        host_before = torch.get_rng_state().numpy().copy()
+        torch.cuda.manual_seed_all(1729)
+        assert jt.core.rng_initial_seed("acl", jt.core.current_device()) == 1729
+        first = torch.rand(8, device="npu")
+        assert first.device.type == "npu"
+        first = first.detach().cpu().numpy().copy()
+        torch.cuda.manual_seed_all(1729)
+        again = torch.rand(8, device="npu")
+        np.testing.assert_array_equal(again.detach().cpu().numpy(), first)
+        np.testing.assert_array_equal(torch.get_rng_state().numpy(), host_before)

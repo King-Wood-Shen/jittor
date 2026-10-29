@@ -1168,6 +1168,12 @@ def _api_cuda_synchronize(device=None, *a, **k):
     return jt.sync_all(True)
 
 
+def _acl_rng_backend():
+    # On an ACL build torch.cuda is the downstream accelerator facade, while
+    # its generator is the native ACL counter stream rather than cuRAND.
+    return getattr(getattr(jt.compiler, "build_config", None), "backend", None) == "acl"
+
+
 def _api_cuda_manual_seed(s):
     # Torch converts the argument before scheduling its lazy CUDA callback.
     # With no visible device, that callback never touches a CUDA generator.
@@ -1176,6 +1182,9 @@ def _api_cuda_manual_seed(s):
         return
     from ..core import _normalize_seed
     seed = _normalize_seed(seed)
+    if _acl_rng_backend():
+        jt.core.rng_manual_seed("acl", seed, _rng_device_index(None))
+        return
     jt.sync_all(True)
     _curand().curand_restore_state(_rng_device_index(None), seed, 0)
 
@@ -1187,6 +1196,9 @@ def _api_cuda_manual_seed_all(s):
         return
     from ..core import _normalize_seed
     seed = _normalize_seed(seed)
+    if _acl_rng_backend():
+        jt.core.rng_manual_seed_all("acl", seed)
+        return
     jt.sync_all(True)
     backend = _curand()
     for index in range(count):
