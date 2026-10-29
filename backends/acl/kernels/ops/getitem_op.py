@@ -24,14 +24,16 @@ getitem_forward = getitem_cmd
 _slice_zero_cache = OrderedDict()
 
 
-def _cached_slice_zero(shape, dtype):
-    device_id = int(getattr(jt.flags, "device_id", -1))
-    key = (device_id, tuple(shape), _jittor_dtype_name(dtype))
+def _cached_slice_zero(shape, reference):
+    # A slice gradient uses these zero fills in the same CodeOp as reference.
+    # Ambient device_id can be -1 while reference is explicitly ACL placed.
+    key = (int(reference.placement_backend), int(reference.device_id),
+           tuple(shape), _jittor_dtype_name(reference.dtype))
     value = _slice_zero_cache.get(key)
     if value is not None:
         _slice_zero_cache.move_to_end(key)
         return value
-    value = jt.zeros(shape, dtype=dtype).stop_grad()
+    value = reference.new_zeros(shape).stop_grad()
     _slice_zero_cache[key] = value
     if len(_slice_zero_cache) > 32:
         _slice_zero_cache.popitem(last=False)
@@ -98,7 +100,7 @@ def basic_slice_acl(x, slices):
         return None
     inputs = [x]
     for fill_shape in fill_shapes:
-        inputs.append(_cached_slice_zero(fill_shape, x.dtype))
+        inputs.append(_cached_slice_zero(fill_shape, x))
     return acl_emit(program, inputs, [x.dtype], [output_shape])[0]
 
 
