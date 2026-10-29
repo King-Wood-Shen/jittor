@@ -99,6 +99,22 @@ def empty_cache():
     jt.gc()
 
 
+def manual_seed(seed):
+    value = int(seed)
+    if not is_available():
+        return
+    from .core import _normalize_seed
+    jt.core.rng_manual_seed("acl", _normalize_seed(value), current_device())
+
+
+def manual_seed_all(seed):
+    value = int(seed)
+    if not is_available():
+        return
+    from .core import _normalize_seed
+    jt.core.rng_manual_seed_all("acl", _normalize_seed(value))
+
+
 def is_bf16_supported():
     _require_acl()
     return True
@@ -147,6 +163,7 @@ _REFUSED = (
 
 _SUPPORTED = ("is_available", "device_count", "current_device", "set_device",
               "device", "synchronize", "empty_cache", "is_bf16_supported",
+              "manual_seed", "manual_seed_all",
               "npu_rms_norm", "npu_rotary_mul", "npu_swiglu")
 
 
@@ -164,7 +181,8 @@ def install(ctx):
     register_api_bindings(
         npu, "torch.npu",
         ("is_available", "device_count", "current_device", "set_device",
-         "device", "is_bf16_supported"),
+         "device", "is_bf16_supported", "manual_seed",
+         "manual_seed_all"),
         Fidelity.EXACT,
         "Native ACL discovery and selection; the index accepts an int, a "
         "string, a torch.device or None, as torch's does.")

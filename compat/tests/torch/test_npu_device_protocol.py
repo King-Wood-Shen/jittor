@@ -12,6 +12,7 @@ the device that was selected.
 
 import os
 
+import numpy as np
 import pytest
 import torch
 
@@ -120,3 +121,18 @@ def test_unsupported_npu_apis_refuse_instead_of_reporting_zero():
                  "get_device_properties", "current_stream", "mem_get_info"):
         with pytest.raises(NotImplementedError):
             getattr(torch.npu, name)()
+
+
+def test_torch_npu_seeding_replays_acl_stream_without_changing_host():
+    if not torch.npu.is_available():
+        pytest.skip("requires ACL device")
+    with jt.runtime.scope(use_acl=1, use_cuda=1, backend_fallback="error"):
+        before = torch.get_rng_state().numpy().copy()
+        for seed_api in (torch.npu.manual_seed, torch.npu.manual_seed_all):
+            seed_api(1729)
+            assert jt.core.rng_initial_seed("acl", jt.core.current_device()) == 1729
+            first = torch.rand(8, device="npu").detach().cpu().numpy().copy()
+            seed_api(1729)
+            actual = torch.rand(8, device="npu").detach().cpu().numpy().copy()
+            np.testing.assert_array_equal(actual, first)
+        np.testing.assert_array_equal(torch.get_rng_state().numpy(), before)
