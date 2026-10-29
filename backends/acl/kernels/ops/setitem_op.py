@@ -140,6 +140,13 @@ class SetItemACL(jt.Function):
             self.value_var = False
         if isinstance(slices, jt.Var):
             if _jittor_dtype_name(slices.dtype) == "bool":
+                mask = slices
+                prefix_mask = 0 < mask.ndim < x.ndim and tuple(mask.shape) == tuple(x.shape[:mask.ndim])
+                if prefix_mask:
+                    mask = mask.reshape(tuple(mask.shape) + (1,) * (x.ndim - mask.ndim)).broadcast(x.shape).contiguous()
+                elif tuple(mask.shape) != tuple(x.shape):
+                    raise ValueError("setitem mask shape must match input shape or leading dimensions")
+                self.mask = mask
                 scalar_value = isinstance(value, (int, float)) or (
                     isinstance(value, jt.Var) and value.ndim == 0)
                 self.mask_scalar = scalar_value
@@ -151,19 +158,24 @@ class SetItemACL(jt.Function):
                     value = jt.full((x.numel(),), value, dtype=x.dtype)
                 elif scalar_value:
                     value = value.broadcast((x.numel(),)).contiguous()
-                if slices.shape != x.shape:
-                    raise ValueError("setitem mask shape must match input shape")
-                if len(value.shape) != 1:
+                if prefix_mask and not scalar_value:
+                    expected_shape = (int(slices.int32().sum().item()),) + tuple(x.shape[slices.ndim:])
+                    if tuple(value.shape) != expected_shape:
+                        raise ValueError("setitem mask value shape must match selected rows")
+                    self.value_shape = tuple(value.shape)
+                    value = value.reshape((-1,))
+                elif len(value.shape) != 1:
                     raise ValueError("setitem mask value must be 1D")
-                if self.value_var and not scalar_value:
-                    slices_len = slices.int32().sum().item()
+                if self.value_var and not scalar_value and not prefix_mask:
+                    slices_len = mask.int32().sum().item()
                     if value.shape[0] != slices_len:
                         raise ValueError("setitem value length must equal selected elements")
                 self.type_ = "mask"
-                self.value_shape = () if scalar_value else value.shape
+                if not prefix_mask or scalar_value:
+                    self.value_shape = () if scalar_value else value.shape
                 # base x is an explicit input so its data is materialized before
                 # the in-place masked-scatter (the runner copies base->out first).
-                inputs = [x.contiguous(), slices, value]
+                inputs = [x.contiguous(), mask, value]
                 outputs = [jt.empty(x.shape, x.dtype)]
                 attr_code = f"""
                 op.jt_name = "inplacemaskedscatter";
@@ -480,7 +492,7 @@ class SetItemACL(jt.Function):
 
     def grad(self, grad_output):
         if self.type_ == "mask":
-            mask = self.input_slice
+            mask = self.mask
             value_grad = None
             if self.value_var:
                 if self.mask_scalar:
@@ -488,7 +500,7 @@ class SetItemACL(jt.Function):
                     # without launching a zero-length masked-select operation.
                     value_grad = jt.where(mask, grad_output, 0).sum().reshape(())
                 else:
-                    value_grad = grad_output[mask]
+                    value_grad = grad_output[self.input_slice]
             return jt.where(mask, 0, grad_output), None, value_grad
         value_grad = None
         if self.value_var:

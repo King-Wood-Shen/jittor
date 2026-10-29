@@ -1195,6 +1195,29 @@ class TestACLTorchCompat(unittest.TestCase):
         self.assertEqual(jt.core.backend_fallback_count() - before, 0)
 
     @jt.flag_scope(use_acl=1, use_cuda=1)
+    def test_moe_prefix_mask_assignment_bfloat16_gradients(self):
+        from jittor._runtime.fallback import forbid_backend_fallbacks
+
+        before = jt.core.backend_fallback_count()
+        with jt.runtime.scope(backend_fallback="error"), forbid_backend_fallbacks():
+            base = torch.tensor([[10., 11.], [20., 21.], [30., 31.]],
+                                dtype=torch.bfloat16, device="npu", requires_grad=True)
+            values = torch.tensor([[1., 2.], [3., 4.]],
+                                  dtype=torch.bfloat16, device="npu", requires_grad=True)
+            mask = torch.tensor([True, False, True], dtype=torch.bool, device="npu")
+            projection = torch.tensor([[2., 3.], [5., 7.], [11., 13.]],
+                                      dtype=torch.bfloat16, device="npu")
+            assigned = base.clone()
+            assigned[mask] = values
+            grad_base, grad_values = torch.autograd.grad(
+                (assigned * projection).sum(), (base, values))
+            actual = _fetch_acl(self, [assigned, grad_base, grad_values])
+            np.testing.assert_array_equal(actual[0], [[1., 2.], [20., 21.], [3., 4.]])
+            np.testing.assert_array_equal(actual[1], [[0., 0.], [5., 7.], [0., 0.]])
+            np.testing.assert_array_equal(actual[2], [[2., 3.], [11., 13.]])
+        self.assertEqual(jt.core.backend_fallback_count(), before)
+
+    @jt.flag_scope(use_acl=1, use_cuda=1)
     def test_npu_single_bool_index_with_full_slices(self):
         """A boolean column index selects device coordinates, not host data."""
         from jittor._runtime.fallback import forbid_backend_fallbacks
