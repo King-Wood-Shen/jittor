@@ -1546,7 +1546,9 @@ def _promoting_binary(self, other, opname, reflected):
             scalar_dtype = _owner._dtype_to_str(g.result_type(self, other))
         scalar = _owner.jt.array(other, dtype=scalar_dtype)
         if bool(getattr(self, "is_cuda", False)):
-            scalar = scalar.cuda()
+            # A bare .cuda() chooses the current device, which may differ
+            # from this tensor under a multi-device module placement.
+            scalar = scalar.to(self.device)
         elif bool(getattr(self, "is_cpu", False)):
             scalar = scalar.cpu()
         # Python numbers are constants in Torch autograd. Placement conversion
