@@ -1671,6 +1671,19 @@ _FAST_BINARY_OPERATORS = ('__add__', '__radd__', '__sub__', '__rsub__',
                           '__mul__', '__rmul__', '__truediv__', '__rtruediv__')
 
 
+def _bfloat_python_float_mul(self, other):
+    if type(other) is not float:
+        return None
+    native_api = get_install_context(_owner.jt).state["tensor_native_api"]
+    if _own_dtype_name(self, native_api) != "bfloat16":
+        return None
+    # Torch keeps the result in BF16 but computes with a float32 Python scalar.
+    # Native BF16 * float first rounds the scalar to BF16, changing attention
+    # scores at BF16 halfway points before the following softmax.
+    wide = self.cast("float32")
+    return _binary_native('__mul__', wide, other, native_api).cast("bfloat16")
+
+
 def _tensor_add(self, other):
     fast = _FAST_BINARY
     if fast is not None:
@@ -1708,6 +1721,9 @@ def _tensor_rsub(self, other):
 
 
 def _tensor_mul(self, other):
+    half_scalar = _bfloat_python_float_mul(self, other)
+    if half_scalar is not None:
+        return half_scalar
     fast = _FAST_BINARY
     if fast is not None:
         out = fast(self, other, 4)
@@ -1717,6 +1733,9 @@ def _tensor_mul(self, other):
 
 
 def _tensor_rmul(self, other):
+    half_scalar = _bfloat_python_float_mul(self, other)
+    if half_scalar is not None:
+        return half_scalar
     fast = _FAST_BINARY
     if fast is not None:
         out = fast(self, other, 5)
