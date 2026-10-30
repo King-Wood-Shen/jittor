@@ -31,8 +31,7 @@ def test_clip_cap_follows_cuda3_with_ambient_cuda0():
 
     if not jt.compiler.has_cuda or torch.cuda.device_count() < 4:
         pytest.skip("four CUDA devices required")
-    with jt.flag_scope(use_cuda=1):
-        torch.cuda.set_device(0)
+    with jt.flag_scope(use_cuda=1), torch.cuda.device(0):
         grads = [jt.array(np.array(values, dtype="float32")).to_device(3)
                  for values in ([3.0, 4.0], [0.0, -3.0])]
         before = jt.core.backend_fallback_count()
