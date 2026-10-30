@@ -1076,7 +1076,8 @@ def _clamp_scalar_bound(value, bound, dtype):
     import jittor as jt
     backend = ori_int(value.placement_backend)
     if backend < 0:
-        return jt.unary(bound, dtype).stop_grad()
+        with device_scope_like(value):
+            return jt.unary(bound, dtype).stop_grad()
     device = max(ori_int(value.device_id), 0)
     token = core._set_tensor_placement(backend, device)
     previous = core._set_construction_placement(backend, device)
