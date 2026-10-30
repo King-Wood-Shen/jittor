@@ -1,8 +1,8 @@
 # Known-Issues Ledger
 
 - Status: Maintained
-- Last reviewed: 2026-10-26
-- Baseline: `2fb04289c`
+- Last reviewed: 2026-10-29
+- Baseline: `1a750dbee`
 - Owner: Jittor core maintainers
 - Review when: an entry is fixed or narrowed, a strict expected failure
   XPASSes, a new defect is reproduced, or at quarterly maintenance
@@ -1666,6 +1666,30 @@ workaround.
   Transformers/Diffusers installed (the metadata mechanism itself is covered by
   `compat/tests/torch/test_torch_shim_distribution_metadata.py`).
 
+## KI-COMPAT-021: T5's decoder MLP gradient leaves the parity band on CUDA
+
+- Severity: Medium (a gradient is wrong by 1.7x the accepted error; the forward
+  and the rest of the gradients agree)
+- Status: Open. Reproduced 2026-10-29 at `008cae211` and `1a750dbee` with the
+  same value, so it predates the float32 attention row-term change.
+- Owner: torch compatibility maintainers
+- Symptom:
+  `compat/tests/torch/test_ecosystem_parity.py::EcosystemParityCUDA::test_transformers_t5`
+  fails on `grad::decoder.block.1.layer.2.DenseReluDense.wi.weight diverged:
+  3.337e-02` against the 2e-2 maximum-relative-error band. The reported value is
+  bit-identical on both commits and across runs.
+- Cause: not isolated. The parameter belongs to a ReLU MLP, so the divergence
+  enters through the decoder block upstream of it. Ruled out: the float32
+  attention backward row term (the number does not move across `b0dcb366d`) and
+  the reference side (the case completes; an older oracle failed in apex before
+  the model ran at all).
+- Workaround: none for T5 training parity on CUDA; the rest of the ecosystem
+  parity matrix passes on the same encoder-decoder shapes it exercises.
+- Evidence: the nodeid above, run with the command in
+  [`docs/results/2026-10-29-cuda-f32-attention-row-term.md`](../../docs/results/2026-10-29-cuda-f32-attention-row-term.md).
+- Exit condition: the case passes on CUDA inside the band, or the band for this
+  case is raised in a change that says why.
+
 ## KI-DIST-001: FSDP2 flat sharding peaks above the unsharded model
 
 - Severity: Limitation (memory; numerics are correct)
@@ -1784,3 +1808,30 @@ workaround.
 - Exit condition: codegen fuses through the reshape above a pending producer
   deterministically and near CUB throughput, or a justified deterministic
   strategy is selected; the rank-1 allocation gate passes.
+
+## KI-TEST-016: the ACL Torch-compat suite is red under the shim for placement reasons
+
+- Severity: Medium (fourteen pre-existing failures in one file would hide a real
+  regression in the same file)
+- Status: Open; reproduced 2026-10-29 on an Ascend 910B3 at `1a750dbee` and
+  `d3ae2bbd6` with identical results.
+- Owner: test infrastructure maintainers
+- Symptom: in native mode `pytest tests/backends/acl` reports 1 failed (the
+  rfft case) / 441 passed / 11 skipped. Under `JITTOR_TORCH_SHIM=1` the same
+  directory reports 15 failed / 455 passed / 12 skipped, and 14 of the failures
+  are in `test_acl_torch_compat.py`: relu, silu, pad, roll, rms_norm,
+  group_norm, batch_norm and fused_adamw among them. Their assertions
+  (`_assert_acl_device`, `output.is_cuda is False`) see `'cpu' != 'device'`.
+- Cause: under the shim on this machine a tensor made by `torch.tensor(...)`
+  lands on the host, so the ACL provider is never asked and the recorders and
+  placement checks see nothing. Those cases rely on `jt.flag_scope(use_acl=1,
+  use_cuda=1)` making the accelerator the default device, which does not happen
+  in this mode on this machine. Not yet distinguished: the flag scope's default
+  device against the shim's device resolution.
+- Workaround: run the ACL gate in native mode, where the numbers above hold; a
+  case that needs shim placement states `device="npu"` itself, as
+  `test_sdpa_boolean_mask_layouts_stay_on_acl` now does.
+- Evidence: the two directory runs above on a 910B3.
+- Exit condition: the file passes under the shim on a 910B3, or every placement
+  case states its device explicitly.
+
