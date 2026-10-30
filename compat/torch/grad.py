@@ -186,7 +186,7 @@ def _clip_grads_with_norm_device(grads, max_norm, total_norm):
         return
     scalar_type = np.float64 if _jittor_dtype_name(acc_dtype) == "float64" else np.float32
     raw_coef = scalar_type(limit) / (total_norm + scalar_type(1e-6))
-    coef = jt.minimum(cast(Any, raw_coef), jt.array(float(scalar_type(1.0))).cast(acc_dtype))
+    coef = jt.minimum(cast(Any, raw_coef), jt.ones_like(raw_coef))
     # CUDA fmin-style minimum may select the finite operand for NaN. Torch
     # propagates a NaN total norm into every gradient when errors are disabled.
     coef = jt.ternary(jt.isnan(raw_coef), raw_coef, coef)
