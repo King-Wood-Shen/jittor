@@ -1,8 +1,8 @@
 # Known-Issues Ledger
 
 - Status: Maintained
-- Last reviewed: 2026-10-29
-- Baseline: `1a750dbee`
+- Last reviewed: 2026-10-30
+- Baseline: `30d9f4998`
 - Owner: Jittor core maintainers
 - Review when: an entry is fixed or narrowed, a strict expected failure
   XPASSes, a new defect is reproduced, or at quarterly maintenance
@@ -1235,6 +1235,29 @@ workaround.
 - Exit condition: remove each sub-item only with focused CPU and accelerator
   tests for its operation and derivative order.
 
+## KI-AUTOGRAD-005: a `numpy_code` or `jt.code` gradient cannot be differentiated again
+
+- Severity: Limitation
+- Status: Limitation, confirmed 2026-10-29 on `4543b0f2b` plus the change that
+  made the `jt.code` case raise (it returned 0 before).
+- Owner: autograd maintainers
+- Symptom: a second derivative through an op whose backward is a numpy
+  callback or a `cpu_grad_src`/`cuda_grad_src` source raises "cannot
+  differentiate a ... gradient again". That includes max/min pooling, which
+  runs as a `jt.code` op by default, so a gradient penalty through
+  `jt.nn.max_pool2d` raises; `complex_pinv` and `complex_eig` have no
+  backward at all.
+- Cause: the backward is opaque user code; nothing says how its result
+  changes with its inputs (`torch.autograd.function.once_differentiable` is
+  the same contract).
+- Workaround: write the op as a `jt.Function` whose `grad` uses
+  differentiable jittor ops. For pooling, `jittor.pool.pool_use_code_op =
+  False` selects the reindex implementation, which differentiates twice.
+- Evidence: `tests/ops/test_code_op.py::TestCodeOp::test_second_derivative_through_a_code_gradient_raises`,
+  `tests/ops/test_numpy_code_op.py::TestCodeOp::test_second_derivative_through_a_numpy_code_gradient_raises`.
+- Exit condition: pooling's default path differentiates twice, and the
+  remaining callback ops either do or are documented as first-order only.
+
 ## KI-EXEC-002: a profile scope cannot measure work launched before it opened
 
 - Severity: Limitation
@@ -1834,4 +1857,95 @@ workaround.
 - Evidence: the two directory runs above on a 910B3.
 - Exit condition: the file passes under the shim on a 910B3, or every placement
   case states its device explicitly.
+
+
+## KI-TEST-017: `test_parallel_compile_attribution` pins a defect the tree no longer has
+
+- Severity: Low for users, Medium for the gate (two red cases in the PR smoke
+  tier hide a real regression in the same file)
+- Status: Open; reproduced 2026-10-30 at `30d9f4998` and, with `src/` and
+  `python/jittor/` checked out at `f37761c40`, identically -- so it predates
+  `81d0bdf2e`.
+- Owner: test infrastructure maintainers
+- Symptom:
+  `tests/codegen/test_parallel_compile_attribution.py::TestCompileFailureAttribution::{test_a_live_failed_var_makes_the_next_sync_report_the_same_failure,test_a_traceback_keeps_the_failed_var_alive_until_frames_are_cleared}`
+  fail. The child prints `first RAISED cause_named=True` and then `second
+  CLEAN`, where the test asserts the second `sync_all(True)` re-raises the
+  first compile error.
+- Cause: unknown. The module's docstring says a Var whose op failed to compile
+  stays in the graph and every later `sync_all(True)` re-raises; the tree now
+  reports the failure once and stays clean. Either error attribution was
+  changed deliberately without updating this file, or a Var carrying the
+  failure is no longer reachable from the graph.
+- Workaround: none needed for users; the case documents a defect class rather
+  than guarding an implemented contract.
+- Evidence: the file on its own, one process, on this machine:
+  `JITTOR_HOME=<native home> PYTHONPATH=python python -m pytest -q
+  tests/codegen/test_parallel_compile_attribution.py` -> 2 failed, 4 passed.
+- Exit condition: decide which behavior is correct, then fix the code or the
+  two assertions (and the module docstring) together; a green file that still
+  asserts the old behavior is not a resolution.
+
+## KI-TEST-018: a Torch-mode import inside a native worker turns a whole file red
+
+- Severity: Low for users, Medium for the gate (48 errors from one cause)
+- Status: Open; reproduced 2026-10-30 at `30d9f4998` with
+  `tools/run_test_suite.py --tier smoke` (native session, `-n 4`), not
+  reproducible running the file alone.
+- Owner: test infrastructure maintainers
+- Symptom: in the smoke tier `tests/ops/test_storage_layout_dtype.py` reports 48
+  setup errors, all `AssertionError: assert 'torch' not in sys.modules` from its
+  autouse `native_device_only` fixture; the same file alone reports 56 passed /
+  6 skipped.
+- Cause: the fixture asserts a clean native process, but xdist shares a worker
+  across files, so any earlier test in that worker that imports `torch`
+  in-process (the shim, or a comparison case) poisons every later file that
+  asserts the invariant. Nothing distinguishes "this file imported torch" from
+  "an earlier file in this worker did".
+- Workaround: run that file alone, or with `-p no:randomly`; `--tier core` does
+  not hit it.
+- Evidence: the smoke run above (48 errors in one file, 23 failures overall) and
+  the isolated run of the same file.
+- Exit condition: the invariant is asserted per worker at the point a
+  Torch-mode test is collected (or native files that touch `torch` are isolated
+  by `--dist loadfile`), so a file's result no longer depends on what ran
+  before it in the same worker.
+
+## KI-COMPAT-022: ConvBERT's span conv and ConvNeXt's channel LayerNorm abort on a `var_relay` invariant under the shim
+
+- Severity: High (an internal invariant, so the model cannot run at all) but
+  narrow (two architectures, CPU path on this machine)
+- Status: Open; reproduced 2026-10-30 at `30d9f4998`, and with `src/` and
+  `python/jittor/` checked out at `f37761c40`, identically -- so it predates
+  `81d0bdf2e`.
+- Owner: codegen/tuner maintainers with torch compatibility maintainers
+- Symptom:
+  `compat/tests/torch/test_torch_hf_models.py::TestTorchHFModels::test_forward_and_eval_determinism`
+  aborts at the `convbert` subtest (`hidden_size=64`, `conv_kernel_size=3`,
+  `head_ratio=2`) with `JittorError: var_relay.cc:107: [check failed:
+  fnodes.count(v)]`. The failing operator is
+  `fused_op(reindex, reindex, binary.multiply, reindex_reduce.add)` with
+  `in: float32[64,1,3,1], float32[1,64,8,1]`, `out: float32[1,64,8,1]` -- the
+  span conv's product (im2col/unfold), created at
+  `transformers/models/convbert/modeling_convbert.py:282`. Rebuilding the model
+  one architecture at a time shows `convnext` hits the same invariant; it was
+  invisible in the test because the aborted `convbert` Var stays in the graph
+  and every later `sync` reports that first failure. The other 31 `CFG`
+  architectures pass.
+- Cause: not yet isolated. `add_relay_group` requires every member of a relayed
+  op other than the relayed output to be a node of the fused op, and this graph
+  has one outside it. Ruled out: the `81d0bdf2e` transpose composition and
+  complex-pow changes (same result with those sources reverted). Ruled out as a
+  fix: declining the relay when a member is outside. That removes the abort for
+  `convbert` (the bare forward then matches the expected shape) but turns
+  `convnext` into `JittorError: code requires source for the selected backend
+  (code_op.cc:408)`: the relay is what lifts an op out of the fused op, so a
+  `jt.code` op cannot simply run inside it. The member has to join the fused op
+  -- the same conclusion KI-TUNER-001 reaches for a broadcast view.
+- Workaround: none; skip these two architectures under the shim.
+- Evidence: the test above, one process, `JITTOR_TORCH_SHIM=1`; the per-model
+  loop over `CFG` with and without the decline experiment above.
+- Exit condition: both architectures run, with the member inside the fused op
+  (not by weakening the relay's membership requirement); no numerical change to
+  the other 31 models.
 
