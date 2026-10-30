@@ -1,4 +1,6 @@
 """Scalar clamp bounds must follow the input tensor's placement."""
+import importlib
+
 import numpy as np
 import pytest
 
@@ -57,4 +59,29 @@ def test_scalar_clamp_inside_cuda_module_follows_input():
         np.testing.assert_allclose(ramp.numpy(), np.clip((np.arange(32, dtype=np.float32) - 10) / 13,
                                                        0, 1), atol=1e-6, rtol=1e-6)
         np.testing.assert_array_equal(integers.numpy(), [2, 2, 2, 3, 4, 5, 5, 5])
+    assert jt.core.backend_fallback_count() == before
+
+
+def test_scalar_clamp_bound_follows_native_cuda1_input():
+    import jittor as jt
+    import torch
+    from jittor._runtime.fallback import forbid_backend_fallbacks
+
+    if not jt.compiler.has_cuda or torch.cuda.device_count() < 2:
+        pytest.skip('two CUDA devices required')
+
+    torch.cuda.set_device(0)
+    value = jt.array([-2.0, 0.5, 4.0]).to_device(1)
+    assert value.placement_backend == -1
+    assert value.device_id == 1
+    bound = importlib.import_module('jittor._core.var')._clamp_scalar_bound(
+        value, 0.0, value.dtype)
+    before = jt.core.backend_fallback_count()
+    with jt.runtime.scope(backend_fallback='error'), forbid_backend_fallbacks():
+        bound.sync()
+        result = torch.clamp(value, 0.0, 1.0)
+        result.sync()
+    assert bound.device == 'cuda:1'
+    assert result.device == 'cuda:1'
+    np.testing.assert_array_equal(result.numpy(), [0.0, 0.5, 1.0])
     assert jt.core.backend_fallback_count() == before
