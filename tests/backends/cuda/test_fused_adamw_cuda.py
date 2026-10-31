@@ -37,24 +37,37 @@ class TestFusedAdamwCuda(unittest.TestCase):
             self.skipTest("requires two CUDA devices")
         from jittor.backends.cuda.kernels.optim.fused_adamw_cuda import _cuda_fused_adamw_updates
 
+        def placed_parameter(device):
+            token = jt.core._set_tensor_placement(1, device)
+            previous = jt.core._set_construction_placement(1, device)
+            try:
+                return jt.array([1.0], dtype="float32")
+            finally:
+                jt.core._restore_construction_placement(previous)
+                jt.core._reset_tensor_placement(token)
+
         for devices in ((1, 1), (0, 1)):
             entries = []
             for device in devices:
-                parameter = jt.array([1.0], dtype="float32").to_device(device)
+                parameter = placed_parameter(device)
                 moment = jt.zeros_like(parameter)
                 variance = jt.zeros_like(parameter)
                 gradient = jt.ones_like(parameter)
                 entries.append((parameter, moment, variance, gradient, 0))
-            with jt.runtime.scope(backend_fallback="error"):
-                updated = _cuda_fused_adamw_updates(entries, 1e-4, 0.9, 0.999, 0.1, 1e-8)
-                jt.sync_all(True)
+            before = jt.core.backend_fallback_count()
+            with jt.flag_scope(use_cuda=0, device_id=0):
+                with jt.runtime.scope(backend_fallback="error"):
+                    updated = _cuda_fused_adamw_updates(entries, 1e-4, 0.9, 0.999, 0.1, 1e-8)
+                    jt.sync_all(True)
                 for (parameter, moment, variance), device in zip(updated, devices):
                     self.assertEqual(parameter.device_id, device)
+                    self.assertEqual(parameter.placement_backend, 1)
                     self.assertEqual(moment.device_id, device)
                     self.assertEqual(variance.device_id, device)
                     np.testing.assert_allclose(parameter.numpy(), [0.99989], rtol=1e-5)
                     np.testing.assert_allclose(moment.numpy(), [0.1], rtol=1e-5)
                     np.testing.assert_allclose(variance.numpy(), [0.001], rtol=2e-5)
+            self.assertEqual(jt.core.backend_fallback_count() - before, 0)
 
     def test_a_list_longer_than_one_launch(self):
         rng = np.random.RandomState(0)

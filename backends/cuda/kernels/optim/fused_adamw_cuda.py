@@ -14,6 +14,7 @@ The arithmetic is the one ``optimizer_api._adam_step`` uses per parameter.
 
 import jittor as jt
 from jittor._core.dtypes import var_dtype_name
+from jittor._core.var import placement_scope_like
 from jittor._runtime.dispatch import register_kernel
 
 _DTYPES = ("float32", "float16", "bfloat16")
@@ -61,10 +62,16 @@ def _cuda_fused_adamw_updates(entries, lr, beta1, beta2, weight_decay, eps):
                var_dtype_name(entry[0]), entry[0].device_id)
         groups.setdefault(key, []).append(index)
     for (steps, _, device_id), indices in groups.items():
-        if hyper is not None:
-            step, lr = hyper.to_device(device_id), 0.0
-        else:
-            step = jt.array(float(steps + 1), dtype="float32").to_device(device_id).stop_grad()
+        reference = entries[indices[0]][0]
+        # A copy of an unplaced scalar can keep FollowRuntime placement even
+        # when its device_id is the parameter's CUDA index. Construct the step
+        # under the parameter's explicit placement so fused_adamw sees the same
+        # backend and device for every input.
+        with placement_scope_like(reference):
+            if hyper is not None:
+                step, lr = hyper.to_device(device_id), 0.0
+            else:
+                step = jt.array(float(steps + 1), dtype="float32").stop_grad()
         for start in range(0, len(indices), _MAX_FUSED_ENTRIES):
             batch = indices[start:start + _MAX_FUSED_ENTRIES]
             count = len(batch)
