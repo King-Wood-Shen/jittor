@@ -32,6 +32,30 @@ def _adamw(p, m, v, g, step, lr, b1, b2, wd, eps):
 @unittest.skipIf(not _test_capability.check_accelerator("cuda", backend=jt).enabled,
                  "no usable CUDA in this build")
 class TestFusedAdamwCuda(unittest.TestCase):
+    def test_updates_place_step_and_split_devices(self):
+        if jt.get_device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+        from jittor.backends.cuda.kernels.optim.fused_adamw_cuda import _cuda_fused_adamw_updates
+
+        for devices in ((1, 1), (0, 1)):
+            entries = []
+            for device in devices:
+                parameter = jt.array([1.0], dtype="float32").to_device(device)
+                moment = jt.zeros_like(parameter)
+                variance = jt.zeros_like(parameter)
+                gradient = jt.ones_like(parameter)
+                entries.append((parameter, moment, variance, gradient, 0))
+            with jt.runtime.scope(backend_fallback="error"):
+                updated = _cuda_fused_adamw_updates(entries, 1e-4, 0.9, 0.999, 0.1, 1e-8)
+                jt.sync_all(True)
+                for (parameter, moment, variance), device in zip(updated, devices):
+                    self.assertEqual(parameter.device_id, device)
+                    self.assertEqual(moment.device_id, device)
+                    self.assertEqual(variance.device_id, device)
+                    np.testing.assert_allclose(parameter.numpy(), [0.99989], rtol=1e-5)
+                    np.testing.assert_allclose(moment.numpy(), [0.1], rtol=1e-5)
+                    np.testing.assert_allclose(variance.numpy(), [0.001], rtol=2e-5)
+
     def test_a_list_longer_than_one_launch(self):
         rng = np.random.RandomState(0)
         sizes = [1, 7, 1024, 1025, 0, 4096 * 3 + 5] * 7          # 42 tensors

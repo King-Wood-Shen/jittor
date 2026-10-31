@@ -45,7 +45,8 @@ def _cuda_fused_adamw_updates(entries, lr, beta1, beta2, weight_decay, eps):
 
     An entry is (parameter, moment, variance, gradient, steps taken so far);
     this is the update for step ``steps + 1``, as the per-parameter path
-    computes it. Entries are grouped by step and dtype, one operator each.
+    computes it. Entries are grouped by step, dtype, and CUDA device, since a
+    fused operator cannot take tensors from different devices.
 
     ``lr`` may instead be a two-element float32 Var ``[step, lr]``, which the
     kernel reads on the device and which then stands for every entry's step:
@@ -56,13 +57,14 @@ def _cuda_fused_adamw_updates(entries, lr, beta1, beta2, weight_decay, eps):
     results = [None] * len(entries)
     groups = {}
     for index, entry in enumerate(entries):
-        key = (0 if hyper is not None else int(entry[4]), var_dtype_name(entry[0]))
+        key = (0 if hyper is not None else int(entry[4]),
+               var_dtype_name(entry[0]), entry[0].device_id)
         groups.setdefault(key, []).append(index)
-    for (steps, _), indices in groups.items():
+    for (steps, _, device_id), indices in groups.items():
         if hyper is not None:
-            step, lr = hyper, 0.0
+            step, lr = hyper.to_device(device_id), 0.0
         else:
-            step = jt.array(float(steps + 1), dtype="float32").stop_grad()
+            step = jt.array(float(steps + 1), dtype="float32").to_device(device_id).stop_grad()
         for start in range(0, len(indices), _MAX_FUSED_ENTRIES):
             batch = indices[start:start + _MAX_FUSED_ENTRIES]
             count = len(batch)
