@@ -322,11 +322,17 @@ static bool retarget_pending(Var* v, int dev, TensorPlacement placement = {}) {
 
 void Op::propagate_device() {
     TensorPlacement target;
+    size_t input_index = 0;
     for (Var* v : inputs()) {
+        const size_t index = input_index++;
         if (!v->placement.explicit_backend || is_pending_scalar(v)) continue;
         USER_CHECK(!target.explicit_backend || target == v->placement)
             << "Expected all tensor inputs on the same backend and device for" << name()
-            << "; use an explicit device copy before mixing CPU and accelerator tensors";
+            << "; use an explicit device copy before mixing CPU and accelerator tensors"
+            << "; input" << index << "target backend/device"
+            << int(target.device.backend) << target.device.index
+            << "actual backend/device" << int(v->placement.device.backend)
+            << v->placement.device.index << "var device_id" << v->device_id;
         target = v->placement;
     }
     if (!target.explicit_backend)
@@ -334,11 +340,17 @@ void Op::propagate_device() {
             if (v->placement.explicit_backend) { target = v->placement; break; }
     if (target.explicit_backend) {
         const int dev = target.device.backend == BackendId::Cpu ? -1 : target.device.index;
+        input_index = 0;
         for (Var* v : inputs()) {
+            const size_t index = input_index++;
             if (!v->placement.explicit_backend || v->placement == target) continue;
             USER_CHECK(is_pending_scalar(v) && retarget_pending(v, dev, target))
                 << "Expected all tensor inputs on the same backend and device for" << name()
-                << "; use an explicit device copy before mixing CPU and accelerator tensors";
+                << "; use an explicit device copy before mixing CPU and accelerator tensors"
+                << "; input" << index << "target backend/device"
+                << int(target.device.backend) << target.device.index
+                << "actual backend/device" << int(v->placement.device.backend)
+                << v->placement.device.index << "var device_id" << v->device_id;
         }
         for (Var* v : outputs()) {
             v->placement = target;
