@@ -56,8 +56,13 @@ def _exactly_causal(mask, query_length, source_length, batch=1):
         return False
     try:
         base = mask._view_base_id() if mask._is_view() else -1
-        key = (base, mask.var_ptr if base < 0 else 0, tuple(mask.shape),
-               mask._storage_offset(), tuple(mask._storage_strides()))
+        key = (
+            base,
+            mask.var_ptr if base < 0 else 0,
+            tuple(mask.shape),
+            mask._storage_offset(),
+            tuple(mask._storage_strides()),
+        )
     except Exception:
         key = None
     if key is not None and _EXACT_CAUSAL[0] == key:
@@ -70,9 +75,7 @@ def _exactly_causal(mask, query_length, source_length, batch=1):
                 (blocks_value.reshape((query_length, source_length)) == expected).all().item()
             )
         else:
-            verdict = bool(
-                (blocks_value == expected.broadcast(blocks_value.shape)).all().item()
-            )
+            verdict = bool((blocks_value == expected.broadcast(blocks_value.shape)).all().item())
     if key is not None:
         _EXACT_CAUSAL[0], _EXACT_CAUSAL[1] = key, verdict
     return verdict
@@ -94,8 +97,7 @@ def causal_mask_rewrite(query, key, attn_mask, is_causal):
         return False
     if dispatch_context().backend not in ("cuda", "cpu"):
         return False
-    return _exactly_causal(attn_mask, int(query.shape[-2]), int(key.shape[-2]),
-                           int(query.shape[0]))
+    return _exactly_causal(attn_mask, int(query.shape[-2]), int(key.shape[-2]), int(query.shape[0]))
 
 
 def _product(a, b, trans_a=False, trans_b=False):

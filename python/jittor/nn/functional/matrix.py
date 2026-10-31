@@ -634,7 +634,7 @@ def _keep_operand_grads(a, b, aa, bb, product):
     ``a``/``b`` when an operand was replaced by its transpose base."""
     if product is None or (aa is a and bb is b) or jt.flags.no_grad:
         return product
-    if ((aa is a or a.is_stop_grad()) and (bb is b or b.is_stop_grad())):
+    if (aa is a or a.is_stop_grad()) and (bb is b or b.is_stop_grad()):
         return product
     return _ProductOfOperands(a, b, product)(a, b)
 
@@ -799,7 +799,10 @@ register_kernel(
 # After oneDNN: float32 takes it where it is built, CBLAS otherwise.
 register_kernel("matmul", "cpu", _blas_matmul, dtypes=_BLAS_DTYPES, supports=_supports_blas)
 register_kernel(
-    "batched_matmul", "cpu", _blas_batched_matmul, dtypes=_BLAS_DTYPES,
+    "batched_matmul",
+    "cpu",
+    _blas_batched_matmul,
+    dtypes=_BLAS_DTYPES,
     supports=_supports_blas_batched,
 )
 del _backend, _complex, _dtypes, _supports
