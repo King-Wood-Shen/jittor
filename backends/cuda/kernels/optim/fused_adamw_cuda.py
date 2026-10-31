@@ -72,6 +72,10 @@ def _cuda_fused_adamw_updates(entries, lr, beta1, beta2, weight_decay, eps):
                 step, lr = hyper.to_device(device_id), 0.0
             else:
                 step = jt.array(float(steps + 1), dtype="float32").stop_grad()
+            # An unexecuted copy can still expose its CPU source to the fused
+            # op's input placement check. Finish this one small step tensor on
+            # the parameter device before constructing the multi-tensor op.
+            step.sync()
         for start in range(0, len(indices), _MAX_FUSED_ENTRIES):
             batch = indices[start:start + _MAX_FUSED_ENTRIES]
             count = len(batch)
