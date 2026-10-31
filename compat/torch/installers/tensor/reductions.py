@@ -42,7 +42,7 @@ def count_nonzero(input, dim=None):
     """Count non-zero entries through the native owner."""
     from importlib import import_module as _import_module
     _owner = _import_module(__package__)
-    return _owner._NATIVE_COUNT_NONZERO(input, dim)
+    return _owner._NATIVE_COUNT_NONZERO(input, dim).int64()
 
 
 def _reduce_index(result):

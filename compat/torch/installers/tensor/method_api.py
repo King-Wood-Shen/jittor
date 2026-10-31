@@ -525,9 +525,20 @@ def _clamp(input, min=None, max=None, min_v=None, max_v=None):
                          max if max is not None else max_v)
 
 
+def _ne_operand(value, peer):
+    if isinstance(value, _NativeVar):
+        return value
+    if isinstance(peer, _NativeVar) and isinstance(
+            value, (int, float, complex, _owner.np.generic)):
+        from jittor._core.var import device_scope_like
+        with device_scope_like(peer):
+            return _owner.jt.array(value)
+    return _owner.jt.array(value)
+
+
 def _torch_ne(input, other):
-    a = input if isinstance(input, _NativeVar) else _owner.jt.array(input)
-    b = other if isinstance(other, _NativeVar) else _owner.jt.array(other)
+    a = _ne_operand(input, other)
+    b = _ne_operand(other, a)
     if _jittor_dtype_name(a.dtype) == "bool":
         a = a.int32()
     if isinstance(b, _NativeVar) and _jittor_dtype_name(b.dtype) == "bool":
@@ -536,7 +547,9 @@ def _torch_ne(input, other):
     out = diff > 0
     if "float" in _jittor_dtype_name(a.dtype) or (isinstance(b, _NativeVar) and "float" in _jittor_dtype_name(b.dtype)):
         try:
-            out = out | _owner.jt.isnan(a) | _owner.jt.isnan(b)
+            from jittor._core.var import device_scope_like
+            with device_scope_like(a):
+                out = out | _owner.jt.isnan(a) | _owner.jt.isnan(b)
         except _owner.EXPECTED as exc:
             _owner.swallowed("torch/installers/tensor.py _torch_ne: out = out | jt.isnan(a) | jt.isnan(b)", exc)
     return out
