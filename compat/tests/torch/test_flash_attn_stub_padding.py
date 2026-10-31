@@ -1,7 +1,20 @@
 import torch
 
 from flash_attn import flash_attn_varlen_func
-from flash_attn.bert_padding import pad_input, unpad_input
+from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input
+
+
+def test_index_first_axis_preserves_order_and_gradient():
+    hidden = torch.arange(4 * 3, dtype=torch.float32).reshape(4, 3)
+    hidden.requires_grad_(True)
+    indices = torch.tensor([3, 1, 3], dtype=torch.int64)
+    selected = index_first_axis(hidden, indices)
+    torch.testing.assert_close(selected, hidden[indices])
+    selected.sum().backward()
+    torch.testing.assert_close(
+        hidden.grad,
+        torch.tensor([[0, 0, 0], [1, 1, 1], [0, 0, 0], [2, 2, 2]], dtype=torch.float32),
+    )
 
 
 def test_flash_attn_padding_round_trip():

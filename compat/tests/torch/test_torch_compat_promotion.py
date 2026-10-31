@@ -267,6 +267,21 @@ class TestBinaryOpPromotion(Base):
                                  f"{da}*{db} {dev}")
         both_devices(body)
 
+    def test_bfloat_python_float_mul_uses_float32_scalar_opmath(self):
+        # Official DeepSeek-V2-Lite Base attention scores expose the BF16
+        # halfway cases. These values are from independent native Torch CUDA.
+        scale = 0.11472138679292611
+        scores = [140.0, 8.5625, 35.0, -35.0]
+        expected = np.array([16.0, 0.98046875, 4.0, -4.0], dtype=np.float32)
+
+        def body(dev):
+            values = torch.tensor(scores, dtype=torch.bfloat16)
+            for result in (values * scale, scale * values):
+                self.assertEqual(dts(result), "bfloat16", dev)
+                self.ae(result.float().numpy(), expected, dev)
+
+        both_devices(body)
+
     def test_floordiv_promotes(self):
         # torch '//' follows the standard promotion lattice (unlike '/').
         def body(dev):
