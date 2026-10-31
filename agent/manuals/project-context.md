@@ -1,8 +1,8 @@
 # Jittor Project Context
 
 - Status: Current-state index, not a history log
-- Last reviewed: 2026-10-28
-- Baseline reviewed: `bbcfd235d`
+- Last reviewed: 2026-10-29
+- Baseline reviewed: `173c1f0a2`
 - Owner: Jittor core maintainers
 - Freshness expires: 2027-01-06
 - Review when: the release line, a top-level goal or an indexed location changes
@@ -42,7 +42,24 @@ preservation, half-contraction accumulation, 0-D setitem codegen, scalar
 `sum(dim=0)`, the CPU deterministic query, the mapped-ACL parity inventory,
 the StepCapture replay copy window (KI-EXEC-016 closed), and the
 Torch autocast layer_norm float32 result (KI-COMPAT-020 closed); exact-value
-cuDNN tests opt into the new strict float32 precision tier.
+cuDNN tests opt into the new strict float32 precision tier. The CUDA
+performance round took the float32 memory-efficient attention backward's row
+term from a per-layer score-matrix rebuild to `dO . O` except on rows whose
+mass sits on one key, resolved `zero_grad` and optimizer readers once per
+parameter list instead of once per tensor, and taught the Torch frontend to
+hand an exact causal mask to the backends as `is_causal` (off Ascend, where
+the verdict's host read defeats graph replay). The 14-workload
+`benchmarks/torch_compat` matrix now compares at a geometric mean of 0.59x
+with no workload slower than PyTorch (BERT-large having been 6.55x on the
+earlier micro-suite), and the per-group optimizer write took `qwen3_train`
+from 412 to 265 ms on a 910B3
+([results](../../docs/results/2026-10-29-cuda-f32-attention-row-term.md)). On
+Ascend, the boolean attention mask no longer expands to score size before the
+fused call: qwen3-0.6B prefill went from 54.99 to 35.69 ms a step on a 910B3,
+below PyTorch's first-step device time, with the mask semantics re-checked
+against the float64 reference for batch, head and key-axis layouts; the
+per-group optimizer write took `qwen3_train` from 412 to 268 ms there
+([results](../../docs/results/2026-10-29-ascend-bool-mask-broadcast.md)).
 
 ## Where information lives
 

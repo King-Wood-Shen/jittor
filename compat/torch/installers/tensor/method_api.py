@@ -1,5 +1,6 @@
 """Stable Torch Tensor method implementations; install only binds these objects."""
 from importlib import import_module
+import contextlib
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
 from ...context import get_install_context
 from ...types import _PYTHON_SCALAR_DTYPES, _make_cpu_resident, _make_cuda_resident, _var_is_cpu_resident
@@ -254,6 +255,29 @@ def _torch_setitem(self, slices, value):
     return result
 
 
+#: Depth of `_optimizer_write_scope`: readers resolved for a whole group.
+_OPTIMIZER_WRITES = [0]
+
+
+@contextlib.contextmanager
+def _optimizer_write_scope():
+    """Resolve every reader once for a group of optimizer stores.
+
+    Each in-place store otherwise resolves the destination storage's readers
+    with a full `sync_all` -- three stores per parameter for AdamW, which on
+    an Ascend 910B3 was 1.19 s of a 4.7 s ten-step `qwen3_train`. In an
+    optimizer update a parameter's readers are upstream of its new value, so
+    one sweep before the group covers them; the stores then only materialize
+    their own source.
+    """
+    _owner.jt.sync_all()
+    _OPTIMIZER_WRITES[0] += 1
+    try:
+        yield
+    finally:
+        _OPTIMIZER_WRITES[0] -= 1
+
+
 def _copy_detached_storage(self, value):
     # Optimizer buckets retain detached aliases of dense slices. Rebinding a
     # holder would leave those aliases reading the old allocation. Only use
@@ -284,7 +308,13 @@ def _copy_detached_storage(self, value):
             return False
         # Resolve pending readers (including clone snapshots) before changing
         # bytes. _copy_into owns placement, stream ordering and dense copies.
-        _owner.jt.sync_all()
+        # An optimizer group resolves them once for every parameter instead
+        # (see `_optimizer_write_scope`), and here only materializes the value
+        # whose graph contains this tensor's readers.
+        if _OPTIMIZER_WRITES[0]:
+            value.sync()
+        else:
+            _owner.jt.sync_all()
         if not self._mem_ptr_now or not value._mem_ptr_now:
             # Still unbuilt after the sync: a call being captured for replay,
             # where the sync runs nothing. Such a tensor has no storage an
@@ -1816,6 +1846,40 @@ def _api_zero(self):
         # exact zero while the old non-leaf graph receives a zero derivative.
         zeros = _owner.jt.ternary(zeros.cast("bool"), self, zeros)
     return _ip(self, zeros, preserve_storage=True)
+
+
+def _api_zero_batch(tensors):
+    """``Tensor.zero_`` for a list, through one reader sync.
+
+    ``_copy_detached_storage`` resolves every pending reader of a tensor's
+    storage before it writes -- that is what keeps a detached alias correct --
+    and doing it once per tensor also drained the device between writes.
+    ``Module.zero_grad(set_to_none=False)`` paid that 199 times for BERT-large
+    and cost 12 ms against PyTorch's 1.5 ms. Nothing in this list reads a
+    parameter, so one sweep ahead of the writes covers all of them; anything
+    the single-tensor path must handle itself (a deferred capture, an unbuilt
+    tensor, a differentiable one) falls back to it.
+    """
+    if not tensors:
+        return
+    _owner.jt.sync_all()
+    cache = {}
+    for tensor in tensors:
+        if (getattr(tensor, "_mem_ptr_now", None) is None
+                or (tensor.requires_grad and not _owner.jt.flags.no_grad
+                    and not tensor.is_leaf)
+                or _fill_captured_state(tensor, 0)):
+            tensor.zero_()
+            continue
+        key = (tuple(tensor.shape), str(tensor.dtype))
+        zeros = cache.get(key)
+        if zeros is None:
+            with _new_scope(tensor, None), _owner.jt.no_grad():
+                zeros = _owner.jt.zeros(tensor.shape, tensor.dtype)
+            cache[key] = zeros
+        with _owner.jt.no_grad():
+            if not tensor._copy_view_into(zeros):
+                tensor._copy_into(zeros)
 
 
 def _api_add(self, o, alpha=1):
