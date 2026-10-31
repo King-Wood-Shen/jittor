@@ -120,6 +120,9 @@ void Executor::auto_flush() {
     const bool deferrable = deferrable_flush();
     if (!policy.supports_auto_flush && !(policy.async_auto_flush_only && deferrable))
         return;
+    // The worker may queue Python-owned root releases after wait begins.
+    async_exec_wait();
+    async_exec_run_python_releases();
     vector<Var*> vars;
     int64 pending_bytes = 0;
     for (auto holder : runtime_holder_state().holders()) {

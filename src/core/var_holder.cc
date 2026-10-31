@@ -25,6 +25,7 @@
 #include "type/fp16_compute.h"
 #include "mem/swap.h"
 #include "runtime/executor_entry.h"
+#include "runtime/async_exec.h"
 #include "runtime/holder_state.h"
 #include "bindings/pyjt/py_converter.h"
 
@@ -1820,6 +1821,10 @@ ItemData VarHolder::item() {
 EXTERN_LIB list<VarPtr> fetcher;
 
 void sync_all(bool device_sync) {
+    // A worker can release Python-owned graph roots while it finishes. Drain
+    // releases before snapshotting unowned Var pointers.
+    async_exec_wait();
+    async_exec_run_python_releases();
     vector<Var*> vars;
     vars.reserve(runtime_holder_state().holders().size());
     for (auto v : runtime_holder_state().holders()) {
