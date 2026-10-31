@@ -95,7 +95,9 @@ def load_optional_libraries():
     stated cause".
     """
     outcome = {}
-    for name in LIBRARY_NAMES:
+    # BLAS is loaded on first matmul use but is not a legacy library attribute.
+    # Include it here so a fresh matrix sees its two registered CPU operators.
+    for name in LIBRARY_NAMES + ("blas",):
         try:
             module = get_library(name, load=True)
         except BaseException as error:            # noqa: BLE001 - recorded below
@@ -436,8 +438,10 @@ PROBES = {
     "cub_cumsum": _probe_cumsum,
     "cublas_matmul": _probe_matmul,
     "mkl_matmul": _probe_matmul,
+    "blas_matmul": _probe_matmul,
     "cublas_batched_matmul": _probe_batched_matmul,
     "mkl_batched_matmul": _probe_batched_matmul,
+    "blas_batched_matmul": _probe_batched_matmul,
     "cudnn_conv": _probe_conv2d,
     "mkl_conv": _probe_conv2d,
     "cudnn_conv_backward_x": _probe_conv2d_backward,
