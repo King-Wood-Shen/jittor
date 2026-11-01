@@ -25,6 +25,15 @@ FIXTURE = Path(__file__).with_name("_verl_v091_jagged_fixture.py")
 BOOTSTRAP = ADAPTERS.parent / "agent/skills/verl-torch-compat/runtime/oracle/sitecustomize.py"
 
 
+def upstream_fixture_source():
+    """Restore the one Python 3.8 debug f-string before upstream pin checks."""
+    text = FIXTURE.read_text()
+    compatible = 'Got ragged_idx={ragged_idx!r} and sample_dim={sample_dim!r}'
+    upstream = 'Got {ragged_idx=} and {sample_dim=}'
+    assert text.count(compatible) == 1
+    return text.replace(compatible, upstream)
+
+
 class SymInt(str):
     """Public symbolic-size fake, not a real framework import."""
 
@@ -187,7 +196,7 @@ def setup(tmp_path, monkeypatch):
     root.__version__ = "0.9.1"
     monkeypatch.setitem(sys.modules, "verl", root)
     torch = Torch()
-    fixture_source = FIXTURE.read_text()
+    fixture_source = upstream_fixture_source()
     fixture_tree = ast.parse(fixture_source)
     modules = {}
     for module_name, functions in (
@@ -474,7 +483,7 @@ def test_pins_and_relocatable_public_boundary_have_negative_controls():
     assert constants["MODULE_SHA256"] == {
         "verl.utils.tensordict_utils": "4dc4c321a51e256232751ddb5cb2a2be129076e7f02f36a685fcad6d0d98f5f1",
         "verl.workers.utils.padding": "4e29a4af7d6f7a2182cbd45536df5c3423745e925d0cd3bb151440dbfba8fbcc"}
-    text = FIXTURE.read_text()
+    text = upstream_fixture_source()
     lines = text.splitlines(keepends=True)
     for node in ast.parse(text).body:
         if isinstance(node, ast.FunctionDef):

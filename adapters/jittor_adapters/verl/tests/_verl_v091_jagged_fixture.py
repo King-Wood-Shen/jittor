@@ -1,4 +1,5 @@
-# Exact function excerpts from verl 0.9.1 commit 1876b06d.
+# Function excerpts from verl 0.9.1 commit 1876b06d; the host fixture
+# loader restores the one upstream debug f-string after Python 3.7 parsing.
 # Host-test imports are supplied by the fixture loader; not an implementation.
 
 def nested_tensor_from_tensor_list(tensors: list[torch.Tensor], ragged_idx: int | None = None) -> torch.Tensor:
@@ -7,7 +8,7 @@ def nested_tensor_from_tensor_list(tensors: list[torch.Tensor], ragged_idx: int 
     if ragged_idx is None:
         ragged_idx = sample_dim
     assert 1 <= ragged_idx <= sample_dim, (
-        f"ragged_idx must be in [1, {sample_dim}]. Got {ragged_idx=} and {sample_dim=}"
+        f"ragged_idx must be in [1, {sample_dim}]. Got ragged_idx={ragged_idx!r} and sample_dim={sample_dim!r}"
     )
 
     if sample_dim == 1:
