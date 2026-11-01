@@ -227,8 +227,11 @@ def native_arguments():
                            if child.name != "__pycache__")
         else:
             ignored.append(path)
-    return tuple(runnable(path) for path in TEST_ROOTS) \
-        + _ignores(tuple(sorted(ignored)) + excluded_paths())
+    # A Torch-owned root must not also be an explicit native selection:
+    # pytest rejects it even when the same invocation passes --ignore.
+    roots = tuple(runnable(path) for path in TEST_ROOTS
+                  if path not in TORCH_MODE_PATHS)
+    return roots + _ignores(tuple(sorted(ignored)) + excluded_paths())
 
 
 def torch_arguments():
