@@ -60,6 +60,15 @@ _PUBLIC_NAMES = {
     "sync_sharded_grads", "sys", "types", "zeros",
 }
 
+
+def _public_api_names():
+    names = {name for name in vars(fsdp) if not name.startswith("_")}
+    if "activation_checkpoint" in names:
+        module = vars(fsdp)["activation_checkpoint"]
+        assert module is sys.modules["jittor.compat.fsdp2.activation_checkpoint"]
+        names.remove("activation_checkpoint")
+    return names
+
 _OWNERSHIP = {
     # The rank/world queries and the two collectives moved to
     # jittor/compat/collectives.py, below both fsdp2 and the distributed
@@ -301,10 +310,7 @@ class TestTorchFSDP2Structure(unittest.TestCase):
         self.assertIs(jt.torch_fsdp2_compat, fsdp)
         self.assertEqual(set(fsdp.__all__), _PUBLIC_NAMES)
         self.assertEqual(len(fsdp.__all__), 79)
-        self.assertEqual(
-            {name for name in vars(fsdp) if not name.startswith("_")},
-            _PUBLIC_NAMES,
-        )
+        self.assertEqual(_public_api_names(), _PUBLIC_NAMES)
         namespace = {}
         exec("from jittor.compat.fsdp2 import *", {}, namespace)
         self.assertEqual(set(namespace), _PUBLIC_NAMES)
@@ -380,7 +386,7 @@ assert second is jittor.torch_fsdp2_compat
         self.assertIs(fsdp._install_fsdp2_distributed, fsdp.install)
 
     def test_public_contract_signatures_reflection_and_pickle(self):
-        public = sorted(name for name in vars(fsdp) if not name.startswith("_"))
+        public = sorted(_public_api_names())
         callables = {}
         for name in public:
             value = getattr(fsdp, name)

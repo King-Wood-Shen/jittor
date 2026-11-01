@@ -411,7 +411,8 @@ def _check_session_completion(log_path, log_text, sentinel, environment=None):
     log_path.write_text(log_text, encoding="utf-8")
     checked = run_python_child(
         [str(CHECKER), "--log", str(log_path), "--sentinel", str(sentinel)],
-        cwd=REPO_ROOT, env=environment, inherit=False, merge_stderr=True,
+        cwd=REPO_ROOT, env=environment, inherit=environment is None,
+        merge_stderr=True,
         timeout=120)
     return checked.returncode == 0, checked.stdout
 
