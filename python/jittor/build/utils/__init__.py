@@ -260,6 +260,8 @@ class Logwrapper:
             text += str(m)
         f = inspect.currentframe()
         caller = f.f_back.f_back if f is not None and f.f_back is not None else None
+        # A frame referencing itself also keeps the caller's tensor locals alive.
+        del f
         if caller is not None:
             info = inspect.getframeinfo(caller)
             fileline = f"{os.path.basename(info.filename)}:{info.lineno}"

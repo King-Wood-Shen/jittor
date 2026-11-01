@@ -6,11 +6,31 @@
 # ***************************************************************
 import unittest
 import os
+import gc
+import weakref
 import jittor as jt
 from jittor import LOG
 from _helpers.logs import find_log_with_re
 
 class TestLog(unittest.TestCase):
+    def test_warning_releases_caller_frame(self):
+        class Marker:
+            pass
+
+        def emit():
+            marker = Marker()
+            ref = weakref.ref(marker)
+            LOG.w("frame lifetime")
+            return ref
+
+        enabled = gc.isenabled()
+        gc.disable()
+        try:
+            self.assertIsNone(emit()())
+        finally:
+            if enabled:
+                gc.enable()
+
     def test_log_capture(self):
         with jt.log_capture_scope(log_v=1000, log_vprefix="") as logs:
             LOG.v("1")
