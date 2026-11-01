@@ -1,10 +1,10 @@
 # Jittor wheel contents baseline (SHA-256 and exact archive member paths)
 # source-wheel: jittor-2.0.0-py3-none-any.whl
-# source-wheel-sha256: 174271c56097759e1ef74e5455da8ee57b73f8ada1aee72be3a7038fdb011563
+# source-wheel-sha256: 7de57540b63eb82c705f4d15bd87a8bc3a298f788dce38cd63a5ac0a2c52506a
 # entries: 1173
 # Regenerate only after reviewing every path and content change.
 52b590393d26e91459301831ad7535099ec1562e8336ceb34d6424671773301b  jittor-2.0.0.dist-info/METADATA
-35b9583f091c3fa389de2a55faa79ccd9d06f855c43bb1540cd3c6f17623102a  jittor-2.0.0.dist-info/RECORD
+fed61a0bbaf986fd71b3a20e37be47d820602ad9d0bc8f96df7e2834f7076ab5  jittor-2.0.0.dist-info/RECORD
 2b6eb4118ce7cd7b09601406aa623c553c4476265836f0d9c16f5c061f7efcc0  jittor-2.0.0.dist-info/WHEEL
 435a22ada7651633d681246096725d6b8a5d15b729df61706c5637cbc58c39c7  jittor-2.0.0.dist-info/entry_points.txt
 8b18f18c9c43b17e6e2bcdefc8df9d423c12e6769d5d13cf6a46fed31e7e1666  jittor-2.0.0.dist-info/licenses/LICENSE.txt
@@ -485,7 +485,7 @@ bd5aa9cebb417d2bb74b7036c5f8e4f90abe6c2f1462fed3d66eca29ef883fc7  jittor/build/u
 dc2e23fd0a9421bf67291e1204d4eb49e3152fd1137c3bc03ac584e4e5a3ab3e  jittor/build/utils/install_msvc.py
 408174be4d6124f907912c192b85ec9f0edecadf591385165a2931f8a4499812  jittor/build/utils/load_pytorch.py
 4a81d465629ae178c125cbe70668447ebf6bc9b25b4aa3fdf1d86ac725d03dbe  jittor/build/utils/load_pytorch_old.py
-c0712c711e0a329cc610d38a4193b4198963a34bee96aade700e008246311521  jittor/build/utils/lock.py
+b1fc8da50ffd846d9ed4d18d294e8ebd95d94e831cedd63e2331cad3eed6fa2f  jittor/build/utils/lock.py
 392c39e630e25a2c78440b314b169e9cbb3b0ad972f0ca2852327eaf7ee8cf2e  jittor/build/utils/manifest.py
 419648a38be4ba83d447730ece739b84a2b19e371d1e537d57e64d32144e25e4  jittor/build/utils/misc.py
 9e435847667052fb35a6aebbf2b676a1ae20a3bca7632914e59c52817e791f20  jittor/build/utils/preflight.py
