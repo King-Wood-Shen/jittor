@@ -306,6 +306,18 @@ class TestAutocastTraining(unittest.TestCase):
 
     TOLERANCE = 0.25
 
+    def test_float32_subtraction_stays_float32_under_cpu_autocast(self):
+        left_np = np.array([0.1234567, 256.25], dtype=np.float32)
+        right_np = np.array([0.1, 0.0012345], dtype=np.float32)
+        left = torch.tensor(left_np)
+        right = torch.tensor(right_np)
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            result = left - right
+            half_result = left.bfloat16() - right.bfloat16()
+        self.assertEqual(result.dtype, torch.float32)
+        np.testing.assert_array_equal(_np(result), (left_np - right_np).astype(np.float64))
+        self.assertEqual(half_result.dtype, torch.bfloat16)
+
     def _baseline(self, device):
         losses, params_finite, finite_fraction = _train("fp32", device)
         self.assertTrue(params_finite)

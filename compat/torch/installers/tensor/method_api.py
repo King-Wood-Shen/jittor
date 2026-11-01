@@ -2,6 +2,7 @@
 from importlib import import_module
 import contextlib
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
+from jittor._runtime import amp_context as _amp_context
 from ...context import get_install_context
 from ...types import _PYTHON_SCALAR_DTYPES, _make_cpu_resident, _make_cuda_resident, _var_is_cpu_resident
 from ....stub_policy import degraded as _degraded, unimplemented as _unimplemented
@@ -1715,13 +1716,25 @@ def _tensor_radd(self, other):
     return _promoting_binary(self, other, '__radd__', True)
 
 
-def _tensor_sub(self, other):
+def _tensor_sub_dispatch(self, other):
     fast = _FAST_BINARY
     if fast is not None:
         out = fast(self, other, 2)
         if out is not None:
             return out
     return _promoting_binary(self, other, '__sub__', False)
+
+
+def _tensor_sub(self, other):
+    # Torch leaves subtraction of two float32 tensors in float32 under
+    # autocast. Jittor's global amp_reg otherwise lowers this fall-through op.
+    if _amp_context.torch_autocast_active() and isinstance(other, _NativeVar):
+        native_api = get_install_context(_owner.jt).state["tensor_native_api"]
+        if (_own_dtype_name(self, native_api) == "float32"
+                and _own_dtype_name(other, native_api) == "float32"):
+            with _owner.jt.flag_scope(amp_reg=0):
+                return _tensor_sub_dispatch(self, other)
+    return _tensor_sub_dispatch(self, other)
 
 
 def _tensor_rsub(self, other):
