@@ -158,6 +158,39 @@ class TestBuildLockIsShared(unittest.TestCase):
             jt.core.lock_release()
         self.assertFalse(self.lock.is_locked)
 
+    def test_forked_child_has_its_own_build_lock_descriptor(self):
+        script = """
+import errno, fcntl, json, os
+import jittor as jt
+from jittor_utils import lock
+
+read_fd, write_fd = os.pipe()
+jt.core.lock_acquire()
+try:
+    child = os.fork()
+    if child == 0:
+        os.close(read_fd)
+        inherited_hold = jt.core.lock_is_held()
+        try:
+            fcntl.flock(lock.jittor_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            blocked = False
+        except OSError as error:
+            blocked = error.errno in (errno.EAGAIN, errno.EWOULDBLOCK)
+        os.write(write_fd, json.dumps([inherited_hold, blocked]).encode())
+        os._exit(0)
+    os.close(write_fd)
+    result = os.read(read_fd, 4096)
+    os.waitpid(child, 0)
+finally:
+    jt.core.lock_release()
+print('FORK_LOCK_RESULT=' + result.decode())
+"""
+        child = run_python_child(["-c", script], without_torch_mode=True)
+        self.assertEqual(child.returncode, 0, child.stderr)
+        result = next(line for line in child.stdout.splitlines()
+                      if line.startswith("FORK_LOCK_RESULT="))
+        self.assertEqual(json.loads(result.split("=", 1)[1]), [False, True])
+
     def test_closing_another_descriptor_does_not_release_the_lock(self):
         """A POSIX record lock dies when *any* fd for the file is closed."""
         jt.core.lock_acquire()

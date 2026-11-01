@@ -223,6 +223,18 @@ class Lock:
         # jittor_core, once compiler.py has handed it this descriptor. From
         # then on it owns the state and both languages go through it.
         self.core = None
+        if hasattr(os, "register_at_fork"):
+            os.register_at_fork(after_in_child=self._after_fork)
+
+    def _after_fork(self):
+        # flock is attached to an open file description. A forked data worker
+        # otherwise shares its parent's lock, so both can compile into one cache.
+        old_fd = self.fd
+        self.fd = os.open(self.filename, os.O_RDWR | os.O_CREAT, 0o666)
+        self._py_is_locked = False
+        if self.core is not None:
+            self.core.set_lock_fd(self.fd, False)
+        os.close(old_fd)
 
     def fileno(self):
         return self.fd
