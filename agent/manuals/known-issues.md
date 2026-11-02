@@ -1,8 +1,8 @@
 # Known-Issues Ledger
 
 - Status: Maintained
-- Last reviewed: 2026-10-31
-- Baseline: `211577a5a`
+- Last reviewed: 2026-11-02
+- Baseline: `d8e30464c`
 - Owner: Jittor core maintainers
 - Review when: an entry is fixed or narrowed, a strict expected failure
   XPASSes, a new defect is reproduced, or at quarterly maintenance
@@ -290,19 +290,23 @@ workaround.
 
 - Severity: Limitation (performance)
 - Status: Open; measured 2026-09-06 on an sm_89 GPU with TF32, exclusive card
-- Owner: code generation, with the Torch-compat division in KI-COMPAT-009
+- Owner: code generation
 - Symptom: the elementwise class of a `large_diffusers_unet2d` step was 3.37 ms
   (nsys) / 3.29 ms (profiler), 1086 GB/s, roofline ratio 0.84 -- already at the
   measured copy bandwidth -- against PyTorch's 3.04 ms.
 - Cause: the positive excess of the 49 fused kernels was about 0.59 ms and none
-  of it is code generation: the float64 scalar division of KI-COMPAT-009
-  (0.55 ms), a bare `transpose` (`src/ops/composite/transpose_op.cc`, 0.10 ms),
-  and about 60 kernels that move almost no data (0.23 ms of launch latency).
+  of it is code generation: 0.55 ms was the float64 scalar division that
+  KI-COMPAT-009 carried -- that entry closed on 2026-11-01 by dividing in the
+  tensor's dtype (see `docs/results/2026-11-01-python-float-division.md`), so
+  this 0.55 ms needs re-measuring rather than assuming -- 0.10 ms a bare
+  `transpose` (`src/ops/composite/transpose_op.cc`), and 0.23 ms of launch
+  latency across about 60 kernels that move almost no data.
 - Workaround: none.
 - Evidence: `agent/skills/cuda-elementwise-bandwidth-roofline/` (measurement
   scripts, nsys and profiler cross-checked, measured copy roofline).
-- Exit condition: re-measure after KI-COMPAT-009 is decided; close when the
-  class is no slower than PyTorch's on the same step.
+- Exit condition: re-measure the class on the same step now that the division
+  no longer widens; close when it is no slower, or narrow the entry to what
+  remains.
 
 ## KI-TUNER-001: the matmul and conv relays never fire, so a hand-written meta-op product runs as a generic kernel
 
@@ -1611,46 +1615,6 @@ workaround.
   including absence of unintended accumulator activation. Preserve the existing
   old/new graph snapshots and storage/gradient contracts when adding this support.
 
-## KI-COMPAT-009: a float32 tensor divided by a Python float is computed in float64
-
-- Severity: Limitation (performance; the result is the float32 PyTorch gives)
-- Status: Open; a design decision is pending. Measured 2026-09-06 on an sm_89 GPU.
-- Owner: torch compatibility / tensor operators
-- Symptom: `x / 2.0` for a float32 `x` on CPU or CUDA casts `x` to float64,
-  divides by a float64 0-d array and casts back, to match PyTorch to the last
-  ulp. On GPUs whose FP64 rate is 1/64 of FP32 this is the largest single excess
-  in the fused elementwise class: about 0.55 ms of a diffusers UNet2D step
-  (every `ResnetBlock2D` ends in `/ self.output_scale_factor`); removing the
-  widening measured 3.29 -> 2.73 ms for that class (see KI-CODEGEN-004).
-- Cause: `use_wide` in the true-division path of
-  `compat/torch/installers/tensor/method_api.py` (float32 widens to float64,
-  float16/bfloat16 widen only to float32, ACL does not widen); the native
-  `_fast_binary` builds the same widened sequence bit for bit.
-- Workaround: multiply by the reciprocal (`x * (1 / s)`), which stays float32,
-  where 1-ulp agreement with PyTorch is not required.
-- Evidence: `compat/tests/torch/test_torch_compat_promotion.py`,
-  `compat/tests/torch/test_native_fast_paths.py`.
-- Exit condition: decide whether 1-ulp parity is worth FP64 on consumer GPUs (for
-  example widen only where FP64 is fast, or compute `x * (1/s)` with a
-  correction), update the promotion tests with the decision, and delete the entry.
-
-## KI-COMPAT-010: torchmetrics' classification and regression metrics fail under the Torch frontend on CUDA
-
-- Severity: Medium (an ecosystem library's core metrics do not run)
-- Status: Open; reproduced 2026-10-12 on CUDA with torchmetrics installed (the
-  gates do not install it, so the cases skip there)
-- Owner: torch compatibility maintainers
-- Symptom: `test_classification_metrics` dies in `reduce_op.cc` with "Reduce
-  dim out of range: requested dims [0,] for a 0-D var"; `test_regression_metrics`
-  fails to compile a fused operator; `test_torchmetrics_required_torch_ops`
-  reports a required op as unsupported.
-- Cause: not isolated; the first is a `dim=0` reduction of a 0-d tensor, which
-  torch accepts.
-- Workaround: none.
-- Evidence: `JITTOR_TORCH_SHIM=1 python -m pytest -q compat/tests/torch/test_torchmetrics_compat.py`
-  on a CUDA machine with torchmetrics.
-- Exit condition: the three cases pass on CUDA.
-
 ## KI-COMPAT-011: an RNN under the Torch frontend on CUDA does not run through cuDNN
 
 - Severity: Medium (the precision policy it is meant to follow is not exercised)
@@ -1688,30 +1652,6 @@ workaround.
 - Exit condition: the four evidence files' cases run on an environment with
   Transformers/Diffusers installed (the metadata mechanism itself is covered by
   `compat/tests/torch/test_torch_shim_distribution_metadata.py`).
-
-## KI-COMPAT-021: T5's decoder MLP gradient leaves the parity band on CUDA
-
-- Severity: Medium (a gradient is wrong by 1.7x the accepted error; the forward
-  and the rest of the gradients agree)
-- Status: Open. Reproduced 2026-10-29 at `008cae211` and `1a750dbee` with the
-  same value, so it predates the float32 attention row-term change.
-- Owner: torch compatibility maintainers
-- Symptom:
-  `compat/tests/torch/test_ecosystem_parity.py::EcosystemParityCUDA::test_transformers_t5`
-  fails on `grad::decoder.block.1.layer.2.DenseReluDense.wi.weight diverged:
-  3.337e-02` against the 2e-2 maximum-relative-error band. The reported value is
-  bit-identical on both commits and across runs.
-- Cause: not isolated. The parameter belongs to a ReLU MLP, so the divergence
-  enters through the decoder block upstream of it. Ruled out: the float32
-  attention backward row term (the number does not move across `b0dcb366d`) and
-  the reference side (the case completes; an older oracle failed in apex before
-  the model ran at all).
-- Workaround: none for T5 training parity on CUDA; the rest of the ecosystem
-  parity matrix passes on the same encoder-decoder shapes it exercises.
-- Evidence: the nodeid above, run with the command in
-  [`docs/results/2026-10-29-cuda-f32-attention-row-term.md`](../../docs/results/2026-10-29-cuda-f32-attention-row-term.md).
-- Exit condition: the case passes on CUDA inside the band, or the band for this
-  case is raised in a change that says why.
 
 ## KI-DIST-001: FSDP2 flat sharding peaks above the unsharded model
 
@@ -1859,55 +1799,175 @@ workaround.
   case states its device explicitly.
 
 
-## KI-TEST-017: `test_parallel_compile_attribution` pins a defect the tree no longer has
+## KI-COMPAT-023: a SiLU module's first call and its later calls round differently
 
-- Severity: Low for users, Medium for the gate (two red cases in the PR smoke
-  tier hide a real regression in the same file)
-- Status: Open; reproduced 2026-10-30 at `30d9f4998` and, with `src/` and
-  `python/jittor/` checked out at `f37761c40`, identically -- so it predates
-  `81d0bdf2e`.
-- Owner: test infrastructure maintainers
-- Symptom:
-  `tests/codegen/test_parallel_compile_attribution.py::TestCompileFailureAttribution::{test_a_live_failed_var_makes_the_next_sync_report_the_same_failure,test_a_traceback_keeps_the_failed_var_alive_until_frames_are_cleared}`
-  fail. The child prints `first RAISED cause_named=True` and then `second
-  CLEAN`, where the test asserts the second `sync_all(True)` re-raises the
-  first compile error.
-- Cause: unknown. The module's docstring says a Var whose op failed to compile
-  stays in the graph and every later `sync_all(True)` re-raises; the tree now
-  reports the failure once and stays clean. Either error attribution was
-  changed deliberately without updating this file, or a Var carrying the
-  failure is no longer reachable from the graph.
-- Workaround: none needed for users; the case documents a defect class rather
-  than guarding an implemented contract.
-- Evidence: the file on its own, one process, on this machine:
-  `JITTOR_HOME=<native home> PYTHONPATH=python python -m pytest -q
-  tests/codegen/test_parallel_compile_attribution.py` -> 2 failed, 4 passed.
-- Exit condition: decide which behavior is correct, then fix the code or the
-  two assertions (and the module docstring) together; a green file that still
-  asserts the old behavior is not a resolution.
+- Severity: Low (one half-precision ulp, about a quarter of the elements)
+- Status: Open; reproduced 2026-11-01 at `3253801e8`, and with the day's
+  division changes reverted and the core rebuilt (`d8e30464c`) too.
+- Owner: torch compatibility / half-precision numerics
+- Symptom: `compat/tests/torch/test_native_fast_paths.py::TestNativeModuleDispatch::test_an_inference_group_norm_and_the_silu_after_it`
+  fails on CUDA where it compares `torch.nn.Sequential(silu)(plain)` with
+  `jt.nn.silu(plain)` for half `plain`: 52-77 of 256 elements differ by one half
+  ulp. The smaller reproduction is the module alone:
 
-## KI-TEST-018: a Torch-mode import inside a native worker turns a whole file red
+  ```python
+  silu = torch.nn.SiLU()
+  plain = torch.randn(2, 8, 4, 4, device="cuda").half()
+  with torch.no_grad():
+      first = silu(plain)       # == torch.nn.functional.silu(plain) and
+      second = silu(plain)      #    == (plain.float32() * plain.float32().sigmoid()).half()
+  # first and second differ in ~68 of 256 elements
+  ```
 
-- Severity: Low for users, Medium for the gate (46 errors from one cause)
-- Status: Open; reproduced 2026-10-30 at `30d9f4998` and 2026-10-31 at
-  `b677f2358` with `tools/run_test_suite.py --tier smoke` (native session,
-  `-n 4`), not reproducible running the file alone.
-- Owner: test infrastructure maintainers
-- Symptom: in the smoke tier `tests/ops/test_storage_layout_dtype.py` reports 46
-  setup errors, all `AssertionError: assert 'torch' not in sys.modules` from its
-  autouse `native_device_only` fixture; the same file alone reports 56 passed /
-  6 skipped.
-- Cause: the fixture asserts a clean native process, but xdist shares a worker
-  across files, so any earlier test in that worker that imports `torch`
-  in-process (the shim, or a comparison case) poisons every later file that
-  asserts the invariant. Nothing distinguishes "this file imported torch" from
-  "an earlier file in this worker did".
-- Workaround: run that file alone, or with `-p no:randomly`; `--tier core` does
-  not hit it.
-- Evidence: the smoke runs above (46 errors in that one file out of 22 failures
-  and 47 errors overall at `b677f2358`, every other failure matching a triaged
-  entry) and the isolated run of the same file.
-- Exit condition: the invariant is asserted per worker at the point a
-  Torch-mode test is collected (or native files that touch `torch` are isolated
-  by `--dist loadfile`), so a file's result no longer depends on what ran
-  before it in the same worker.
+  The **first** call on a fresh module is the one that matches real PyTorch 2.11
+  bit for bit (0 of 256 over several seeds) and the widened float32 path; every
+  later call on that module answers as if the operands had stayed half
+  (`x * sigmoid(x)` in half precision), which is the 1-ulp side. `silu(plain)`
+  and `silu(plain.clone())` differ the same way, so it is a property of the
+  module/process after the first call, not of the tensor.
+- Cause: not isolated. Not the tuner (`enable_tuner=0` reproduces), not graph
+  replay (`auto_graph_replay=0` reproduces), not the dispatch cache
+  (`_prefer_forward` is class-level and stable), and not the ACL kernel (not
+  used on CUDA). The remaining suspect is the widening inside `nn.silu` --
+  `wide = x.float32(); (wide * wide.sigmoid()).cast(dtype)` -- losing its
+  float32 operands on the path the second call takes.
+- Workaround: none needed for accuracy. A test that asserts bit parity with
+  PyTorch should compare against a spelling that has not already run in the
+  same process, or compare with real PyTorch rather than between two Jittor
+  spellings.
+- Evidence: the snippet above and the nodeid, one process each, on an RTX 4090
+  with `JITTOR_TORCH_SHIM=1`; the values are also recorded in
+  `docs/results/2026-11-01-python-float-division.md`.
+- Exit condition: repeated calls on one module answer the same bits, and the
+  case is green.
+
+
+## KI-COMPAT-024: storage façades and some constructed views retain alias gaps
+
+- Severity: Medium (storage identity or Python writes can differ from Torch).
+- Status: Open; observed during CPU/CUDA work based on `f995bd1f4` through
+  `40d4414f45b89b7cb7f5efdc06ca622b674d772a` on 2026-10-30. The relevant
+  storage/gather implementations remain at integration baseline `88b48a1f1`;
+  this entry does not claim a fresh runtime reproduction on that baseline.
+- Owner: native storage / Torch Tensor compatibility maintainers.
+- Symptom: `tensor.untyped_storage().data_ptr()` reports Python object identity,
+  not allocation identity. General gap-containing `as_strided` requests use a
+  gather/copy. Historical probes found some `split` results with correct
+  physical pointers whose Python indexed assignment did not update their
+  source. This is a bounded historical observation, not a claim that every
+  split layout fails or that split reads are wrong.
+- Cause: `_Storage.data_ptr` returns `id(self._var)`; unsupported as-strided
+  layouts use the gather branch. The historical split issue concerned raw
+  getitem paths without the same VarHolder write provenance as registered view
+  APIs. Direct foreign-kernel writes through a physical pointer are a distinct
+  path and do not prove Python assignment ownership.
+- Workaround: check materialized Tensor.data_ptr and byte offsets for physical
+  sharing; construct supported views with slice/reshape/permute and perform
+  Python writes through their registered parent view. Do not infer general
+  alias support from correct read values.
+- Evidence: `compat/torch/installers/tensor/method_api.py` owns `_Storage` and
+  `_as_strided_as_view`. The historical pointer probe used
+  `x=torch.arange(12,dtype=torch.float32); x.data_ptr(); y=x.reshape(3,4).t()`
+  and compared Tensor.data_ptr with Storage.data_ptr. Separate CPU probes
+  exposed gather/split writeback boundaries. See the
+  [integration report](../../docs/results/2026-11-01-vllm-runtime-integration.md)
+  for the source/validation distinction. Raw historical artifacts remain under
+  `$JITTOR_LAB_ROOT/_state/vllm-product/20261030/`, unversioned.
+- Exit condition: allocation identity and valid strided/split write ownership
+  match independent Torch on CPU and each claimed accelerator, including
+  lifetime/offset tests; unsupported layouts are rejected or clearly declared
+  instead of being silently represented as fully aliasing views.
+
+## KI-MEM-004: scalar boolean assignment retains one live operation
+
+- Severity: Low (bounded native CPU lifetime observation; growth is unmeasured).
+- Status: Open; reproduced on 2026-11-02 at
+  `9391a815dd6cc67b2d2fbe61fd9b4a1fad1d345a` in native CPU mode.
+- Owner: Jittor core memory / indexing maintainers.
+- Symptom: in a fresh native process, `live_ops` increases from 0 to 1 after
+  `value = jt.array(1.0); value[jt.array(True)] = jt.array(2.0);`
+  `assert value.item() == 2; del value`. It remains 1 after `gc.collect()`,
+  `jt.sync_all()`, and `jt.gc()`. This records one scalar-mask operation only;
+  repeated-call growth and accelerator behavior have not been established.
+- Cause: the retaining owner is not yet identified. The scalar-mask test leaves
+  the operation alive before the later argmax test starts; argmax itself leaves
+  the count unchanged. This is not evidence of an argmax/backward leak.
+- Workaround: lifetime tests for unrelated operators compare before/after live
+  operation counts, or run in a fresh process. This avoids test-order coupling;
+  it does not fix the scalar-mask retention or establish general leak freedom.
+- Evidence: run
+  `python -m pytest -q tests/core/test_setitem.py::TestSetitem::test_scalar_mask_with_var_value_compiles tests/ops/test_misc_issue.py::TestMiscIssue::test_argmax_memleak`
+  on the recorded baseline: the scalar-mask test passes, then the historical
+  argmax global-zero assertion fails with 1 live operation. Argmax alone passes.
+  Both test files are unchanged from `88b48a1f1` on that baseline; runtime
+  reproduction on `88b48a1f1` itself was not performed. The argmax regression
+  now checks its own count delta and retains its original sync/delete lifecycle.
+  Raw evidence: `$JITTOR_LAB_ROOT/_state/vllm-core-merge/20261101/logs/`
+  `smoke-argmax-minimal-sequence.log` and `smoke-scalar-mask-liveness.log`.
+- Exit condition: identify and justify or release the retained owner, add a
+  focused lifetime regression, and establish whether repeated scalar-mask
+  assignments accumulate live operations on each claimed backend.
+
+## KI-COMPAT-025: CPU bf16 autocast narrows an explicitly float32 loss
+
+- Severity: Medium (numerical fidelity in bounded autocast training).
+- Status: Open; reproduced 2026-11-02 on remote baseline
+  `88b48a1f18b2964f05090f65561e07ab64343715` and integration source
+  `ee116312ed3448a51c77ab1c9e2abeb45677f7f7`, with separate native caches
+  and asserted source paths. This is not introduced by the vLLM prerequisites.
+- Owner: Torch compatibility / AMP maintainers.
+- Symptom: `TestAutocastTraining::test_bfloat16_autocast` ends at
+  `0.158203125` against float32's `0.12238326668739319`, a relative difference of
+  `0.2926859143587205` beyond the unchanged 25% gate, on both commits. In CPU bf16 autocast,
+  `x = torch.ones(2).bfloat16(); y = torch.ones(2)` followed by
+  `((x.float() - y) ** 2).mean()` returns bf16: the explicit cast is float32,
+  but subtraction, square, and mean are narrowed. Independent real Torch
+  2.13 keeps all four stages float32 on the same CPU input.
+- Cause: the region-wide native AMP register lowers operations even after an
+  explicit float32 cast, unlike the per-operator autocast policy. The earlier
+  LayerNorm fix in `91ff825fc` remains active: all 80 training calls return
+  float32 from bf16 inputs with Torch autocast active. Changing only loss
+  construction in an untracked diagnostic to disable native AMP gives final
+  loss `0.12916548550128937` (5.54% from float32), with finite parameters and
+  gradients. This narrows the cause; it does not establish complete autocast
+  fidelity. The model uses ReLU, so this is not the SiLU issue KI-COMPAT-023.
+- Workaround: use float32 training for this bounded CPU task. Explicit
+  `.float()` inside the active region is insufficient to preserve the loss
+  arithmetic's dtype. No tolerance relaxation or runtime workaround is merged.
+- Evidence: the named case in
+  `compat/tests/torch/test_torch_half_precision_numerics.py` fails alone on
+  both commits; the candidate file has 10 passed, 1 skipped, and this failure.
+  Raw logs and source-identity/dtype probes are under
+  `$JITTOR_LAB_ROOT/_state/vllm-core-merge/20261101/`, indexed with hashes in
+  `bf16-diagnosis.json`. Historical KI-COMPAT-020 concerned the LayerNorm
+  output policy; its fix remains active. This distinct loss-arithmetic issue
+  does not reopen that mechanism. CUDA was not tested here.
+- Exit condition: a focused float32-loss dtype regression agrees with real
+  Torch, this unchanged training gate passes, and the complete half-precision
+  file plus related AMP/GradScaler tests pass on CPU and each claimed backend.
+
+
+## KI-COMPAT-026: lazy module imports invalidate initial namespace contracts
+
+- Severity: Medium (activation ownership and suite isolation).
+- Status: Open; reproduced on 2026-11-02 at `9391a815`.
+- Owner: Torch compatibility namespace / test maintainers.
+- Symptom: importing `torch.distributed.run` after activation adds a lazy module
+  that makes a later `compat.install(torch)` reject the completed graph.
+  Importing `jittor.compat.fsdp2.activation_checkpoint` also adds a normal Python
+  package attribute, so initial-public-surface tests fail in the warmed process.
+- Cause: initial namespace expectations and lazy imports are not reconciled.
+  A fresh child cannot be compared to a warmed parent's exact module-name set.
+- Workaround: run initial activation, alias and FSDP surface checks in clean
+  processes; do not disable strict ownership rejection or delete arbitrary
+  runtime modules to hide a changed graph.
+- Evidence: the four complete activation/alias/compat-structure/FSDP-structure
+  files pass 45 cases in a clean source environment. Importing only the two
+  modules above after collection reproduces six failures and 35 passes.
+  Source/test files involved are unchanged from `88b48a1`; an old-baseline
+  runtime reproduction was not performed for this issue. Logs are unversioned
+  under `$JITTOR_LAB_ROOT/_state/vllm-core-merge/20261101/logs/`:
+  `shim-clean-env-files.log` and `shim-order-repro.log`.
+- Exit condition: intentional lazy modules have explicit ownership and
+  initial-surface tests isolate their premise; the minimal import-order
+  sequence passes without weakening foreign-module rejection.

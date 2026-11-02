@@ -3,7 +3,7 @@
 ``tests/backends/parity/test_device_parity.py`` used to switch the parallel op
 compiler off for its whole class, with the reason "otherwise an asynchronous
 compile error can surface in the following test and be attributed to the wrong
-operator". The cost was
+operator". The observation was right and the diagnosis was not, and the cost was
 the compile parallelism of a 227-operator battery -- the dominant term in the
 CUDA gate.
 
@@ -11,15 +11,22 @@ What actually happens (each step below is one assertion here):
 
 1. A JIT compile failure is reported with the deliberate cause in it, parallel
    compiler or not. Attribution is not lost by compiling in threads.
-2. A failed compile is isolated from an unrelated later ``sync_all(True)``,
-   even while the failed Var remains referenced. The new computation works.
-3. Dropping the reference also leaves the next ``sync_all(True)`` clean.
+2. A Var whose op failed to compile **stays in the graph** and keeps failing
+   when it is read: ``held.sync()`` and ``held.numpy()`` raise the same failure
+   every time. A later ``sync_all(True)`` that meets it only as a bystander is
+   clean, because implicit execution excludes failed graphs
+   (``src/core/executor.cc``, "Exclude failed bystanders from implicit
+   execution") -- so it no longer lands on whichever test syncs next.
+3. Dropping the reference releases it, and is no longer what makes the next
+   ``sync_all(True)`` clean.
 
-An exception's traceback can retain the failed Var in the failing frame's
-locals. ``traceback.clear_frames`` releases them, as the parity battery does
-around each operator; the retained traceback must not poison later syncs.
+A *failed test* keeps that Var alive through the exception's traceback: the
+failing frame's locals. ``traceback.clear_frames`` releases them, which is what
+the parity battery does around each operator; it is a memory-release measure
+now, not what keeps the next operator green.
 
-Everything runs in a child process to isolate the deliberate compile failure.
+Everything runs in a child process: the point of the exercise is a deliberately
+poisoned runtime, and the assertions in step 2 say it does not stay local.
 """
 
 import os
@@ -181,22 +188,39 @@ class TestCompileFailureAttribution(unittest.TestCase):
         output = _run('held = poisoned_var()\nsync("first")\n')
         self.assertIn("first RAISED cause_named=True", output, output[-3000:])
 
-    def test_a_live_failed_var_does_not_poison_an_unrelated_sync(self):
-        """Step 2: a held failed Var cannot poison a fresh serial sync."""
+    def test_a_live_failed_var_is_reported_once_and_still_fails_when_read(self):
+        """Step 2 -- the failure is reported once, and the failed Var keeps it.
+
+        Serialising the compiler was the old workaround for a later, unrelated
+        sync reporting another operator's broken kernel. That no longer happens:
+        an implicit sync skips a failed bystander instead of retrying it, so the
+        innocent computation below is clean and its value is right. What does
+        stay is that reading the failed Var fails every time -- the error is not
+        swallowed, only kept to the graph that owns it.
+        """
         output = _run(
             'held = poisoned_var()\n'
             'sync("first")\n'
             'unrelated = jt.array([4.0, 5.0]) * 2\n'
             'sync("second")\n'
-            'print("unrelated_value", unrelated.sum().item())\n',
+            'print("unrelated_value", unrelated.sum().item())\n'
+            'for attempt in ("read", "read_again"):\n'
+            '    try:\n'
+            '        held.sync()\n'
+            '        print(attempt, "CLEAN")\n'
+            '    except Exception as error:\n'
+            '        print(attempt, "RAISED", "cause_named=%s" % ("nonexistent-header-that-proves-jit-compile-attribution" in str(error)))\n',
             threads=0,
         )
         self.assertIn("first RAISED cause_named=True", output, output[-3000:])
         self.assertIn("second CLEAN", output, output[-3000:])
         self.assertIn("unrelated_value 18.0", output, output[-3000:])
+        self.assertIn("read RAISED cause_named=True", output, output[-3000:])
+        self.assertIn("read_again RAISED cause_named=True", output, output[-3000:])
 
-    def test_dropping_the_failed_var_makes_the_next_sync_clean(self):
-        """Step 3 -- the remedy the parity battery relies on."""
+    def test_dropping_the_failed_var_releases_it(self):
+        """Step 3 -- dropping it still releases the memory, and was never the
+        reason the next sync is clean."""
         output = _run(
             'held = poisoned_var()\n'
             'sync("first")\n'
@@ -207,26 +231,38 @@ class TestCompileFailureAttribution(unittest.TestCase):
         self.assertIn("first RAISED cause_named=True", output, output[-3000:])
         self.assertIn("second CLEAN", output, output[-3000:])
 
-    def test_a_retained_failure_traceback_does_not_poison_later_syncs(self):
-        """A retained failed frame leaves unrelated syncs clean before cleanup."""
+    def test_a_traceback_does_not_poison_later_syncs(self):
+        """Why a *failed test* no longer poisons the next one.
+
+        Nothing in the failing test still names the Var -- the frame that does
+        is the one pytest keeps for the report -- so the traceback, not the
+        test, is what holds it. Holding it is harmless to another sync now, and
+        the Var itself still fails when something reads it.
+        """
         output = _run(
+            'kept_var = []\n'
             'def failing_test():\n'
-            '    local = poisoned_var()\n'
+            '    kept_var.append(poisoned_var())\n'
             '    jt.sync_all(True)\n'
             'try:\n'
             '    failing_test()\n'
-            'except Exception as error:\n'
+            'except Exception:\n'
             '    kept = sys.exc_info()[2]\n'
-            f'    print("first RAISED cause_named=%s" % ({_MARKER!r} in str(error)))\n'
             'gc.collect()\n'
             'sync("while_traceback_held")\n'
+            'try:\n'
+            '    kept_var[0].sync()\n'
+            '    print("read CLEAN")\n'
+            'except Exception as error:\n'
+            '    print("read RAISED", "cause_named=%s" % ("nonexistent-header-that-proves-jit-compile-attribution" in str(error)))\n'
             'traceback.clear_frames(kept)\n'
             'gc.collect()\n'
             'sync("after_clear_frames")\n'
         )
-        self.assertIn("first RAISED cause_named=True", output, output[-3000:])
         self.assertIn("while_traceback_held CLEAN", output, output[-3000:])
+        self.assertIn("read RAISED cause_named=True", output, output[-3000:])
         self.assertIn("after_clear_frames CLEAN", output, output[-3000:])
+
 
 
 if __name__ == "__main__":
