@@ -82,6 +82,12 @@ class _DistributedDataParallel(_DataParallel):
     backward's own leaf collection is keyed by ``id()`` and is not.
     """
 
+    # Its constructor emits collectives over the wrapped module's existing
+    # tensors. The generic Torch Module initializer must not apply the default
+    # factory placement (CPU unless torch.set_default_device changes it) to
+    # those lazy collective outputs.
+    _torch_placement_from_inputs = True
+
     require_backward_grad_sync = True
 
     def __init__(self, module, *args, **kwargs):

@@ -11,6 +11,7 @@ import jittor as jt
 from jittor.compat.torch.context import get_install_context
 from jittor.compat.torch.tensor_state import compatibility_owner
 from jittor.compat.torch.installers import distributed as owner
+from jittor.compat.torch.installers.nn import extra_api as nn_extra_api
 
 
 class Group:
@@ -95,6 +96,12 @@ def test_installer_and_bootstrap_bind_stable_implementations():
     assert dist.ProcessGroup is owner._JittorProcessGroup
     assert dist.distributed_c10d.Work is owner._JittorWork
     assert dist.distributed_c10d._get_default_group() is dist.group.WORLD
+
+
+def test_ddp_internal_collectives_follow_wrapped_tensor_placement():
+    # DDP construction broadcasts existing parameters; it must not inherit
+    # torch's default CPU placement for newly-created factory tensors.
+    assert nn_extra_api._DistributedDataParallel._torch_placement_from_inputs is True
 
 
 def test_group_creation_and_rank_maps(distributed_state, monkeypatch):

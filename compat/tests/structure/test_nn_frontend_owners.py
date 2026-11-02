@@ -68,7 +68,13 @@ class TestNNFrontendOwners(unittest.TestCase):
         dtypes.dtype_name = str
         sys.modules[dtypes.__name__] = dtypes
         frontend = types.ModuleType("_nn_owner_probe.frontend")
-        frontend.tensor_frontend = lambda tensor_type, **scope: nullcontext()
+        self.frontend_scopes = []
+
+        def record_frontend_scope(tensor_type, **scope):
+            self.frontend_scopes.append(scope)
+            return nullcontext()
+
+        frontend.tensor_frontend = record_frontend_scope
         frontend.make_parameter_type = lambda backend, tensor_type: Parameter
         sys.modules[frontend.__name__] = frontend
         self.frontend = self.load("nn_frontend")
@@ -98,6 +104,7 @@ class TestNNFrontendOwners(unittest.TestCase):
         self.assertIs(self.owner.adapt_class(Layer), adapted)
         self.assertIsInstance(vars(adapted)["__init__"], self.frontend.LayerInitializer)
         module = adapted()
+        self.assertEqual(self.frontend_scopes[-1], {"default_placement": True})
         self.assertIsInstance(module.weight, Parameter)
         self.assertIs(module.weight, module.alias)
         self.assertNotIsInstance(module.buffer, Parameter)
@@ -112,6 +119,18 @@ class TestNNFrontendOwners(unittest.TestCase):
                 super().__init__()
                 self.tag = "derived"
         self.assertEqual(Derived().tag, "derived")
+
+    def test_internal_ddp_initializer_follows_existing_tensor_placement(self):
+        class DistributedDataParallel(NativeModule):
+            _torch_placement_from_inputs = True
+
+            def __init__(self):
+                self.initialized = True
+
+        adapted = self.owner.adapt_class(DistributedDataParallel)
+        module = adapted()
+        self.assertTrue(module.initialized)
+        self.assertEqual(self.frontend_scopes[-1], {"default_placement": False})
 
     def test_external_and_global_children_keep_source_objects_unchanged(self):
         class Child(NativeModule):
