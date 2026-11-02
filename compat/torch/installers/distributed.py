@@ -416,6 +416,20 @@ def _init_process_group(*args, **kwargs):
     store = kwargs.get("store")
     if store is not None and init_method is not None:
         raise ValueError("init_process_group accepts store or init_method, not both")
+    # A torchrun agent already owns MASTER_PORT with PyTorch's c10d Store.
+    # Jittor's TCPStore has a different wire protocol and cannot bind that same
+    # endpoint. When explicitly configured, use one shared Jittor FileStore
+    # for this job/phase instead; keep torchrun's env:// identity (rank/world)
+    # and agent Store untouched. This is opt-in so the Jittor-native launcher
+    # and ordinary single-process callers retain their existing behavior.
+    rendezvous_file = os.environ.get(
+        "JITTOR_TORCH_DISTRIBUTED_STORE_FILE", "").strip()
+    if store is None and rendezvous_file and init_method in (None, "env://"):
+        if not os.path.isabs(rendezvous_file):
+            raise ValueError(
+                "JITTOR_TORCH_DISTRIBUTED_STORE_FILE must be an absolute "
+                "shared job/phase path")
+        init_method = "file://" + rendezvous_file
     if init_method is not None:
         store, requested_rank, requested_world_size = next(
             _store_rendezvous(

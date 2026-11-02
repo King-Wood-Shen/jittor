@@ -138,7 +138,15 @@ class LayerInitializer:
         if self.native.__name__ == "Embedding":
             arguments = inspect.signature(self.original).bind_partial(module, *args, **kwargs)
             frozen = bool(arguments.arguments.get("_freeze", False))
-        with tensor_frontend(owner.tensor_type):
+        # DistributedDataParallel's constructor performs collectives on its
+        # already-placed parameters. It is not a tensor factory: putting its
+        # lazy broadcast ops under torch's default-device placement (CPU by
+        # default) overrides parameter placement, so NCCL is later dispatched
+        # to CPU when the constructor flushes it.
+        default_placement = not getattr(
+            self.native, "_torch_placement_from_inputs", False)
+        with tensor_frontend(
+                owner.tensor_type, default_placement=default_placement):
             previous = vars(module).get("_native_parameter_construction")
             object.__setattr__(module, "_native_parameter_construction", True)
             try:
