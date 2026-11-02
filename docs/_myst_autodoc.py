@@ -120,12 +120,18 @@ class PublicAutomoduleBridge(RstDirectiveBridge):
         missing = sorted(rich_objects - discovered)
         if missing:
             raise RuntimeError("stable API objects are not publicly exported: {}".format(missing))
-        lines = [".. py:module:: {}".format(module_name), ""]
+        no_index = "no-index" in self.options
+        lines = [".. py:module:: {}".format(module_name)]
+        if no_index:
+            lines.append("   :no-index:")
+        lines.append("")
         for member, _value, directive in members:
             qualified = module_name + "." + member
             if qualified not in rich_objects:
                 continue
             lines.append(".. {}{}:: {}".format(_ALIAS_PREFIX, directive, qualified))
+            if no_index:
+                lines.append("   :no-index:")
             lines.append("")
         return "\n".join(lines) + "\n"
 

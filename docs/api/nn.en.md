@@ -5,4 +5,5 @@ Stateful layers live in `nn.modules`, and stateless functions live in
 `nn.functional`.
 
 :::{autopublicmodule} jittor.nn
+:no-index:
 :::

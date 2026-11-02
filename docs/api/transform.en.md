@@ -4,4 +4,5 @@
 transforms.
 
 :::{autopublicmodule} jittor.transform
+:no-index:
 :::

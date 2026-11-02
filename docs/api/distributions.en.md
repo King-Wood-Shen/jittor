@@ -4,4 +4,5 @@
 sampling, log probability, and KL divergence.
 
 :::{autopublicmodule} jittor.distributions
+:no-index:
 :::

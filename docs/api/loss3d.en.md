@@ -4,4 +4,5 @@
 including Chamfer distance and Earth Mover's distance.
 
 :::{autopublicmodule} jittor.loss3d
+:no-index:
 :::

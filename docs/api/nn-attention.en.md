@@ -4,4 +4,5 @@
 attention and its fused implementations.
 
 :::{autopublicmodule} jittor.nn.attention
+:no-index:
 :::

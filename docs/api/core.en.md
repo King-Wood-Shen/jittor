@@ -5,6 +5,7 @@ through `jt.ops`, and common operators are available on both `jt` and `jt.Var`
 (that is, in functional and method form).
 
 :::{autopublicmodule} jittor
+:no-index:
 :::
 
 The complete list of dynamic operators is available at runtime with

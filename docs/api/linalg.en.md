@@ -4,4 +4,5 @@
 eigenvalue routines, norms, and Einstein summation.
 
 :::{autopublicmodule} jittor.linalg
+:no-index:
 :::

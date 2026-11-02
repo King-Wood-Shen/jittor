@@ -4,4 +4,5 @@
 handles batching, shuffling, and multi-process loading.
 
 :::{autopublicmodule} jittor.dataset
+:no-index:
 :::
