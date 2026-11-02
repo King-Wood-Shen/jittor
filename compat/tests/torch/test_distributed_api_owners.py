@@ -181,6 +181,40 @@ def test_init_destroy_store_and_backend_validation(distributed_state, monkeypatc
     assert state["initialized"]
 
 
+def test_init_process_group_env_rendezvous_uses_explicit_shared_file(
+        distributed_state, monkeypatch):
+    state, _, _ = distributed_state
+    rendezvous_calls = []
+
+    class Store:
+        pass
+
+    store = Store()
+
+    def rendezvous(url, **kwargs):
+        rendezvous_calls.append((url, kwargs))
+        return iter([(store, 0, 1)])
+
+    monkeypatch.setattr(owner, "_store_rendezvous", rendezvous)
+    monkeypatch.setenv(
+        "JITTOR_TORCH_DISTRIBUTED_STORE_FILE",
+        "/shared/job/phase/store.sqlite")
+    owner._init_process_group(
+        backend="gloo", init_method="env://", rank=0, world_size=1)
+    assert rendezvous_calls == [(
+        "file:///shared/job/phase/store.sqlite",
+        {"rank": 0, "world_size": 1, "timeout": None})]
+    assert state["initialized"] and state["store"] is store
+
+
+def test_init_process_group_shared_file_requires_absolute_path(
+        distributed_state, monkeypatch):
+    monkeypatch.setenv("JITTOR_TORCH_DISTRIBUTED_STORE_FILE", "relative/store.sqlite")
+    with pytest.raises(ValueError, match="absolute shared job/phase path"):
+        owner._init_process_group(
+            backend="gloo", init_method="env://", rank=0, world_size=1)
+
+
 def test_checkpoint_stubs_keep_policy_and_importable_owner(monkeypatch):
     from jittor.compat import stub_policy
     dist = compatibility_owner(jt).distributed
