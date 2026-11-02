@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "events": {
+    "legacy-event-1": {
+      "kind": "feedback",
+      "subject": "example",
+      "content": {"decision_version": 3, "note": "preserve this payload"},
+      "evidence": "status.json"
+    }
+  }
+}

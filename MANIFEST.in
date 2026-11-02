@@ -807,6 +807,7 @@ include tools/build/gen_pyi.py
 include tools/build/generate_manifest.py
 include tools/check_repo_layout.sh
 include tools/check_session_completed.py
+include tools/coordination/feedback_inbox.py
 include tools/distributed/README.md
 include tools/distributed/tmpi
 include tools/docs/check_build.py
