@@ -60,6 +60,7 @@ class NativeOperation:
         import jittor
         context = get_install_context(jittor)
         implementation = context.state["native_torch_operations"][self._operation_key]
+        promoted_integer_sqrt = False
         # Torch promotes integer sqrt inputs to the default floating dtype.
         # Jittor's native unary inference promotes int64 to float64, which
         # changes scalar-derived bounds (for example NEFTune's alpha/sqrt(dim)).
@@ -69,6 +70,7 @@ class NativeOperation:
                 dtype = _dtype_name(value.dtype)
                 if dtype in {"bool", "int8", "int16", "int32", "int64",
                              "uint8", "uint16", "uint32", "uint64"}:
+                    promoted_integer_sqrt = True
                     args = (value.cast("float32"), *args[1:])
         defaults = self._TORCH_DEFAULTS.get(self._operation_key)
         if defaults:
@@ -79,9 +81,17 @@ class NativeOperation:
         if self._operation_key in ("fft.fftfreq", "fft.rfftfreq"):
             kwargs = dict(kwargs)
             device = kwargs.pop("device", None)
+        # Integer sqrt promotion produces a float32 value even inside a
+        # float16 autocast region.  Jittor's amp_reg is a global dtype
+        # inference bias, so the explicit cast above alone is insufficient:
+        # the sqrt op would otherwise be inferred back to float16.  Scope the
+        # native op to AMP's prefer-float32 register for this promoted case.
         with tensor_frontend(context.state["Var"], device=device):
             if isinstance(implementation, type) and issubclass(implementation, context.native_backend.Function):
                 implementation = implementation()
+            if promoted_integer_sqrt:
+                with jittor.flag_scope(amp_reg=1):
+                    return implementation(*args, **kwargs)
             return implementation(*args, **kwargs)
 
     def __reduce__(self):
