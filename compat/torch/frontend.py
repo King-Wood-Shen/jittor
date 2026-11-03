@@ -385,6 +385,12 @@ def rebuild_tensor(tensor_type, array, dtype, requires_grad, device=None):
     backend = tensor_type._frontend_backend
     with tensor_frontend(tensor_type, device=device):
         value = backend.array(array, dtype=dtype)
+        # This is a fresh tensor reconstructed from materialized storage. The
+        # factory can record a producer under the caller's grad policy, but a
+        # deepcopy/unpickle result has no source graph in PyTorch: it is a leaf.
+        # Cut that construction edge before restoring the saved grad policy;
+        # requires_grad_(False) itself is reversible and therefore preserves it.
+        value = value.stop_grad()
         value.requires_grad = requires_grad
     return value
 

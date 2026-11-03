@@ -105,6 +105,22 @@ class TestModuleChildStorage:
         root.alias = None
         assert storage["alias"] is None and not list(root.children())
 
+    def test_deepcopy_frozen_embedding_restores_a_leaf(self, device):
+        # PEFT's ModulesToSaveWrapper deep-copies frozen modules, then makes
+        # the copy trainable. The copied parameter must be a leaf so that this
+        # reversible requires_grad transition is legal on CUDA as well as CPU.
+        module = torch.nn.Embedding(8, 4).to(device)
+        module.weight.requires_grad_(False)
+
+        copied = copy.deepcopy(module)
+
+        assert copied.weight is not module.weight
+        assert copied.weight.device.type == device
+        assert copied.weight.is_leaf
+        assert not copied.weight.requires_grad
+        copied.weight.requires_grad_(True)
+        assert copied.weight.is_leaf and copied.weight.requires_grad
+
     def test_pickle_and_copy_rebind_child_storage(self, device):
         root = torch.nn.Module()
         root.child = torch.nn.Linear(2, 1).to(device)
