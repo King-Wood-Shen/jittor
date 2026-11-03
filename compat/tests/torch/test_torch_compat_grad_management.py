@@ -3,6 +3,7 @@
 from _helpers import capability as _test_capability
 
 import math
+import json
 import unittest
 
 import numpy as np
@@ -31,6 +32,23 @@ class _FakeOptimizer:
 
 
 class TestGradientManagement(unittest.TestCase):
+    def test_public_clip_grad_norm_returns_serializable_torch_tensor(self):
+        parameter = torch.tensor(np.array([3.0, 4.0], dtype="float32"),
+                                 requires_grad=True)
+        (parameter * parameter).sum().backward()
+
+        total_norm = torch.nn.utils.clip_grad_norm_([parameter], 1.0)
+
+        self.assertIsInstance(total_norm, torch.Tensor)
+        # Match Transformers Trainer's type-gated scalar conversion before it
+        # appends the value to TrainerState.log_history.
+        logged_value = (total_norm.item()
+                        if isinstance(total_norm, torch.Tensor)
+                        else total_norm)
+        self.assertIsInstance(logged_value, (int, float))
+        json.dumps({"grad_norm": logged_value})
+        self.assertAlmostEqual(float(logged_value), 10.0, places=5)
+
     def test_autograd_grad_unused_semantics(self):
         def make_graph():
             # torch.autograd.grad, so torch tensors: ``grad`` and the

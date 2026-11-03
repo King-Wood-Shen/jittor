@@ -222,9 +222,18 @@ def clip_grad_norm_(parameters, max_norm, norm_type=2.0,
         parameters = [parameters]
     parameters = list(parameters)
     grads = _grads_of(parameters)
-    return _clip_grad_norm_device(
+    total_norm = _clip_grad_norm_device(
         grads, max_norm, norm_type, error_if_nonfinite,
         shard_reduce=_parameters_are_sharded(parameters))
+    # The device reduction creates a native Var. Torch-facing callers expect
+    # clip_grad_norm_ to return the installed torch.Tensor type; Transformers
+    # relies on that identity to call item() before storing grad_norm in its
+    # JSON-serialized TrainerState. Keep the reduction and clipping on device,
+    # then publish its result through the active compatibility frontend.
+    tensor_type = get_install_context(_jt).state["Var"]
+    if isinstance(total_norm, tensor_type):
+        return total_norm
+    return tensor_type(total_norm)
 
 
 def clip_grad_value_(parameters, clip_value, **k):
