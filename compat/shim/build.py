@@ -355,6 +355,10 @@ def build_extension_dirs(
         build_temp_path, build_lib_path = _setuptools_build_dirs(ext_root, child_env)
         build_root = _setuptools_build_root(ext_root, child_env)
         child_env["JITTOR_TORCH_EXTENSIONS_DIR"] = os.fspath(build_root)
+        # Importing torch from setup.py can activate this shim in the build
+        # child. That child is already responsible for its own extension, so
+        # recursively scanning and launching setup.py again would recurse.
+        child_env["JITTOR_TORCH_SKIP_EXT_BUILD"] = "1"
         if not force and not _needs_build(ext, env=child_env):
             _log(verbose, "extension up-to-date: %s" % ext.root)
             continue

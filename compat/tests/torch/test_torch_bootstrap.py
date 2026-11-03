@@ -988,6 +988,26 @@ class TestTorchBootstrap(unittest.TestCase):
             self.assertEqual(len(exts[0].sources), 2)
             self.assertTrue(exts[0].setup_py.endswith("setup.py"))
 
+    def test_extension_build_child_does_not_recursively_build_extensions(self):
+        from jittor.compat.shim import build
+        from jittor.compat.shim.discovery import NativeExtension
+
+        with tempfile.TemporaryDirectory(dir=str(_TEST_STATE_ROOT)) as directory:
+            root = pathlib.Path(directory, "native-package")
+            root.mkdir()
+            setup_py = root / "setup.py"
+            setup_py.write_text("from setuptools import setup\nsetup(name='native-package')\n")
+            extension = NativeExtension(root=str(root), setup_py=str(setup_py))
+            env = {"JITTOR_TORCH_EXTENSIONS_DIR": str(pathlib.Path(directory, "cache"))}
+
+            with mock.patch.object(build, "_needs_build", return_value=True), \
+                    mock.patch.object(build.subprocess, "run") as run:
+                build.build_extension_dirs([extension], env=env, verbose=False)
+
+            child_env = run.call_args.kwargs["env"]
+            self.assertEqual(child_env["JITTOR_TORCH_SKIP_EXT_BUILD"], "1")
+            self.assertNotIn("JITTOR_TORCH_SKIP_EXT_BUILD", env)
+
     def test_explicit_project_runtime_defaults_to_user_cache(self):
         from jittor.compat.shim.preflight import project_runtime_root
 
