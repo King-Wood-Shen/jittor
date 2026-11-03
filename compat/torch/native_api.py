@@ -8,6 +8,7 @@ from .api_delegates import bind_delegates
 from .context import get_install_context
 from .frontend import tensor_frontend
 from .fidelity import Fidelity, register_fidelity
+from jittor._core.dtypes import dtype_name as _dtype_name
 
 
 _NATIVE_NAMES = (
@@ -59,6 +60,16 @@ class NativeOperation:
         import jittor
         context = get_install_context(jittor)
         implementation = context.state["native_torch_operations"][self._operation_key]
+        # Torch promotes integer sqrt inputs to the default floating dtype.
+        # Jittor's native unary inference promotes int64 to float64, which
+        # changes scalar-derived bounds (for example NEFTune's alpha/sqrt(dim)).
+        if self._operation_key == "sqrt" and args:
+            value = args[0]
+            if isinstance(value, context.state["Var"]):
+                dtype = _dtype_name(value.dtype)
+                if dtype in {"bool", "int8", "int16", "int32", "int64",
+                             "uint8", "uint16", "uint32", "uint64"}:
+                    args = (value.cast("float32"), *args[1:])
         defaults = self._TORCH_DEFAULTS.get(self._operation_key)
         if defaults:
             kwargs = dict(kwargs)
