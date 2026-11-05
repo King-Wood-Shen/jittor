@@ -371,12 +371,43 @@ def _python_state(value):
 
 
 def reduce_tensor(value):
+    if value._is_shared_memory():
+        owner = getattr(value, "_torch_shared_memory_owner", None)
+        if owner is None:
+            raise NotImplementedError(
+                "Pickling shared views is unsupported; pass the shared epoch tensor itself")
+        if _jittor_dtype_name(value.dtype) != "int64" or value.numel() != 1:
+            raise NotImplementedError(
+                "Shared tensor pickling supports one-element int64 tensors only")
+        state = _python_state(value)
+        state.pop("_torch_shared_memory_owner", None)
+        state.pop("_torch_shared_storage_source", None)
+        return (
+            rebuild_shared_tensor,
+            (type(value), owner.name, "int64", value.requires_grad, "cpu"),
+            state,
+        )
     return (
         rebuild_tensor,
         (type(value), value.numpy(), _jittor_dtype_name(value.dtype), value.requires_grad,
          str(value.device)),
         _python_state(value),
     )
+
+
+def rebuild_shared_tensor(tensor_type, name, dtype, requires_grad, device="cpu"):
+    if dtype != "int64" or device != "cpu" or requires_grad:
+        raise NotImplementedError(
+            "Shared tensor reconstruction supports CPU int64 non-gradient tensors only")
+    from .shared_memory import attach_epoch_buffer
+
+    owner, array = attach_epoch_buffer(name)
+    backend = tensor_type._frontend_backend
+    with tensor_frontend(tensor_type, device="cpu"):
+        value = backend.core._reuse_shared_np_array(array, owner)
+        value.requires_grad = False
+    value._torch_shared_memory_owner = owner
+    return value
 
 
 def rebuild_tensor(tensor_type, array, dtype, requires_grad, device=None):

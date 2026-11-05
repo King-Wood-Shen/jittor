@@ -80,6 +80,43 @@ VarHolder* reuse_np_array(PyObject* obj) {
     return new VarHolder(std::move(vp));
 }
 
+VarHolder* reuse_shared_np_array(PyObject* obj, PyObject* owner) {
+    USER_CHECK(Py_TYPE(obj) == PyArray_Type);
+    auto arr = (PyArray_Proxy*)obj;
+    USER_CHECK(arr->nd == 1 && arr->dimensions[0] == 1)
+        << "Shared epoch storage requires a one-element int64 NumPy array";
+    USER_CHECK(get_type_str(arr) == ns_int64)
+        << "Shared epoch storage requires int64 NumPy storage";
+    USER_CHECK(is_c_style(arr))
+        << "Shared epoch storage requires contiguous NumPy storage";
+    USER_CHECK(owner != nullptr && owner != Py_None)
+        << "Shared epoch storage requires a live shared-memory owner";
+
+    NanoVector shape = NanoVector::make(arr->dimensions, arr->nd);
+    VarPtr vp(shape, ns_int64);
+    vp->finish_pending_liveness();
+    vp->mem_ptr = arr->data;
+
+    Py_INCREF(obj);
+    Py_INCREF(owner);
+    Allocation allocation;
+    make_foreign_allocation(allocation, vp->mem_ptr, vp->size,
+        [obj, owner]() {
+            // A Var can release storage from the executor thread. Keep both
+            // Python references alive until the final allocator owner leaves.
+            PyGILState_STATE state = PyGILState_Ensure();
+            Py_DECREF(obj);
+            Py_DECREF(owner);
+            PyGILState_Release(state);
+        }, nullptr, true);
+    vp->allocator = allocation.allocator;
+    vp->allocation = allocation.allocation;
+    allocation.ptr = nullptr;
+    allocation.allocator = nullptr;
+    allocation.allocation = 0;
+    return new VarHolder(std::move(vp));
+}
+
 ArrayOp::ArrayOp(PyObject* obj) {
     ArrayArgs args;
     PyObjHolder holder;

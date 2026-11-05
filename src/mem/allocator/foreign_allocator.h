@@ -34,7 +34,10 @@ struct ForeignAllocator : Allocator {
 // (device_id) explicitly for foreign memory that actually lives on a GPU
 // (see bindings/pyjt/dlpack.cc's kDLCUDA import path).
 void make_foreign_allocation(Allocation& a, void* ptr, size_t size, std::function<void()>&& del_func,
-    Allocator* target = nullptr);
+    Allocator* target = nullptr, bool shared = false);
+// True only for foreign allocations explicitly backed by an inter-process
+// shared-memory owner. Ordinary NumPy/DLPack foreign pointers remain false.
+bool foreign_allocation_is_shared(Allocator* allocator, size_t allocation);
 
 EXTERN_LIB ForeignAllocator foreign_allocator;
 // Lazily-constructed, process-lifetime pool of per-device ForeignAllocator

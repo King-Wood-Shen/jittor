@@ -49,6 +49,8 @@ from .method_api import (
     _api_storage_offset,
     _api_reduce_ex,
     _api_reduce,
+    _api_share_memory,
+    _api_is_shared,
     _api_is_nested,
 
     _BINARY_APIS,
@@ -379,6 +381,14 @@ def _install_tensor_methods(g, Var, _DTYPE_OBJS=None):
     # Query the physical layout, including stride-zero expanded storage.
     if not hasattr(Var, "is_contiguous"):
         Var.is_contiguous = _api_is_contiguous
+
+    Var.share_memory_ = _api_share_memory
+    Var.is_shared = _api_is_shared
+    register_api_bindings(
+        Var, "torch.Tensor", ("share_memory_", "is_shared"),
+        Fidelity.APPROXIMATE,
+        "Uses real multiprocessing shared storage for one-element CPU int64 tensors; "
+        "arbitrary layouts, CUDA storage, and shared-view pickling are unsupported.")
 
     _native_add = g.add
     g.add = _add

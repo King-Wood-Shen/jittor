@@ -15,8 +15,9 @@ namespace jittor {
 struct ForeignAllocation {
     std::function<void()> del_func;
     int64 cnt;
-    ForeignAllocation(std::function<void()>&& del_func)
-        : del_func(std::move(del_func)), cnt(1) {}
+    bool shared;
+    ForeignAllocation(std::function<void()>&& del_func, bool shared)
+        : del_func(std::move(del_func)), cnt(1), shared(shared) {}
 };
 
 ForeignAllocator foreign_allocator;
@@ -49,12 +50,17 @@ void ForeignAllocator::free(void* mem_ptr, size_t size, const size_t& allocation
 }
 
 void make_foreign_allocation(Allocation& a, void* ptr, size_t size, std::function<void()>&& del_func,
-        Allocator* target) {
-    auto fa = new ForeignAllocation(std::move(del_func));
+        Allocator* target, bool shared) {
+    auto fa = new ForeignAllocation(std::move(del_func), shared);
     a.allocator = target ? target : &foreign_allocator;
     a.allocation = (size_t)fa;
     a.ptr = ptr;
     a.size = size;
+}
+
+bool foreign_allocation_is_shared(Allocator* allocator, size_t allocation) {
+    if (allocator != &foreign_allocator || !allocation) return false;
+    return ((ForeignAllocation*)allocation)->shared;
 }
 
 bool ForeignAllocator::share_with(size_t size, size_t allocation, size_t offset) {

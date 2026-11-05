@@ -2209,6 +2209,42 @@ def _api_reduce_ex(self, protocol):
     return reduce_tensor(self)
 
 
+def _api_share_memory(self):
+    """Share only the one-element CPU int64 storage used by dataset epochs."""
+    if self._is_shared_memory():
+        return self
+    if _jittor_dtype_name(self.dtype) != "int64" or self.numel() != 1:
+        raise NotImplementedError(
+            "share_memory_ currently supports one-element int64 tensors only")
+    if not _var_is_cpu_resident(self):
+        raise NotImplementedError("share_memory_ currently supports CPU tensors only")
+    if self.requires_grad:
+        raise RuntimeError("share_memory_ does not support tensors requiring gradients")
+
+    self.sync()
+    initial_value = int(self.item())
+    from ...shared_memory import create_epoch_buffer
+    owner, array = create_epoch_buffer(initial_value)
+    from ...frontend import tensor_frontend
+    with tensor_frontend(type(self), device="cpu"):
+        shared = _owner.jt.core._reuse_shared_np_array(array, owner)
+    self._torch_shared_memory_owner = owner
+    try:
+        self._replace_with_shared_storage(shared)
+        # The native share ring stores a Var* parent while aliases live.
+        # Keep its holder alive for the lifetime of this rebound Var.
+        self._torch_shared_storage_source = shared
+    except BaseException:
+        self.__dict__.pop("_torch_shared_memory_owner", None)
+        owner.unlink_after_failed_install()
+        raise
+    return self
+
+
+def _api_is_shared(self):
+    return bool(self._is_shared_memory())
+
+
 def _api_reduce(self):
     return (_owner._rebuild_var_from_numpy, (self.numpy(), _jittor_dtype_name(self.dtype)))
 

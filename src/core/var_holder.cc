@@ -17,6 +17,7 @@
 #include "core/graph.h"
 #include "core/grad.h"
 #include "mem/allocator/cuda_dual_allocator.h"
+#include "mem/allocator/foreign_allocator.h"
 #include "ops/op_register.h"
 #include "ops/composite/transpose_op.h"
 #include "ops/composite/fuse_transpose_op.h"
@@ -1698,6 +1699,72 @@ VarHolder* VarHolder::_update(VarHolder* v, bool logical_write) {
 VarHolder* VarHolder::sync(bool device_sync, bool weak_sync) {
     jittor::sync({this}, device_sync, weak_sync);
     return this;
+}
+
+void VarHolder::replace_with_shared_storage(VarHolder* shared) {
+    ExecutorEntryScope entry;
+    USER_CHECK(shared && shared != this)
+        << "Shared storage replacement requires a distinct source Var";
+    // Finish this value and the replacement, but leave downstream consumers
+    // queued. A detached alias that has not materialized yet must resolve its
+    // share_with request against the new allocation after this rebinding.
+    sync(true, false);
+    shared->sync(true, false);
+
+    USER_CHECK(var->dtype() == ns_int64 && var->num == 1)
+        << "Shared storage replacement supports one-element int64 Vars only";
+    // Jittor represents scalar integer tensors through a one-element Var, but
+    // the frontend can retain a different NanoVector rank for that same
+    // single value. This bounded epoch path moves exactly one int64 slot, so
+    // require equal element count and dtype rather than shape-vector identity.
+    USER_CHECK(shared->var->dtype() == var->dtype()
+            && shared->var->num == 1 && var->num == 1
+            && shared->var->size == var->size)
+        << "Shared storage source must contain one int64 element";
+    USER_CHECK(var->device_id < 0 && shared->var->device_id < 0
+            && var->allocator && !var->allocator->is_cuda()
+            && shared->var->allocator && !shared->var->allocator->is_cuda())
+        << "Shared storage replacement supports CPU Vars only";
+    USER_CHECK(!get_requires_grad() && !shared->get_requires_grad())
+        << "Shared storage replacement does not support autograd Vars";
+    USER_CHECK(!view && !views && !var->share_next && !var->is_sharing())
+        << "Cannot replace storage while materialized view aliases exist"
+        << " (holder_view=" << (view != nullptr)
+        << ", holder_views=" << (views != nullptr)
+        << ", var_share_next=" << (var->share_next != nullptr)
+        << ", var_is_sharing=" << var->is_sharing() << ")";
+    for (Op* consumer : var->outputs()) {
+        auto* pending_alias = dynamic_cast<CloneOp*>(consumer);
+        USER_CHECK(pending_alias && consumer->is_stop_grad()
+                && !consumer->is_finished()
+                && pending_alias->y->share_src == var
+                && !pending_alias->y->mem_ptr)
+            << "Cannot replace storage while a non-pending-alias consumer exists";
+    }
+    USER_CHECK(!capture_record && var->capture_owners == 0)
+        << "Cannot replace storage for a captured Var";
+    USER_CHECK(var->is_finished())
+        << "Cannot replace storage before its producer is finished";
+    USER_CHECK(!save_mem)
+        << "Shared storage replacement is unsupported with save_mem enabled";
+    USER_CHECK(shared->var->mem_ptr
+            && foreign_allocation_is_shared(shared->var->allocator,
+                shared->var->allocation))
+        << "Replacement source is not owned by a shared foreign allocation";
+
+    // Keep this Var object in place: direct aliases and any pending share_src
+    // requests continue to name it and therefore resolve against the new
+    // allocation. Already-materialized aliases were rejected above.
+    free_var_mem(var);
+    var->share_with(shared->var);
+    CHECK(var->alloc(shared->var->allocator));
+}
+
+bool VarHolder::is_shared_memory() {
+    Var* current = var;
+    while (current && current->share_src) current = current->share_src;
+    return current && current->allocator
+        && foreign_allocation_is_shared(current->allocator, current->allocation);
 }
 
 #ifdef HAS_ACCELERATOR

@@ -789,6 +789,14 @@ struct VarHolder {
         return this;
     }
 
+    // Replace only the storage of a CPU one-element int64 Var with a real
+    // shared foreign allocation, preserving this Var and Python holder's
+    // identity. The caller creates and initializes `shared` first.
+    // @pyjt(_replace_with_shared_storage)
+    void replace_with_shared_storage(VarHolder* shared);
+    // @pyjt(_is_shared_memory)
+    bool is_shared_memory();
+
     /**
      * print the information of the Var to debug.
      */
@@ -1121,5 +1129,7 @@ inline VarHolder* wrap_var_addr(int64 addr) {
 
 // @pyjt(reuse_np_array)
 VarHolder* reuse_np_array(PyObject* obj);
+// @pyjt(_reuse_shared_np_array)
+VarHolder* reuse_shared_np_array(PyObject* obj, PyObject* owner);
 
 } // jittor
