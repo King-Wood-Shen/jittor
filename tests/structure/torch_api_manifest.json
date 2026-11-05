@@ -394,6 +394,7 @@
   "add_",
   "addcdiv",
   "addcmul",
+  "addcmul_",
   "addmm",
   "all",
   "amax",

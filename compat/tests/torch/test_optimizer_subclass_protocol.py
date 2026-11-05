@@ -146,3 +146,13 @@ def test_native_algorithm_numeric_initializer_and_state_remain_valid(name):
     assert isinstance(optimizer.param_groups[0]['lr'], float)
     if name == 'AdamW':
         assert {'exp_avg', 'exp_avg_sq', 'step'} <= set(optimizer.state[parameter])
+
+
+def test_addcmul_inplace_preserves_tensor_identity_and_updates_values():
+    target = torch.tensor([1., 2.], device=_device())
+    first = torch.tensor([2., 3.], device=_device())
+    second = torch.tensor([4., 5.], device=_device())
+    published = target
+    result = target.addcmul_(first, second, value=.5)
+    assert result is published is target
+    np.testing.assert_allclose(snapshot(target), [5., 9.5], rtol=1e-6)
