@@ -286,3 +286,15 @@ CUDA-06 复用了 Qwen2-0.5B full checkpoint-3 和原四条训练样例，作业
 Qwen3 embedding 训练测试与 Qwen3 推理示例的公开 API，但本地 Qwen2 checkpoint 只覆盖离线加载/推理，
 不复现官方 Qwen3/STSB 训练测试。验收索引：
 `JittorEcosystem/jittor-ms-swift` 的 `support/evidence/CUDA-06/embedding-159030/`。
+
+## 双 checkpoint runtime identity 与 fallback 计数补证（2026-11-06）
+
+[`scripts/test_identity_fallback.py`](scripts/test_identity_fallback.py) 可在一张 CUDA 卡上复核既有 seq-cls 与
+embedding checkpoint，并记录 Jittor core、`jittor-compat`、Swift checkout 和已安装 helper 的实际身份。
+它用 `jt.core.backend_fallback_count()` 在两段前向前后读取 runtime 计数，并要求 `backend_fallback=error`。
+参数和资产通过环境变量提供；模型及样例 SHA 固定在用例内，离线执行，不训练、不下载。
+
+CUDA-06 补证作业 `159113`：core/compat 同为 `507742d6…`，Swift 实际 checkout `88d7279…`，安装 helper
+`fc5bc2c…`；fallback counter 在 seq-cls 和 embedding 前向前后均为 0。`159094` 曾因误用顶层计数器名失败，
+保留错误日志；修正为 `jt.core.backend_fallback_count()` 后通过。详细证据位于
+`JittorEcosystem/jittor-ms-swift/support/evidence/CUDA-06/runtime-identity-fallback-159113/`。
