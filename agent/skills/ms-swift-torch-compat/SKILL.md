@@ -314,3 +314,9 @@ the independently calculated norm and clip return were NaN, and all 168 saved Lo
 This confirms a training-gradient failure despite a finite loss. Do not count the result as a healthy pretrain update.
 Evidence and raw logs are retained at `support/evidence/CUDA-06/pretrain-gradient-159269/` in
 `JittorEcosystem/jittor-ms-swift`.
+
+## CUDA-06 FP16 pretraining gradient root-cause probe (2026-11-06)
+
+[`scripts/test_pretrain_amp_root_cause.py`](scripts/test_pretrain_amp_root_cause.py) captures named pre-clip gradients, an independent FP64 L2 norm, the shim clip return, runtime fallback counts and saved LoRA-B updates. The paired Slurm runner reuses one fixed isolated hot-site copy, existing Qwen2-0.5B weights and the existing three-row fixture. `CUDA06_TRAIN_FP16` selects the controlled `fp16=true/false` setting; both runs keep FP32 weights, bf16 off, gradient checkpointing and optimizer constant.
+
+The test overlays only the three Python modules from personal commit `5776eca` implementing CUDA-17 FP32 AMP preservation. With `fp16=true`, job `159278` still reported 306/336 nonfinite gradients; first named leaves were layer-0 Qwen2 `q_proj.lora_A` and `lora_B`, independent norm and clip return were NaN, and all 168 LoRA-B tensors stayed zero. With only `fp16=false`, job `159322` measured 336/336 finite gradients, L2 `37.0433559`, clip return `37.0433540`, and all 168 LoRA-B tensors updated. This pins the failure to this configuration's fp16-enabled path, while showing the RMSNorm-specific CUDA-17 change alone does not fix it. It does not yet identify the exact failing autocast operation or establish that CUDA-06 and CUDA-17 share a root cause.
