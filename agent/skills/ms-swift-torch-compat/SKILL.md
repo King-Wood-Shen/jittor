@@ -273,3 +273,16 @@ CUDA-06 验收使用 checkpoint-8，作业 `158981`，pytest 1 pass。此项只�
 `tests/test_align/test_cls.py` 作为参考固定 SHA；由于它会下载模型并重新训练，本用例是离线适配
 重载检查，并非原测试的直接执行。完整作业证据索引在
 `JittorEcosystem/jittor-ms-swift` 的 `support/evidence/CUDA-06/seqcls-158981/`。
+
+## 既有 Qwen2 embedding checkpoint 推理复核（2026-11-06）
+
+[`scripts/test_embedding_checkpoint.py`](scripts/test_embedding_checkpoint.py) 可离线加载本地 Swift
+embedding checkpoint，并通过公开 `TransformersEngine` / `InferRequest` 计算 embedding。运行前设置
+`CUDA06_EMBED_CHECKPOINT`、`CUDA06_EMBED_SAMPLE`、`CUDA06_EMBED_RECEIPT`，以及模型、config、tokenizer、
+训练 args、样例、官方 `tests/train/test_embedding.py`、官方 Qwen3 推理示例各自的 SHA256 环境变量与源码路径。
+用例验证保存参数、实际 CUDA 参数设备、有限 embedding 与有限 cosine 矩阵；它不做训练或语义质量判断。
+
+CUDA-06 复用了 Qwen2-0.5B full checkpoint-3 和原四条训练样例，作业 `159030` 单卡 1 pass。它参照官方
+Qwen3 embedding 训练测试与 Qwen3 推理示例的公开 API，但本地 Qwen2 checkpoint 只覆盖离线加载/推理，
+不复现官方 Qwen3/STSB 训练测试。验收索引：
+`JittorEcosystem/jittor-ms-swift` 的 `support/evidence/CUDA-06/embedding-159030/`。
