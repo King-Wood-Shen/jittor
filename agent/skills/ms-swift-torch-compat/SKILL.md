@@ -256,3 +256,20 @@ transformers,peft,swift；仓库名里的 `-` 由工具归一化）；`_ecosyste
 ms-swift/peft 版本组合问题，与 jittor 无关；换成报告用的 **ms-swift 4.5.2 + peft 0.17.1 +
 transformers 4.56.2** 即跑通。原始报告见
 `$JITTOR_LAB_ROOT/_state/verify-ml/{ms-swift.unpinned-peft0.20.log,ms-swift.pinned.log}`。
+
+## 既有 Qwen2 序列分类 checkpoint 重载（2026-11-06）
+
+可用 [`scripts/test_seq_cls_checkpoint.py`](scripts/test_seq_cls_checkpoint.py) 对本地已有的
+`Qwen2ForSequenceClassification` checkpoint 做单卡 CUDA 重载检查。通过环境变量提供
+`CUDA06_SEQCLS_CHECKPOINT`、`CUDA06_SEQCLS_SAMPLE`、`CUDA06_SEQCLS_RECEIPT`，以及
+`CUDA06_SEQCLS_MODEL_SHA256`、`CUDA06_SEQCLS_CONFIG_SHA256`、
+`CUDA06_SEQCLS_TOKENIZER_SHA256`、`CUDA06_SEQCLS_ARGS_SHA256`、
+`CUDA06_SEQCLS_SAMPLE_SHA256`、`CUDA06_SEQCLS_OFFICIAL_SHA256`、
+`CUDA06_SEQCLS_OFFICIAL_REFERENCE`；测试不下载模型或数据。验收检查训练参数 `seq_cls` /
+2 类 / max length 64、分类头、CUDA 可见设备数为 1，以及 8 条样例的有限 `(8, 2)` logits。
+
+CUDA-06 验收使用 checkpoint-8，作业 `158981`，pytest 1 pass。此项只证明已有 checkpoint
+可加载并前向推理，不证明训练更新、收敛或历史双 rank NCCL 行为。上游
+`tests/test_align/test_cls.py` 作为参考固定 SHA；由于它会下载模型并重新训练，本用例是离线适配
+重载检查，并非原测试的直接执行。完整作业证据索引在
+`JittorEcosystem/jittor-ms-swift` 的 `support/evidence/CUDA-06/seqcls-158981/`。
