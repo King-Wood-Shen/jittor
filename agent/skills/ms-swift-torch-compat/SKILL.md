@@ -298,3 +298,19 @@ CUDA-06 补证作业 `159113`：core/compat 同为 `507742d6…`，Swift 实际 
 `fc5bc2c…`；fallback counter 在 seq-cls 和 embedding 前向前后均为 0。`159094` 曾因误用顶层计数器名失败，
 保留错误日志；修正为 `jt.core.backend_fallback_count()` 后通过。详细证据位于
 `JittorEcosystem/jittor-ms-swift/support/evidence/CUDA-06/runtime-identity-fallback-159113/`。
+
+## CUDA-06 pretrain gradient diagnostic (2026-11-06)
+
+[`scripts/test_pretrain_grad_diagnostic.py`](scripts/test_pretrain_grad_diagnostic.py) wraps
+`Accelerator.clip_grad_norm_` immediately before the optimizer update, checks each available gradient on host,
+independently sums squared FP64 gradient values, records the shim's clip-norm return, then checks saved LoRA-B tensors.
+It reuses the CUDA-06 runner's `tools/runtime_context.py`; set `PYTHONPATH` to the ms-swift repository's `tools`
+directory and provide the `CUDA06_*` asset/output/receipt variables used by the paired Slurm script.
+The paired runner is site-specific evidence tooling and expects the original Qwen2-0.5B cache, three-row fixture,
+installed site from job 157176, and one CUDA device. It is not a general trainer fix.
+
+On the frozen assets, job `159269` completed the one-step diagnostic but found 306/336 gradient tensors non-finite;
+the independently calculated norm and clip return were NaN, and all 168 saved LoRA-B tensors remained zero.
+This confirms a training-gradient failure despite a finite loss. Do not count the result as a healthy pretrain update.
+Evidence and raw logs are retained at `support/evidence/CUDA-06/pretrain-gradient-159269/` in
+`JittorEcosystem/jittor-ms-swift`.
