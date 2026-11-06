@@ -4,6 +4,8 @@
 // file 'LICENSE.txt', which is part of this source code package.
 // ***************************************************************
 #include <algorithm>
+#include <functional>
+#include <thread>
 #include "core/exec_plan.h"
 #include "runtime/launch_diagnostics.h"
 #include "core/var.h"
@@ -38,6 +40,7 @@ void ExecPlan::clear() {
     op_inputs.clear();
     op_inputs_begin.clear();
     var_producer.clear();
+    producer_edge_audit.clear();
     batch_hold_per_var = 0;
     batch_hold = nullptr;
     // Kept as vectors: `schedule_hold_release` resizes this to the batch's
@@ -80,6 +83,7 @@ void build_exec_plan(vector<Var*>& vars, bool weak_sync, ExecPlan& plan) {
         op_num = 0;
         start_var_num = 0;
         bfs_q.clear();
+        plan.producer_edge_audit.clear();
         // get all nodes need to be executed
         int need_opt = 0;
         batch_epoch.reset(new TraversalEpoch("Executor::run_sync"));
@@ -98,6 +102,23 @@ void build_exec_plan(vector<Var*>& vars, bool weak_sync, ExecPlan& plan) {
             if (i + 8 < (int)bfs_q.size()) __builtin_prefetch(bfs_q[i + 8]);
             auto node = bfs_q[i];
             op_num += !node->is_var();
+            if (node->is_var()) {
+                ProducerEdgeAudit audit;
+                audit.var = node->var();
+                audit.thread_id_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
+                if (!node->_inputs.empty()) {
+                    auto input = node->_inputs.front();
+                    auto output_edge = input.reverse();
+                    audit.producer = output_edge.node && !output_edge.node->is_var()
+                        ? output_edge.node->op() : nullptr;
+                    audit.slot = output_edge.index;
+                    if (audit.producer && audit.slot >= 0
+                            && audit.slot < (int)output_edge.node->_outputs.size())
+                        audit.producer_has_var =
+                            output_edge.node->_outputs[audit.slot].node == node;
+                }
+                plan.producer_edge_audit.push_back(audit);
+            }
             // Tapes groups autograd edges; execute's returned tensor path
             // supplies its forward data. These inputs must remain lazy until
             // a real data reader (or backward) requests their providers.

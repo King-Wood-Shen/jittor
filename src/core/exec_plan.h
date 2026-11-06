@@ -33,6 +33,18 @@ struct PlanScratch {
     vector<int> last_use;
 };
 
+// A lightweight trace of the producer edge as the BFS first encounters a Var.
+// Compared with the later per-op output snapshot, this tells whether the edge
+// was already absent during collection or disappeared while the plan was
+// being assembled.
+struct ProducerEdgeAudit {
+    Var* var = nullptr;
+    Op* producer = nullptr;
+    int slot = -1;
+    bool producer_has_var = false;
+    size_t thread_id_hash = 0;
+};
+
 // What the Planner hands the Runner: one batch, already cut into fused
 // segments and ordered. Everything here is *indices into `ops`*, never
 // pointers into the graph beyond `ops`/`all_vars` themselves, so the plan can
@@ -88,6 +100,7 @@ struct ExecPlan {
     // is produced inside it (and under which output index), instead of asking
     // the var, whose `_inputs` may have been cleared by now.
     vector<pair<Op*, int>> var_producer;
+    vector<ProducerEdgeAudit> producer_edge_audit;
     // Backward liveness `Executor::run_sync` contributes to every var above,
     // for the batch's duration -- one per var once the hold is taken, zero
     // before that and for a plan built by anything else. Phase 7 subtracts it

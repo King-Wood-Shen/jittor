@@ -15,7 +15,9 @@
 #include "ops/op_register.h"
 #include "utils/graph_build_profile.h"
 #include <cstdlib>
+#include <functional>
 #include <sstream>
+#include <thread>
 
 namespace jittor {
 
@@ -163,29 +165,58 @@ void FusedOp::update_ops() {
            << " batch_var_fused=" << (batch_var_fused ? "set" : "null")
            << " stamp_count=" << tstate.stamp_count()
            << " active_epochs=" << tstate.active_epochs();
-        for (Op* op : ops) {
-            // `addr` is what the H3FUSE erase-output log prints for its
-            // producer, so the two lines can be matched up; `holder` is the
-            // op's strong list of its own outputs. Zero `outputs` with a
-            // non-empty `holder` means the edge was erased while the var is
-            // still alive -- somebody detached the producer, not the var.
-            os << "\n  op " << op->name() << " addr=" << (void*)op
-               << " tflag=" << op->tflag
-               << " batch_stamp=" << op->batch_stamp
-               << " outputs=" << op->outputs().size()
-               << " holder=" << op->outputs_holder.size()
-               << " inputs=" << op->inputs().size();
-            for (Var* o : op->outputs()) {
-                os << "\n     out tflag=" << o->tflag
-                   << " batch_stamp=" << o->batch_stamp
-                   << " stays=" << (int)var_stays_in_memory((Node*)o);
-                if (batch_var_fused && o->batch_stamp == batch_stamp_wanted) {
-                    int idx = o->batch_index_at(batch_stamp_wanted);
-                    os << " batch_index=" << idx;
-                    if (idx >= 0 && (uint)idx < batch_var_fused->size())
-                        os << " var_fused=" << (*batch_var_fused)[idx];
+        // Do not inspect the Op objects on this failure path. The original
+        // report itself raced with node reclamation and crashed in op->name(),
+        // hiding the invariant failure. Use only the plan's pointer snapshots
+        // and compare addresses; never dereference a graph node here.
+        if (batch_plan) {
+            for (size_t local = 0; local < ops.size(); ++local) {
+                int plan_index = -1;
+                for (size_t i = 0; i < batch_plan->ops.size(); ++i)
+                    if (batch_plan->ops[i] == ops[local]) {
+                        plan_index = (int)i;
+                        break;
+                    }
+                os << "\n  op local=" << local << " addr=" << (void*)ops[local];
+                if (plan_index < 0 || plan_index + 1 >= (int)batch_plan->op_outputs_begin.size()) {
+                    os << " plan_index=missing";
+                    continue;
+                }
+                int begin = batch_plan->op_outputs_begin[plan_index];
+                int end = batch_plan->op_outputs_begin[plan_index + 1];
+                os << " plan_index=" << plan_index << " snapshot_outputs=" << (end - begin);
+                for (int j = begin; j < end; ++j) {
+                    Var* out = batch_plan->op_outputs[j];
+                    os << "\n     out_addr=" << (void*)out;
+                    for (size_t vi = 0; vi < batch_plan->all_vars.size(); ++vi)
+                        if (batch_plan->all_vars[vi] == out) {
+                            os << " batch_var_index=" << vi;
+                            if (batch_var_fused && vi < batch_var_fused->size())
+                                os << " var_fused=" << (*batch_var_fused)[vi];
+                            break;
+                        }
+                }
+                for (const auto& audit : batch_plan->producer_edge_audit) {
+                    if (audit.producer != ops[local]) continue;
+                    bool snapshot_has_var = false;
+                    for (int j = begin; j < end; ++j)
+                        if (batch_plan->op_outputs[j] == audit.var) {
+                            snapshot_has_var = true;
+                            break;
+                        }
+                    os << "\n     producer_edge_audit stage=bfs_var_edge"
+                       " var_addr=" << (void*)audit.var
+                       << " producer_addr=" << (void*)audit.producer
+                       << " slot=" << audit.slot
+                       << " bfs_edge_present=" << audit.producer_has_var
+                       << " snapshot_has_var=" << snapshot_has_var
+                       << " bfs_thread_hash=" << audit.thread_id_hash
+                       << " update_ops_thread_hash="
+                       << std::hash<std::thread::id>{}(std::this_thread::get_id());
                 }
             }
+        } else {
+            os << "\n  plan_snapshot=missing";
         }
         LOGw << os.str();
     }

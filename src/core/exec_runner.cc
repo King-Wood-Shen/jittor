@@ -139,22 +139,18 @@ void check_op_async_error(Op* op, bool is_fused_op, const std::exception& e,
     vector<Var*> ins, outs;
     if (is_fused_op) {
         FusedOp& fused_op = *((FusedOp*)op);
-        op_name = "fused_op(";
-        for (auto& sub : fused_op.ops) {
-            if (op_name.back() != '(') op_name += ", ";
-            op_name += sub->name_ex();
-        }
-        op_name += ")";
-        for (auto& vi : fused_op.vars) {
-            if (vi.type == 0) ins.push_back(vi.var);
-            if (vi.type == 2) outs.push_back(vi.var);
-        }
+        // A fused batch carries raw graph pointers, and this handler is often
+        // reached precisely after one of those pointers became invalid. Do
+        // not let error reporting walk them and replace the original error
+        // with a SIGSEGV. The sub-op count is stable metadata; the original
+        // exception text below is the useful diagnostic.
+        op_name = "fused_op(suboperators=" + std::to_string(fused_op.ops.size()) + ")";
     } else {
         op_name = op->name_ex();
         for (auto v : op->inputs()) ins.push_back(v);
         for (auto v : op->outputs()) outs.push_back(v);
     }
-    if (outs.size()) stack = get_node_trace(outs.back());
+    if (!is_fused_op && outs.size()) stack = get_node_trace(outs.back());
 
     // No log-line prefix: the first line is the reason, so that it is what a
     // Python traceback ends with.
@@ -164,7 +160,7 @@ void check_op_async_error(Op* op, bool is_fused_op, const std::exception& e,
     // The Python frames are the second thing a reader wants and the only part
     // that names their own code: the traceback points at the line that needed
     // the result, not the one that built the operator.
-    string sites = stack.size() ? "" : creation_sites(op, is_fused_op);
+    string sites = stack.size() || is_fused_op ? "" : creation_sites(op, is_fused_op);
     if (stack.size()) {
         report << "\n[Async Backtrace]: ---";
         for (auto& s : stack) {
