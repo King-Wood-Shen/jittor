@@ -4,6 +4,7 @@ import contextlib
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
 from jittor._runtime import amp_context as _amp_context
 from ...context import get_install_context
+from ...amp import _preserve_autocast_arithmetic
 from ...types import _PYTHON_SCALAR_DTYPES, _make_cpu_resident, _make_cuda_resident, _var_is_cpu_resident
 from ....stub_policy import degraded as _degraded, unimplemented as _unimplemented
 from ..core import _promote_pair
@@ -1761,6 +1762,19 @@ def _tensor_mul(self, other):
     half_scalar = _bfloat_python_float_mul(self, other)
     if half_scalar is not None:
         return half_scalar
+    if (isinstance(other, _NativeVar)
+            and _preserve_autocast_arithmetic()
+            and _own_dtype_name(
+                self, get_install_context(_owner.jt).state["tensor_native_api"])
+            == "float32"
+            and _own_dtype_name(
+                other, get_install_context(_owner.jt).state["tensor_native_api"])
+            == "float32"):
+        with _owner.jt.flag_scope(amp_reg=_owner.jt.amp_flags.disabled):
+            return _promoting_binary(self, other, '__mul__', False)
+    if type(other) in (int, float) and _preserve_autocast_arithmetic():
+        with _owner.jt.flag_scope(amp_reg=0):
+            return _promoting_binary(self, other, '__mul__', False)
     fast = _FAST_BINARY
     if fast is not None:
         out = fast(self, other, 4)
@@ -1773,6 +1787,9 @@ def _tensor_rmul(self, other):
     half_scalar = _bfloat_python_float_mul(self, other)
     if half_scalar is not None:
         return half_scalar
+    if type(other) in (int, float) and _preserve_autocast_arithmetic():
+        with _owner.jt.flag_scope(amp_reg=0):
+            return _promoting_binary(self, other, '__rmul__', True)
     fast = _FAST_BINARY
     if fast is not None:
         out = fast(self, other, 5)
@@ -1798,10 +1815,22 @@ def _tensor_rmod(self, other):
 
 
 def _tensor_pow(self, other):
+    if (_preserve_autocast_arithmetic()
+            and _own_dtype_name(
+                self, get_install_context(_owner.jt).state["tensor_native_api"])
+            == "float32"):
+        with _owner.jt.flag_scope(amp_reg=_owner.jt.amp_flags.disabled):
+            return _promoting_binary(self, other, '__pow__', False)
     return _promoting_binary(self, other, '__pow__', False)
 
 
 def _tensor_rpow(self, other):
+    if (_preserve_autocast_arithmetic()
+            and _own_dtype_name(
+                self, get_install_context(_owner.jt).state["tensor_native_api"])
+            == "float32"):
+        with _owner.jt.flag_scope(amp_reg=_owner.jt.amp_flags.disabled):
+            return _promoting_binary(self, other, '__rpow__', True)
     return _promoting_binary(self, other, '__rpow__', True)
 
 

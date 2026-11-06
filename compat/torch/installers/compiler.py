@@ -386,6 +386,12 @@ def onnx_export(*args, **kwargs):
 
 
 def _api_rsqrt(x):
+    from ..amp import _preserve_autocast_arithmetic
+    from jittor._core.dtypes import dtype_name
+    if (_preserve_autocast_arithmetic()
+            and dtype_name(x.dtype) == "float32"):
+        with jt.flag_scope(amp_reg=jt.amp_flags.disabled):
+            return 1.0 / jt.sqrt(x)
     return 1.0 / jt.sqrt(x)
 
 
@@ -589,7 +595,7 @@ def install(ctx):
     g = ctx.jittor_module
     transaction = active_transaction(ctx)
     # ---- elementwise / reduction helpers that may be missing ----
-    _bind_missing(g, "rsqrt", _api_rsqrt)
+    g.rsqrt = _api_rsqrt
     _install_empty_like(g)
     # module-level comparison ops (torch.gt(a,b) etc.); .gt methods already exist.
     _bind_missing(g, "gt", _api_gt)

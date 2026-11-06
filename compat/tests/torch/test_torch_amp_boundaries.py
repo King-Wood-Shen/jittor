@@ -51,6 +51,28 @@ def _scaler_case(device, scale, gradient, dtype=torch.float32):
 
 class TestAmpBoundaries(cu.JittorTestCase):
     @_no_fallbacks
+    def test_fp32_rmsnorm_statistics_stay_finite_under_autocast(self, device):
+        # Qwen2 RMSNorm casts its FP16 activation to FP32 before pow/mean/rsqrt.
+        source = np.linspace(-357.75, 373.5, 2048, dtype=np.float32)
+        x = torch.nn.Parameter(torch.tensor(source, device=device))
+        with torch.autocast(_region(device), dtype=(
+                torch.bfloat16 if device == "cpu" else torch.float16)):
+            value = x.float()
+            variance = value.pow(2).mean(-1, keepdim=True)
+            inverse = torch.rsqrt(variance + 1e-6)
+            output = value * inverse
+
+        expected = source / np.sqrt(np.mean(source * source) + 1e-6)
+        self.assertEqual(str(variance.dtype), "torch.float32")
+        self.assertEqual(str(inverse.dtype), "torch.float32")
+        self.assertEqual(str(output.dtype), "torch.float32")
+        self.assertTrue(np.isfinite(variance.numpy()).all())
+        self.assertTrue(np.isfinite(inverse.numpy()).all())
+        np.testing.assert_allclose(output.numpy(), expected, rtol=1e-5, atol=1e-5)
+        output.sum().backward()
+        self.assertTrue(np.isfinite(x.grad.numpy()).all())
+
+    @_no_fallbacks
     def test_all_fp32_matmul_really_uses_bfloat16_in_forward_and_backward(self, device):
         x = torch.nn.Parameter(torch.full((2, 2), 1e5, device=device))
         weight = torch.nn.Parameter(torch.eye(2, device=device))
