@@ -5,6 +5,7 @@
 // file 'LICENSE.txt', which is part of this source code package.
 // ***************************************************************
 #pragma once
+#include <cstdint>
 #include <mutex>
 #include <atomic>
 #include <thread>
@@ -27,6 +28,32 @@ EXTERN_LIB uint8 node_order;
 // Non-zero while lived_nodes is being maintained in a build without
 // NODE_MEMCHECK; set by check_graph's setter (graph.cc).
 EXTERN_LIB int node_track_lived;
+
+// Bounded, opt-in diagnostic for an Op whose final output edge is erased.
+// The record is copied while the edge is live so failure reporting never
+// dereferences a possibly reclaimed Node.
+struct OutputEraseAudit {
+    uint64 event_sequence = 0;
+    uintptr_t op_addr = 0;
+    int64 op_id = -1;
+    uintptr_t removed_node_addr = 0;
+    int64 removed_node_id = -1;
+    int edge_index = -1;
+    int output_count_before = 0;
+    // 1: erase_output(), 2: Node::free() clears its output vector directly.
+    int origin = 0;
+    int64 batch_stamp = -1;
+    int64 tflag = -1;
+    uint64 time_ns = 0;
+    size_t thread_id_hash = 0;
+};
+struct OutputEraseAuditStats {
+    uint64 recorded = 0;
+    uint64 overwritten = 0;
+    uint64 batch_stamp_mismatches = 0;
+};
+EXTERN_LIB vector<OutputEraseAudit> recent_output_erase_audits_for(uintptr_t op_addr);
+EXTERN_LIB OutputEraseAuditStats output_erase_audit_stats();
 
 inline static Node* get_node(int64 id) 
 { return  lived_nodes_id.count(id) ? lived_nodes_id[id] : nullptr; }

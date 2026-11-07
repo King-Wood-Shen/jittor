@@ -4,6 +4,8 @@
 // file 'LICENSE.txt', which is part of this source code package.
 // ***************************************************************
 #include <algorithm>
+#include <atomic>
+#include <cstdlib>
 #include <functional>
 #include <thread>
 #include "core/exec_plan.h"
@@ -13,6 +15,8 @@
 #include "core/fuser.h"
 
 namespace jittor {
+
+static std::atomic<uint64> next_exec_plan_diagnostic_generation{1};
 
 // Defined by the executor, read here: the planner is the only user.
 DECLARE_FLAG(int, gopt_disable);
@@ -30,6 +34,8 @@ static inline bool has_gopt(Node* node) {
 }
 
 void ExecPlan::clear() {
+    diagnostic_generation = 0;
+    diagnostic_builder_thread_hash = 0;
     backend = BackendId::Cpu;
     epoch.reset();
     stamp = 0;
@@ -41,6 +47,7 @@ void ExecPlan::clear() {
     op_inputs_begin.clear();
     var_producer.clear();
     producer_edge_audit.clear();
+    op_enqueue_audit.clear();
     batch_hold_per_var = 0;
     batch_hold = nullptr;
     // Kept as vectors: `schedule_hold_release` resizes this to the batch's
@@ -67,7 +74,9 @@ void mark_failed_batch(const ExecPlan& plan) {
         if (!v->is_finished()) v->set_flag(VarFlags::_execution_failed);
 }
 
-void build_exec_plan(vector<Var*>& vars, bool weak_sync, ExecPlan& plan) {
+void build_exec_plan(vector<Var*>& vars, bool weak_sync, ExecPlan& plan,
+                     vector<VarPtr>& batch_hold,
+                     vector<VarPtr>& planning_hold) {
     plan.clear();
     auto& scratch = plan.scratch;
     plan.backend = execution_target_backend();
@@ -80,71 +89,140 @@ void build_exec_plan(vector<Var*>& vars, bool weak_sync, ExecPlan& plan) {
     int start_var_num = 0;
     auto& batch_epoch = plan.epoch;
     while (1) {
+        plan.diagnostic_generation = next_exec_plan_diagnostic_generation.fetch_add(
+            1, std::memory_order_relaxed);
+        plan.diagnostic_builder_thread_hash = std::hash<std::thread::id>{}(
+            std::this_thread::get_id());
         op_num = 0;
         start_var_num = 0;
         bfs_q.clear();
         plan.producer_edge_audit.clear();
-        // get all nodes need to be executed
+        plan.op_enqueue_audit.clear();
         int need_opt = 0;
-        batch_epoch.reset(new TraversalEpoch("Executor::run_sync"));
-        int64 max_id = 0;
-        for (Var* v : vars)
-            if (!v->is_finished() && !batch_epoch->marked(v)) {
-                batch_epoch->mark(v);
-                start_var_num++;
-                bfs_q.push_back(v);
-                max_id = std::max(max_id, v->id);
-            }
-        for (int i=0; i<bfs_q.size(); i++) {
-            // The walk is a chain of cache misses on nodes spread across the
-            // heap. The queue says which node comes a few steps from now, so
-            // start its load while this one is being looked at.
-            if (i + 8 < (int)bfs_q.size()) __builtin_prefetch(bfs_q[i + 8]);
-            auto node = bfs_q[i];
-            op_num += !node->is_var();
-            if (node->is_var()) {
-                ProducerEdgeAudit audit;
-                audit.var = node->var();
-                audit.thread_id_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
-                if (!node->_inputs.empty()) {
-                    auto input = node->_inputs.front();
-                    auto output_edge = input.reverse();
-                    audit.producer = output_edge.node && !output_edge.node->is_var()
-                        ? output_edge.node->op() : nullptr;
-                    audit.slot = output_edge.index;
-                    if (audit.producer && audit.slot >= 0
-                            && audit.slot < (int)output_edge.node->_outputs.size())
-                        audit.producer_has_var =
-                            output_edge.node->_outputs[audit.slot].node == node;
+        batch_epoch.reset();
+        batch_hold.clear();
+        planning_hold.clear();
+        {
+            // `count_fuse` and the later snapshot consume raw Op pointers.
+            // Serialize only the graph walk and acquire a hold for each
+            // discovered Var before allowing Node::free() to run again. The
+            // graph mutex is released before optimization and fusion.
+            std::lock_guard<GraphMutationMutex> graph_guard(graph_mutation_mutex());
+            batch_epoch.reset(new TraversalEpoch("Executor::run_sync"));
+            int64 max_id = 0;
+            for (Var* v : vars)
+                if (!v->is_finished() && !batch_epoch->marked(v)) {
+                    batch_epoch->mark(v);
+                    batch_hold.emplace_back(v);
+                    start_var_num++;
+                    bfs_q.push_back(v);
+                    max_id = std::max(max_id, v->id);
                 }
-                plan.producer_edge_audit.push_back(audit);
-            }
-            // Tapes groups autograd edges; execute's returned tensor path
-            // supplies its forward data. These inputs must remain lazy until
-            // a real data reader (or backward) requests their providers.
-            if (node->is_var() || !node->op()->flag(OpFlags::_no_input_storage))
-                for (auto i : node->_inputs)
-                    if (!batch_epoch->marked(i.node) && !i.node->is_finished()) {
-                        batch_epoch->mark(i.node);
-                        need_opt += has_gopt(i.node);
-                        bfs_q.push_back(i.node);
+            for (int i=0; i<bfs_q.size(); i++) {
+                // The walk is a chain of cache misses on nodes spread across
+                // the heap. The queue says which node comes a few steps from
+                // now, so start its load while this one is being looked at.
+                if (i + 8 < (int)bfs_q.size()) __builtin_prefetch(bfs_q[i + 8]);
+                auto node = bfs_q[i];
+                op_num += !node->is_var();
+                if (node->is_var()) {
+                    ProducerEdgeAudit audit;
+                    audit.plan_generation = plan.diagnostic_generation;
+                    audit.event_sequence = plan.producer_edge_audit.size()
+                        + plan.op_enqueue_audit.size() + 1;
+                    audit.var = node->var();
+                    audit.thread_id_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
+                    if (!node->_inputs.empty()) {
+                        auto input = node->_inputs.front();
+                        auto output_edge = input.reverse();
+                        audit.producer = output_edge.node && !output_edge.node->is_var()
+                            ? output_edge.node->op() : nullptr;
+                        audit.slot = output_edge.index;
+                        if (audit.producer && audit.slot >= 0
+                                && audit.slot < (int)output_edge.node->_outputs.size())
+                            audit.producer_has_var =
+                                output_edge.node->_outputs[audit.slot].node == node;
                     }
-            // this var has been fetched
-            if (weak_sync || node->flags.get(NodeFlags::_fetch)) {
-                for (auto& n : node->_outputs) {
-                    // if not in queue and is fetch op
-                    if (!batch_epoch->marked(n.node) &&
-                        n.node->liveness.pending.active() &&
-                        !n.node->is_finished() &&
-                        (n.node->id <= max_id ||
-                            n.node->flags.get(NodeFlags::_fetch))) {
-                        batch_epoch->mark(n.node);
-                        need_opt += has_gopt(n.node);
-                        bfs_q.push_back(n.node);
+                    plan.producer_edge_audit.push_back(audit);
+                }
+                // Tapes groups autograd edges; execute's returned tensor path
+                // supplies its forward data. These inputs must remain lazy until
+                // a real data reader (or backward) requests their providers.
+                if (node->is_var() || !node->op()->flag(OpFlags::_no_input_storage))
+                    for (auto i : node->_inputs)
+                        if (!batch_epoch->marked(i.node) && !i.node->is_finished()) {
+                            batch_epoch->mark(i.node);
+                            if (i.node->is_var()) batch_hold.emplace_back(i.node->var());
+                            need_opt += has_gopt(i.node);
+                            bfs_q.push_back(i.node);
+                            // A Var's `_inputs` points to its producer Op. Record
+                            // this first enqueue while both ends of the edge are
+                            // still live; its output Var is already in batch_hold.
+                            if (node->is_var() && !i.node->is_var()) {
+                                OpEnqueueAudit audit;
+                                audit.plan_generation = plan.diagnostic_generation;
+                                audit.event_sequence = plan.producer_edge_audit.size()
+                                    + plan.op_enqueue_audit.size() + 1;
+                                audit.op = i.node->op();
+                                audit.source = node;
+                                audit.source_id = node->id;
+                                audit.op_id = i.node->id;
+                                audit.edge_index = i.back_index;
+                                audit.path = 1;
+                                audit.thread_id_hash = std::hash<std::thread::id>{}(
+                                    std::this_thread::get_id());
+                                plan.op_enqueue_audit.push_back(audit);
+                            }
+                        }
+                // this var has been fetched
+                if (weak_sync || node->flags.get(NodeFlags::_fetch)) {
+                    for (auto& n : node->_outputs) {
+                        // if not in queue and is fetch op
+                        if (!batch_epoch->marked(n.node) &&
+                            n.node->liveness.pending.active() &&
+                            !n.node->is_finished() &&
+                            (n.node->id <= max_id ||
+                                n.node->flags.get(NodeFlags::_fetch))) {
+                            batch_epoch->mark(n.node);
+                            if (n.node->is_var()) batch_hold.emplace_back(n.node->var());
+                            need_opt += has_gopt(n.node);
+                            bfs_q.push_back(n.node);
+                            // Weak-sync can enqueue a consumer Op before one
+                            // of its output Vars enters this batch. Hold a
+                            // representative output through plan construction.
+                            if (!n.node->is_var()) {
+                                for (auto& out : n.node->_outputs)
+                                    if (out.node->is_var()) {
+                                        planning_hold.emplace_back(out.node->var());
+                                        break;
+                                    }
+                                OpEnqueueAudit audit;
+                                audit.plan_generation = plan.diagnostic_generation;
+                                audit.event_sequence = plan.producer_edge_audit.size()
+                                    + plan.op_enqueue_audit.size() + 1;
+                                audit.op = n.node->op();
+                                audit.source = node;
+                                audit.source_id = node->id;
+                                audit.op_id = n.node->id;
+                                audit.edge_index = n.index;
+                                audit.path = 2;
+                                audit.thread_id_hash = std::hash<std::thread::id>{}(
+                                    std::this_thread::get_id());
+                                plan.op_enqueue_audit.push_back(audit);
+                            }
+                        }
                     }
                 }
             }
         }
+        if (std::getenv("JT_TRACE_PLAN_LIFETIME"))
+            LOGw << "exec_plan_hold_acquired"
+                 << " generation=" << plan.diagnostic_generation
+                 << " bfs_nodes=" << bfs_q.size()
+                 << " batch_vars_held=" << batch_hold.size()
+                 << " weak_op_anchors_held=" << planning_hold.size();
+        if (std::getenv("JT_TEST_PLAN_HOLD_THROW_AFTER_BFS"))
+            throw std::runtime_error("injected plan-hold unwind check");
         if (!need_opt || gopt_disable) break;
         for (Node* n : bfs_q) {
             if (has_gopt(n)) {
@@ -199,6 +277,18 @@ void build_exec_plan(vector<Var*>& vars, bool weak_sync, ExecPlan& plan) {
     int var_num = all_vars.size();
     plan.op_num = op_num;
     plan.start_var_num = start_var_num;
+    if (plan.stamp == 320 && std::getenv("JT_TRACE_EXEC_PLAN_EDGES")) {
+        LOGw << "exec_plan_build_snapshot"
+             << " stamp=" << plan.stamp
+             << " plan_addr=" << (const void*)&plan
+             << " plan_generation=" << plan.diagnostic_generation
+             << " builder_thread_hash=" << plan.diagnostic_builder_thread_hash
+             << " ops=" << plan.ops.size()
+             << " vars=" << plan.all_vars.size()
+             << " op_outputs=" << plan.op_outputs.size()
+             << " producer_audits=" << plan.producer_edge_audit.size()
+             << " enqueue_audits=" << plan.op_enqueue_audit.size();
+    }
 
     // father: father of union-find set
     vector<int>& father = scratch.father;
@@ -608,6 +698,12 @@ void build_exec_plan(vector<Var*>& vars, bool weak_sync, ExecPlan& plan) {
             range[rid] = fuse_ops.size();
         }
     }
+}
+
+void build_exec_plan(vector<Var*>& vars, bool weak_sync, ExecPlan& plan) {
+    vector<VarPtr> batch_hold;
+    vector<VarPtr> planning_hold;
+    build_exec_plan(vars, weak_sync, plan, batch_hold, planning_hold);
 }
 
 } // jittor
