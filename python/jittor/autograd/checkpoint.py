@@ -107,7 +107,11 @@ class _Rematerialize(Function):
                 indices = [i for i, enabled in enumerate(self.needs_grad) if enabled]
                 # Missing (unused) captures are ordinary zero derivatives, not
                 # parameters to accumulate into as a side effect of this VJP.
-                computed = jt.core.grad_optional(loss, [leaves[i] for i in indices], True)
+                # AMP applies to the replayed forward, not reverse operators
+                # built for its VJP. Preserve replay autocast and disable Jittor
+                # AMP flags only for grad_optional's graph construction.
+                with jt.flag_scope(amp_reg=0, auto_mixed_precision_level=0):
+                    computed = jt.core.grad_optional(loss, [leaves[i] for i in indices], False)
                 result = [None] * len(leaves)
                 for index, gradient in zip(indices, computed):
                     if gradient is not None:

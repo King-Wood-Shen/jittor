@@ -2,6 +2,7 @@
 
 import functools
 import gc
+import inspect
 import os
 import weakref
 
@@ -244,6 +245,41 @@ def test_autocast_dtype_and_gradients_replay(native_device):
         result = checkpoint(fn, x)
     result.float().sum().backward()
     assert calls == [(True, "torch.bfloat16"), (True, "torch.bfloat16")]
+    np.testing.assert_allclose(snapshot(x.grad), np.full((2, 4), 3), rtol=0, atol=0)
+    np.testing.assert_allclose(snapshot(weight.grad), np.full((4, 3), 2), rtol=0, atol=0)
+
+
+def test_reentrant_vjp_disables_amp_register_while_preserving_replay_amp(native_device, monkeypatch):
+    if native_device != "cuda":
+        pytest.skip("checkpoint AMP VJP contract")
+    observed_forward_amp = []
+    observed_vjp_amp = []
+    observed_checkpoint_retain_graph = []
+    original = jt.core.grad_optional
+
+    def record_grad_optional(*args, **kwargs):
+        observed_vjp_amp.append((int(jt.flags.amp_reg), int(jt.flags.auto_mixed_precision_level)))
+        caller = inspect.currentframe().f_back
+        if caller.f_code.co_filename.endswith("/autograd/checkpoint.py"):
+            observed_checkpoint_retain_graph.append(args[2] if len(args) > 2 else kwargs.get("retain_graph"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(jt.core, "grad_optional", record_grad_optional)
+    x = torch.ones((2, 4), device=native_device, requires_grad=True)
+    weight = torch.ones((4, 3), device=native_device, requires_grad=True)
+
+    def fn(value):
+        out = value @ weight
+        observed_forward_amp.append((torch.is_autocast_enabled("cuda"), str(out.dtype)))
+        return out
+
+    with torch.autocast("cuda", dtype=torch.float16):
+        result = checkpoint(fn, x)
+    result.float().sum().backward()
+
+    assert observed_forward_amp == [(True, "torch.float16")] * 2
+    assert observed_vjp_amp and set(observed_vjp_amp) == {(0, 0)}
+    assert observed_checkpoint_retain_graph == [False]
     np.testing.assert_allclose(snapshot(x.grad), np.full((2, 4), 3), rtol=0, atol=0)
     np.testing.assert_allclose(snapshot(weight.grad), np.full((4, 3), 2), rtol=0, atol=0)
 
