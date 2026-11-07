@@ -92,6 +92,16 @@ pair<Op*, int> FusedOp::snapshot_producer(Var* v) const {
 }
 
 void FusedOp::update_ops() {
+    if (batch_stamp_wanted == 320 && std::getenv("JT_TRACE_EXEC_PLAN_EDGES")) {
+        LOGw << "exec_plan_update_ops_entry"
+             << " stamp=" << batch_stamp_wanted
+             << " plan_addr=" << (const void*)batch_plan
+             << " plan_generation=" << (batch_plan ? batch_plan->diagnostic_generation : 0)
+             << " plan_ops=" << (batch_plan ? batch_plan->ops.size() : 0)
+             << " producer_audits=" << (batch_plan ? batch_plan->producer_edge_audit.size() : 0)
+             << " enqueue_audits=" << (batch_plan ? batch_plan->op_enqueue_audit.size() : 0)
+             << " fused_ops=" << ops.size();
+    }
     if (!ops.empty()) float32_precision = ops.back()->float32_precision;
     if (!ops.empty()) launch_origin = ops.back()->launch_origin;
     loop_options_merged.clear();
@@ -162,9 +172,18 @@ void FusedOp::update_ops() {
         std::ostringstream os;
         os << "fused segment with no in-memory output: ops=" << ops.size()
            << " batch_stamp_wanted=" << batch_stamp_wanted
+           << " plan_addr=" << (const void*)batch_plan
+           << " plan_generation=" << (batch_plan ? batch_plan->diagnostic_generation : 0)
+           << " plan_ops=" << (batch_plan ? batch_plan->ops.size() : 0)
+           << " producer_audits=" << (batch_plan ? batch_plan->producer_edge_audit.size() : 0)
+           << " enqueue_audits=" << (batch_plan ? batch_plan->op_enqueue_audit.size() : 0)
            << " batch_var_fused=" << (batch_var_fused ? "set" : "null")
            << " stamp_count=" << tstate.stamp_count()
            << " active_epochs=" << tstate.active_epochs();
+        auto erase_stats = output_erase_audit_stats();
+        os << "\n  output_erase_audit_stats recorded=" << erase_stats.recorded
+           << " overwritten=" << erase_stats.overwritten
+           << " batch_stamp_mismatches=" << erase_stats.batch_stamp_mismatches;
         // Do not inspect the Op objects on this failure path. The original
         // report itself raced with node reclamation and crashed in op->name(),
         // hiding the invariant failure. Use only the plan's pointer snapshots
@@ -205,7 +224,9 @@ void FusedOp::update_ops() {
                             break;
                         }
                     os << "\n     producer_edge_audit stage=bfs_var_edge"
-                       " var_addr=" << (void*)audit.var
+                       << " plan_generation=" << audit.plan_generation
+                       << " event_sequence=" << audit.event_sequence
+                       << " var_addr=" << (void*)audit.var
                        << " producer_addr=" << (void*)audit.producer
                        << " slot=" << audit.slot
                        << " bfs_edge_present=" << audit.producer_has_var
@@ -213,6 +234,36 @@ void FusedOp::update_ops() {
                        << " bfs_thread_hash=" << audit.thread_id_hash
                        << " update_ops_thread_hash="
                        << std::hash<std::thread::id>{}(std::this_thread::get_id());
+                }
+                for (const auto& audit : batch_plan->op_enqueue_audit) {
+                    if (audit.op != ops[local]
+                            || audit.plan_generation != batch_plan->diagnostic_generation) continue;
+                    os << "\n     op_enqueue_audit path="
+                       << (audit.path == 1 ? "var_input_producer" : "fetched_var_output_consumer")
+                       << " plan_generation=" << audit.plan_generation
+                       << " event_sequence=" << audit.event_sequence
+                       << " source_addr=" << (void*)audit.source
+                       << " op_addr=" << (void*)audit.op
+                       << " source_id=" << audit.source_id
+                       << " op_id=" << audit.op_id
+                       << " edge_index=" << audit.edge_index
+                       << " enqueue_thread_hash=" << audit.thread_id_hash;
+                }
+                for (const auto& audit : recent_output_erase_audits_for(
+                         (uintptr_t)ops[local])) {
+                    if (audit.op_id != ops[local]->id) continue;
+                    os << "\n     output_erase_audit event_sequence=" << audit.event_sequence
+                       << " op_addr=" << (void*)audit.op_addr
+                       << " op_id=" << audit.op_id
+                       << " origin=" << (audit.origin == 1 ? "erase_output" : "Node::free_clear")
+                       << " removed_node_addr=" << (void*)audit.removed_node_addr
+                       << " removed_node_id=" << audit.removed_node_id
+                       << " edge_index=" << audit.edge_index
+                       << " output_count_before=" << audit.output_count_before
+                       << " batch_stamp=" << audit.batch_stamp
+                       << " tflag=" << audit.tflag
+                       << " time_ns=" << audit.time_ns
+                       << " thread_hash=" << audit.thread_id_hash;
                 }
             }
         } else {

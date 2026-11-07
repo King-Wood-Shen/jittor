@@ -9,16 +9,82 @@
 #include "core/op.h"
 #include "core/var.h"
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cstdlib>
 #include <functional>
 
 namespace jittor {
+
+static std::atomic<uint64> output_erase_batch_stamp_mismatches{0};
 
 // TEMP DIAGNOSTIC: see Node::erase_output. Cached because the erase path runs
 // for every edge of every node the liveness drain frees.
 static bool h3_fuse_dump_on() {
     static const bool on = getenv("H3_FUSE_DUMP") != nullptr;
     return on;
+}
+
+static bool exec_plan_edge_trace_on() {
+    static const bool on = getenv("JT_TRACE_EXEC_PLAN_EDGES") != nullptr;
+    return on;
+}
+
+static bool exec_plan_edge_trace_batch_matches(int64 batch_stamp) {
+    static const int64 target = []() -> int64 {
+        const char* value = getenv("JT_TRACE_EXEC_PLAN_BATCH_STAMP");
+        if (!value || !*value) return -1;
+        char* end = nullptr;
+        long long parsed = strtoll(value, &end, 10);
+        return end != value && *end == '\0' ? (int64)parsed : -1;
+    }();
+    bool matches = target < 0 || batch_stamp == target;
+    if (!matches)
+        output_erase_batch_stamp_mismatches.fetch_add(1, std::memory_order_relaxed);
+    return matches;
+}
+
+namespace {
+constexpr size_t output_erase_audit_capacity = 256;
+std::array<OutputEraseAudit, output_erase_audit_capacity> output_erase_audits;
+std::mutex output_erase_audits_mutex;
+uint64 output_erase_audit_count = 0;
+std::atomic<uint64> output_erase_audit_overwrites{0};
+
+void record_output_erase_audit(OutputEraseAudit event) {
+    std::lock_guard<std::mutex> guard(output_erase_audits_mutex);
+    event.event_sequence = output_erase_audit_count + 1;
+    if (output_erase_audit_count >= output_erase_audit_capacity)
+        output_erase_audit_overwrites.fetch_add(1, std::memory_order_relaxed);
+    output_erase_audits[output_erase_audit_count % output_erase_audit_capacity] = event;
+    ++output_erase_audit_count;
+}
+} // namespace
+
+vector<OutputEraseAudit> recent_output_erase_audits_for(uintptr_t op_addr) {
+    vector<OutputEraseAudit> result;
+    if (!exec_plan_edge_trace_on()) return result;
+    std::lock_guard<std::mutex> guard(output_erase_audits_mutex);
+    uint64 count = std::min<uint64>(output_erase_audit_count, output_erase_audit_capacity);
+    uint64 begin = output_erase_audit_count - count;
+    result.reserve(count);
+    for (uint64 seq = begin; seq < output_erase_audit_count; ++seq) {
+        const auto& event = output_erase_audits[seq % output_erase_audit_capacity];
+        if (event.op_addr == op_addr) result.push_back(event);
+    }
+    return result;
+}
+
+OutputEraseAuditStats output_erase_audit_stats() {
+    OutputEraseAuditStats stats;
+    {
+        std::lock_guard<std::mutex> guard(output_erase_audits_mutex);
+        stats.recorded = output_erase_audit_count;
+    }
+    stats.overwritten = output_erase_audit_overwrites.load(std::memory_order_relaxed);
+    stats.batch_stamp_mismatches = output_erase_batch_stamp_mismatches.load(
+        std::memory_order_relaxed);
+    return stats;
 }
 
 int free_buffer_depth = 0;
@@ -297,8 +363,10 @@ void Node::free() {
     // ("backward liveness release without a matching owner", node.h:279).
     // Measured: the early return removed the `outputs().size()` assert over 12
     // loader-race runs and replaced it with that underflow in 3 of them. The
-    // fix has to keep the planning thread and this one from overlapping at all
-    // -- `graph_mutation_mutex()` -- not keep this node alive.
+    // planner now takes `graph_mutation_mutex()` only while it snapshots the
+    // reachable graph and acquires Var holds; those holds protect its raw Op
+    // pointers after the lock is released. Do not extend the lock across
+    // fusion/compile/execution, and do not skip this liveness release.
     flags.set(NodeFlags::_queued_for_free);
     free_buffer().push_back(this);
     for (auto in : _inputs) {
@@ -319,6 +387,31 @@ void Node::free() {
         // an output var that nothing needs backward has just lost its only
         // producer, so it can go with us
         if (out.node->is_var() && !out.node->liveness.backward.active()) out.node->free();
+    }
+    // `free()` removes the op's own output list with one vector clear; it does
+    // not call `erase_output()` on this node. Record those exact edges before
+    // clearing so a later empty-output invariant can distinguish this path
+    // from a reverse-edge erase performed by another node.
+    if (exec_plan_edge_trace_on() && !is_var() && !_outputs.empty()
+            && exec_plan_edge_trace_batch_matches(batch_stamp)) {
+        int old_output_count = _outputs.size();
+        for (uint i = 0; i < _outputs.size(); ++i) {
+            Node* removed_node = _outputs[i].node;
+            OutputEraseAudit event;
+            event.op_addr = (uintptr_t)this;
+            event.op_id = id;
+            event.removed_node_addr = (uintptr_t)removed_node;
+            event.removed_node_id = removed_node ? removed_node->id : -1;
+            event.edge_index = i;
+            event.output_count_before = old_output_count;
+            event.origin = 2;
+            event.batch_stamp = batch_stamp;
+            event.tflag = tflag;
+            event.time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            event.thread_id_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
+            record_output_erase_audit(event);
+        }
     }
     _outputs.clear();
     if (is_var()) free_var((Var*)this);
@@ -599,9 +692,31 @@ void Node::erase_input(uint index) {
 
 void Node::erase_output(uint index) {
     ASSERT(index < _outputs.size());
+    Node* removed_node = _outputs[index].node;
+    int old_output_count = _outputs.size();
     _outputs.erase(_outputs.begin() + index);
     for (uint i = index; i < _outputs.size(); ++i)
         _outputs[i].reverse().back_index = i;
+    // Keep a small in-memory trace only when explicitly enabled. Logging each
+    // erase changes the race window; this stores only the rare transition to
+    // zero outputs, and prints matching events only if the invariant fails.
+    if (exec_plan_edge_trace_on() && !is_var() && _outputs.empty()
+            && exec_plan_edge_trace_batch_matches(batch_stamp)) {
+        OutputEraseAudit event;
+        event.op_addr = (uintptr_t)this;
+        event.op_id = id;
+        event.removed_node_addr = (uintptr_t)removed_node;
+        event.removed_node_id = removed_node ? removed_node->id : -1;
+        event.edge_index = index;
+        event.output_count_before = old_output_count;
+        event.origin = 1;
+        event.batch_stamp = batch_stamp;
+        event.tflag = tflag;
+        event.time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        event.thread_id_hash = std::hash<std::thread::id>{}(std::this_thread::get_id());
+        record_output_erase_audit(event);
+    }
     // TEMP DIAGNOSTIC (H3_FUSE_DUMP): an Op's `_outputs` is the list of Vars it
     // produces, and FusedOp::update_ops() classifies a fused segment by walking
     // exactly that list. Erasing the last entry leaves the op with nothing to

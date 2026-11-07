@@ -38,10 +38,30 @@ struct PlanScratch {
 // was already absent during collection or disappeared while the plan was
 // being assembled.
 struct ProducerEdgeAudit {
+    uint64 plan_generation = 0;
+    uint64 event_sequence = 0;
     Var* var = nullptr;
     Op* producer = nullptr;
     int slot = -1;
     bool producer_has_var = false;
+    size_t thread_id_hash = 0;
+};
+
+// A failure-path record of how an Op first entered the BFS. Producer-edge
+// audits only explain Var -> producer discovery; weak-sync/fetch can also
+// enqueue a consumer Op by walking a Var's reverse `_outputs` edge. Keep the
+// enqueue relation and scalar identities while the edge is live, then compare
+// pointers only if FusedOp later reports an empty output snapshot.
+struct OpEnqueueAudit {
+    uint64 plan_generation = 0;
+    uint64 event_sequence = 0;
+    Op* op = nullptr;
+    Node* source = nullptr;
+    int64 source_id = -1;
+    int64 op_id = -1;
+    int edge_index = -1;
+    // 1: Var::_inputs -> producer Op; 2: fetched Var::_outputs -> consumer Op.
+    int path = 0;
     size_t thread_id_hash = 0;
 };
 
@@ -56,6 +76,10 @@ struct ProducerEdgeAudit {
 // Runner's job. That split is what lets `run_sync` be read as two halves and
 // is the precondition for reusing a plan across steps.
 struct ExecPlan {
+    // Diagnostic identity for distinguishing reused plan storage from a
+    // later execution that happens to use the same addresses.
+    uint64 diagnostic_generation = 0;
+    size_t diagnostic_builder_thread_hash = 0;
     BackendId backend = BackendId::Cpu;
     // The batch's claim on `Node::tflag`, and the stamp every index below is
     // relative to: `Node::batch_index_at(stamp)` is only answerable while this
@@ -79,8 +103,10 @@ struct ExecPlan {
     // batch had numbered could be emptied underneath the planner -- `outputs=0`
     // and the "no in-memory output" assert, or, worse, incomplete edges and a
     // kernel reading the wrong vars. `build_exec_plan` walks these same lists
-    // once; recording what it saw costs one vector per op and makes the batch
-    // independent of any concurrent `free()`, with no lock and no deferral.
+    // once; recording what it saw costs one vector per op. Collection takes
+    // the graph-mutation lock only while walking these lists and acquiring
+    // the batch's initial Var holds; later planner phases use those holds
+    // without the lock or deferral.
     //
     // Indexed by an op's batch index, flattened: op `i`'s outputs are
     // `op_outputs[op_outputs_begin[i] .. op_outputs_begin[i+1])`. One vector
@@ -101,6 +127,7 @@ struct ExecPlan {
     // the var, whose `_inputs` may have been cleared by now.
     vector<pair<Op*, int>> var_producer;
     vector<ProducerEdgeAudit> producer_edge_audit;
+    vector<OpEnqueueAudit> op_enqueue_audit;
     // Backward liveness `Executor::run_sync` contributes to every var above,
     // for the batch's duration -- one per var once the hold is taken, zero
     // before that and for a plan built by anything else. Phase 7 subtracts it
@@ -158,6 +185,11 @@ struct ExecPlan {
 // weak sync; `weak_sync` additionally lets the collection walk forward into
 // pending consumers of a collected node, not only backward into its inputs.
 // Leaves `plan.epoch` held; the caller releases it once the batch is compiled.
+void build_exec_plan(vector<Var*>& vars, bool weak_sync, ExecPlan& plan,
+                     vector<VarPtr>& batch_hold,
+                     vector<VarPtr>& planning_hold);
+// Planner-only callers (for example plan property tests) do not carry a batch
+// state beyond this call; use temporary holds for the duration of planning.
 void build_exec_plan(vector<Var*>& vars, bool weak_sync, ExecPlan& plan);
 
 // A batch that failed before running all of its ops leaves the rest pending.

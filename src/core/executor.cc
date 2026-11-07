@@ -9,8 +9,14 @@
 // ***************************************************************
 #include <mutex>
 #include <algorithm>
+#include <atomic>
+#include <cstdlib>
 #include <functional>
 #include <queue>
+#include <thread>
+#ifdef __linux__
+#include <execinfo.h>
+#endif
 #ifdef HAS_ACCELERATOR
 #include "core/event_queue.h"
 #endif
@@ -46,6 +52,8 @@
 #include "mem/mem_info.h"
 
 namespace jittor {
+
+static std::atomic<uint64> empty_run_sync_trace_sequence{0};
 
 EXTERN_LIB MemoryProfiler memory_profiler;
 DEFINE_FLAG(int, lazy_execution, 1, "Default enabled, if disable, use immediately eager execution rather than lazy execution, This flag makes error message and traceback information better. But this flag will raise memory consumption and lower the performance.");
@@ -460,6 +468,10 @@ static void schedule_hold_release(ExecPlan& plan) {
 struct BatchState {
     ExecPlan plan;
     vector<VarPtr> batch_hold;
+    // Weak-sync may enqueue a consumer Op before any of its outputs enter the
+    // plan's var table. Keep one representative output alive until the plan
+    // vars below have taken their execution holds.
+    vector<VarPtr> planning_hold;
     unique_ptr<FusedOp> fused_op;
     vector<Var*> vars;
 };
@@ -487,7 +499,19 @@ BatchStatePool& batch_state_pool() {
 void recycle_batch_state(BatchState* state) {
     state->fused_op.reset();
     state->vars.clear();
+    const size_t batch_vars_held = state->batch_hold.size();
+    const size_t weak_op_anchors_held = state->planning_hold.size();
+    // A failed plan build can still own an active traversal epoch. Drop it
+    // before the holds: releasing a final Var hold may run Node::free().
+    state->plan.epoch.reset();
+    state->planning_hold.clear();
     state->batch_hold.clear();
+    if (std::getenv("JT_TRACE_PLAN_LIFETIME"))
+        LOGw << "exec_plan_hold_release"
+             << " batch_vars_released=" << batch_vars_held
+             << " weak_op_anchors_released=" << weak_op_anchors_held
+             << " batch_vars_remaining=" << state->batch_hold.size()
+             << " weak_op_anchors_remaining=" << state->planning_hold.size();
     bool keep = state->plan.ops.capacity() <= BatchStatePool::pooled_ops_limit
         && state->plan.all_vars.capacity() <= 2 * BatchStatePool::pooled_ops_limit;
     if (keep) {
@@ -554,6 +578,33 @@ static bool may_run_async(const ExecPlan& plan) {
 }
 
 void Executor::run_sync(vector<Var*> vars, bool device_sync, bool weak_sync, bool may_defer) {
+    if (vars.empty() && std::getenv("JT_TRACE_EXEC_PLAN_EDGES")) {
+        const uint64 sequence = empty_run_sync_trace_sequence.fetch_add(
+            1, std::memory_order_relaxed) + 1;
+        LOGw << "exec_plan_empty_run_sync"
+             << " event_sequence=" << sequence
+             << " thread_hash=" << std::hash<std::thread::id>{}(
+                    std::this_thread::get_id())
+             << " device_sync=" << device_sync
+             << " weak_sync=" << weak_sync
+             << " may_defer=" << may_defer;
+#ifdef __linux__
+        void* frames[32];
+        int frame_count = backtrace(frames, 32);
+        for (int i = 0; i < frame_count; ++i)
+            LOGw << "exec_plan_empty_run_sync_frame sequence=" << sequence
+                 << " frame=" << i << " addr=" << frames[i];
+#endif
+    }
+    // `vars` is commonly assembled from VarHolder roots before entering here.
+    // The waits below can release the GIL; another Python thread may then
+    // rebind a holder and drop the last owner of one of these Vars before the
+    // planner takes its batch holds. Pin the caller's roots before either wait
+    // so the raw pointers remain Vars until `build_exec_plan` owns its batch.
+    vector<VarPtr> input_root_holds;
+    input_root_holds.reserve(vars.size());
+    for (Var* var : vars) input_root_holds.emplace_back(var);
+
     // The batch on the worker, if one is in flight, comes first: this one may
     // need what it produces, and only one runs at a time.
     async_exec_wait();
@@ -572,6 +623,10 @@ void Executor::run_sync(vector<Var*> vars, bool device_sync, bool weak_sync, boo
     if (weak_sync && !use_threading)
         top_weak_sync(vars);
     resolve_dynamic_inputs(*this, vars);
+    // Dynamic-input resolution can append roots. Keep those alive through the
+    // planner too; duplicate holds are harmless and are dropped at the handoff.
+    input_root_holds.reserve(input_root_holds.size() + vars.size());
+    for (Var* var : vars) input_root_holds.emplace_back(var);
     this->allocator = get_allocator();
     this->temp_allocator = get_allocator(true);
     // Each op allocates from and launches on the device its outputs live on;
@@ -584,7 +639,21 @@ void Executor::run_sync(vector<Var*> vars, bool device_sync, bool weak_sync, boo
     // == phases 2-5: graph -> execution plan ==
     auto state = acquire_batch_state();
     ExecPlan& plan = state->plan;
-    build_exec_plan(vars, weak_sync, plan);
+    vector<VarPtr>& batch_hold = state->batch_hold;
+    vector<VarPtr>& planning_hold = state->planning_hold;
+    try {
+        build_exec_plan(vars, weak_sync, plan, batch_hold, planning_hold);
+    } catch (...) {
+        if (std::getenv("JT_TRACE_PLAN_LIFETIME"))
+            LOGw << "exec_plan_hold_exception_unwind"
+                 << " generation=" << plan.diagnostic_generation
+                 << " batch_vars_held=" << batch_hold.size()
+                 << " weak_op_anchors_held=" << planning_hold.size();
+        throw;
+    }
+    // The planner now owns every unfinished root through `batch_hold` (and
+    // finished roots are no longer read), so release the temporary entry pins.
+    input_root_holds.clear();
     trace_batch.mark(stb_planned);
     // Hold the batch's vars for its duration -- and with them the ops that
     // produce them, since an op's liveness comes from its outputs, so an op
@@ -600,7 +669,8 @@ void Executor::run_sync(vector<Var*> vars, bool device_sync, bool weak_sync, boo
     // each, baseline is ~2 dumps in 6):
     //   no hold             : the "no in-memory output" assert in fused_op.cc
     //   keep the node alive : 3/12 runs die on a liveness underflow (node.h:279)
-    //   hold the graph lock : deadlock, killed at the timeout
+    //   hold the graph lock through planning/execution: deadlock, killed at
+    //       the timeout; this implementation locks only the graph snapshot
     //   edge snapshot only  : 0 dumps but 7/20 segfault in the execution-time
     //                         relay walk (`VarRelayManager::get_op_relay_info`)
     //   snapshot + this hold: 20/20 ok, 0 dumps, 0 segfaults, 0 underflows
@@ -608,9 +678,16 @@ void Executor::run_sync(vector<Var*> vars, bool device_sync, bool weak_sync, boo
     // use. The edge snapshot stays because a *live* var can still have its
     // edges released (`release_inputs`, which the shim uses to park tensors),
     // and the planner reads them.
-    vector<VarPtr>& batch_hold = state->batch_hold;
-    batch_hold.reserve(plan.all_vars.size());
-    for (Var* v : plan.all_vars) batch_hold.emplace_back(v);
+    ASSERT(batch_hold.size() == plan.all_vars.size());
+    for (size_t i = 0; i < plan.all_vars.size(); ++i)
+        ASSERT(batch_hold[i].ptr == plan.all_vars[i]);
+    if (std::getenv("JT_TRACE_PLAN_LIFETIME"))
+        LOGw << "exec_plan_hold_handoff"
+             << " generation=" << plan.diagnostic_generation
+             << " plan_vars=" << plan.all_vars.size()
+             << " batch_vars_held=" << batch_hold.size()
+             << " weak_op_anchors_held=" << planning_hold.size();
+    planning_hold.clear();
     // What phase 7 has to discount: this hold is bookkeeping, not a consumer.
     plan.batch_hold_per_var = 1;
     schedule_hold_release(plan);
