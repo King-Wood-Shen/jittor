@@ -330,11 +330,11 @@ torch::Tensor zeros_like_with_options(torch::Tensor x) {
 
         b = mod.view_as_bytes(torch.tensor([1.0], dtype=torch.float32))
         self.assertEqual(tuple(b.shape), (4,))
-        self.assertEqual(str(b.dtype), "uint8")
+        self.assertEqual(b.dtype, torch.uint8)
 
         z = mod.zeros_like_with_options(x)
         self.assertEqual(tuple(z.shape), (3,))
-        self.assertEqual(str(z.dtype), "float32")
+        self.assertEqual(z.dtype, torch.float32)
         self.assertEqual(float(z.sum().item()), 0.0)
 
 
