@@ -5,6 +5,7 @@ include MANIFEST.in
 include pyproject.toml
 include setup.py
 include shim/cpp_extension/include/ATen/ATen.h
+include shim/cpp_extension/include/ATen/Dispatch.h
 include shim/cpp_extension/include/ATen/cuda/CUDAContext.h
 include shim/cpp_extension/include/ATen/cuda/CUDAGeneratorImpl.h
 include shim/cpp_extension/include/ATen/cuda/CUDAUtils.h
