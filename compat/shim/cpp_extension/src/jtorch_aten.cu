@@ -569,6 +569,18 @@ static bool pyvar_flag(void* obj, const char* name) {
     Py_DECREF(attr);
     return ok == 1;
 }
+void* enter_tensor_frontend(void* python_tensor) {
+    // One argument owns inference for the call; other arguments must not stack
+    // policy restorations whose destruction order follows pybind's tuple.
+    PyObject* current = jittor::current_tensor_frontend_type();
+    bool native = current == reinterpret_cast<PyObject*>(&jittor::PyjtVarHolder.ht_type);
+    Py_DECREF(current);
+    if (!native) return nullptr;
+    return new jittor::PyTensorFrontendScope(reinterpret_cast<PyObject*>(python_tensor));
+}
+void leave_tensor_frontend(void* scope) noexcept {
+    delete static_cast<jittor::PyTensorFrontendScope*>(scope);
+}
 bool pyvar_is_ext_readonly_borrow(void* obj) {
     return pyvar_flag(obj, "_jittor_torch_ext_readonly_borrow");
 }

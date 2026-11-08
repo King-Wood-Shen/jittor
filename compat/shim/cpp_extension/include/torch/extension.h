@@ -174,6 +174,9 @@ struct TensorIndex {
 } // namespace indexing
 
 namespace detail {
+    // The opaque scope reuses the core's argument-inferred frontend guard.
+    void*    enter_tensor_frontend(void* python_tensor);
+    void     leave_tensor_frontend(void* scope) noexcept;
     void*    vh_device_ptr(jittor::VarHolder*);        // device ptr, no cpu-migrate
     int64_t  vh_ndim(jittor::VarHolder*);
     int64_t  vh_size(jittor::VarHolder*, int64_t d);
@@ -458,11 +461,15 @@ namespace pybind11 { namespace detail {
 template <> struct type_caster<jtorch::Tensor> {
     PYBIND11_TYPE_CASTER(jtorch::Tensor, _("Tensor"));
     object keepalive;
+    std::unique_ptr<void, void (*)(void*)> frontend_scope{
+        nullptr, &jtorch::detail::leave_tensor_frontend};
     bool readonly_arg = false;
     bool mutable_arg = false;
     bool load(handle src, bool) {
+        frontend_scope.reset();
         if (!src || src.is_none()) return false;
         if (!jtorch::detail::is_jittor_var(src.ptr())) return false;
+        frontend_scope.reset(jtorch::detail::enter_tensor_frontend(src.ptr()));
         readonly_arg = jtorch::detail::pyvar_is_ext_readonly_borrow(src.ptr());
         mutable_arg = readonly_arg ? false : jtorch::detail::pyvar_is_ext_mutable(src.ptr());
         value = readonly_arg ? jtorch::detail::tensor_from_pyvar_readonly(src.ptr())

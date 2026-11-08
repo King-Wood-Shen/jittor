@@ -4,6 +4,7 @@ import functools
 import numpy as np
 import pytest
 import torch
+import jittor as jt
 
 from jittor._runtime.fallback import forbid_backend_fallbacks
 
@@ -109,3 +110,17 @@ float host_half_conversion() {
     mod = load_inline('jittor_host_dispatch_half_probe', cpp_sources=source,
                       functions=['host_half_conversion'], verbose=False)
     assert mod.host_half_conversion() == 1.5
+
+
+def test_cpp_extension_preserves_parameter_result_type_and_restores_scope():
+    with forbid_backend_fallbacks():
+        parameter = torch.nn.Parameter(torch.ones(4, device='cuda'))
+        result = extension().copy_tensor(parameter)
+        assert type(result) is torch.Tensor
+        assert not isinstance(result, torch.nn.Parameter)
+        native = jt.ones(4)
+        assert type(native) is jt.Var
+        native_result = extension().copy_tensor(native)
+        assert type(native_result) is jt.Var
+        np.testing.assert_array_equal(result.cpu().numpy(), np.ones(4))
+        np.testing.assert_array_equal(native_result.numpy(), np.ones(4))
