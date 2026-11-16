@@ -1317,10 +1317,21 @@ def compile_single(head_file_name, src_file_name, src=None):
         f.write(code)
     return True
 
+def ordered_binding_headers(cache_path, jittor_path):
+    """Keep generated binding registration stable across directory layouts.
+
+    ``glob`` follows filesystem directory order.  On a fresh NFS cache this
+    can swap generated headers and change pyjt_all.cc (and its JIT key) even
+    when the header contents are identical.  Core headers retain precedence
+    over generated headers while each group gets a stable order.
+    """
+    headers1 = sorted(glob.glob(core_root(jittor_path)+"/**/*.h", recursive=True))
+    headers2 = sorted(glob.glob(cache_path+"/gen/**/*.h", recursive=True))
+    return headers1 + headers2
+
+
 def compile(cache_path, jittor_path):
-    headers1 = glob.glob(core_root(jittor_path)+"/**/*.h", recursive=True)
-    headers2 = glob.glob(cache_path+"/gen/**/*.h", recursive=True)
-    headers = headers1 + headers2
+    headers = ordered_binding_headers(cache_path, jittor_path)
     basenames = []
     pyjt_names = []
     for h in headers:

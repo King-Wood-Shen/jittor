@@ -23,6 +23,7 @@ in the first 16 characters was never seen.
 import importlib.util
 import os
 import unittest
+from unittest import mock
 
 
 REPO_ROOT = os.path.dirname(
@@ -52,6 +53,34 @@ def render(declaration, annotation="// @pyjt(f)\n"):
     """Generate the binding for one declaration and return the C++ text."""
     return generator().compile_src(
         annotation + declaration, "test.h", "test")
+
+
+class TestBindingHeaderOrder(unittest.TestCase):
+    def test_generated_headers_have_stable_order_across_glob_permutations(self):
+        module = generator()
+        core = ["/source/core/z.h", "/source/core/a.h"]
+        generated = ["/cache/gen/jit_tests.h", "/cache/gen/jit_op_maker.h",
+                     "/cache/gen/jit_flags.h"]
+
+        def order(core_order, generated_order):
+            with mock.patch.object(module, "core_root", return_value="/source/core"), \
+                    mock.patch.object(module.glob, "glob",
+                                      side_effect=[core_order, generated_order]):
+                return module.ordered_binding_headers("/cache", "/source")
+
+        expected = ["/source/core/a.h", "/source/core/z.h",
+                    "/cache/gen/jit_flags.h", "/cache/gen/jit_op_maker.h",
+                    "/cache/gen/jit_tests.h"]
+        self.assertEqual(order(core, generated), expected)
+        self.assertEqual(order(list(reversed(core)), list(reversed(generated))), expected)
+
+    def test_core_headers_keep_precedence_over_generated_headers(self):
+        module = generator()
+        with mock.patch.object(module, "core_root", return_value="/source/core"), \
+                mock.patch.object(module.glob, "glob", side_effect=[
+                    ["/source/core/z.h"], ["/cache/gen/a.h"]]):
+            self.assertEqual(module.ordered_binding_headers("/cache", "/source"),
+                             ["/source/core/z.h", "/cache/gen/a.h"])
 
 
 class TestSplitArgs(unittest.TestCase):
