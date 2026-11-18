@@ -92,6 +92,7 @@ _HEADER = r"""
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
+#include <cstdio>
 #include "core/executor.h"
 #include "mem/allocator.h"
 #include "runtime/float32_precision.h"
@@ -368,34 +369,75 @@ def _source(rows, cin, cout, dtype):
         int found = 0;
         cublasLtMatmulAlgoGetHeuristic(lt, op, la, lb, lc, lc, pref,
                                        {_CANDIDATES}, cand, &found);
-        cudaEvent_t beg, end;
-        cudaEventCreate(&beg); cudaEventCreate(&end);
-        float best = 1e30f;
+        // A wall-clock winner changes with process timing. For the same
+        // shape/weights, split-K 28 and 32 rounded logits differently. Keep
+        // the cuBLASLt capability probe, then select by algorithm config.
+        // This makes the result independent of candidate timing and order.
+        const cublasLtMatmulAlgoConfigAttributes_t attrs[7] = {{
+            CUBLASLT_ALGO_CONFIG_SPLITK_NUM, CUBLASLT_ALGO_CONFIG_ID,
+            CUBLASLT_ALGO_CONFIG_REDUCTION_SCHEME, CUBLASLT_ALGO_CONFIG_TILE_ID,
+            CUBLASLT_ALGO_CONFIG_STAGES_ID, CUBLASLT_ALGO_CONFIG_CTA_SWIZZLING,
+            CUBLASLT_ALGO_CONFIG_CUSTOM_OPTION
+        }};
+        int best_key[7] = {{}};
+        bool have_rank = false;
         for (int c = 0; c < found; c++) {{
             auto once = [&]() {{
-                // Explicit stream: jittor runs on `cudaStreamPerThread`, which
-                // does not synchronise with the legacy default stream.
                 return cublasLtMatmul(lt, op, &alpha, in1_p, la, in0_p, lb, &beta,
                                       out0_p, lc, out0_p, lc, &cand[c].algo,
                                       ws, wsize, cudaStreamPerThread);
             }};
             if (once() != CUBLAS_STATUS_SUCCESS) continue;
-            cudaDeviceSynchronize();
-            cudaEventRecord(beg, cudaStreamPerThread);
-            for (int r = 0; r < 3; r++) once();
-            cudaEventRecord(end, cudaStreamPerThread);
-            if (cudaEventSynchronize(end) != cudaSuccess) continue;
-            float ms = 0.0f;
-            cudaEventElapsedTime(&ms, beg, end);
-            if (ms > 0.0f && ms < best) {{
-                best = ms;
+            if (cudaDeviceSynchronize() != cudaSuccess) continue;
+            int key[7] = {{}};
+            bool attributes_ok = true;
+            for (int k = 0; k < 7; k++) {{
+                size_t got = 0;
+                if (cublasLtMatmulAlgoConfigGetAttribute(&cand[c].algo, attrs[k],
+                        &key[k], sizeof(key[k]), &got) != CUBLAS_STATUS_SUCCESS
+                        || got != sizeof(key[k])) {{
+                    attributes_ok = false;
+                    break;
+                }}
+            }}
+            if (!attributes_ok) continue;
+            bool better = !have_rank;
+            bool equal = have_rank;
+            if (have_rank) {{
+                for (int k = 0; k < 7; k++) {{
+                    if (key[k] != best_key[k]) {{
+                        better = key[k] < best_key[k];
+                        equal = false;
+                        break;
+                    }}
+                }}
+                if (equal && cand[c].workspaceSize < choice.workspace) better = true;
+            }}
+            if (better) {{
+                for (int k = 0; k < 7; k++) best_key[k] = key[k];
+                have_rank = true;
                 choice.algo = cand[c].algo;
                 choice.workspace = cand[c].workspaceSize;
                 choice.usable = true;
             }}
         }}
-        cudaEventDestroy(beg); cudaEventDestroy(end);
         cublasLtMatmulPreferenceDestroy(pref);
+        // Task-isolated diagnostic: observe the already selected algorithm.
+        // This runs after timing and never changes the choice or GEMM inputs.
+        int algo_id = -1, split_k = -1, reduction = -1;
+        size_t got = 0;
+        if (choice.usable) {{
+            cublasLtMatmulAlgoConfigGetAttribute(&choice.algo, CUBLASLT_ALGO_CONFIG_ID,
+                                                 &algo_id, sizeof(algo_id), &got);
+            cublasLtMatmulAlgoConfigGetAttribute(&choice.algo, CUBLASLT_ALGO_CONFIG_SPLITK_NUM,
+                                                 &split_k, sizeof(split_k), &got);
+            cublasLtMatmulAlgoConfigGetAttribute(&choice.algo, CUBLASLT_ALGO_CONFIG_REDUCTION_SCHEME,
+                                                 &reduction, sizeof(reduction), &got);
+        }}
+        fprintf(stderr, "JT_LT_CHOICE rows=%d cin=%d cout=%d tier=%d usable=%d id=%d splitk=%d reduction=%d workspace=%zu\\n",
+                rows, cin, cout, tier, (int)choice.usable, algo_id, split_k,
+                reduction, choice.workspace);
+        fflush(stderr);
     }}
 
     if (choice.usable) {{
