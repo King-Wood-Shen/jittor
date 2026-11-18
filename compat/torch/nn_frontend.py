@@ -51,16 +51,35 @@ def module_call(module, *args, **kwargs):
     return python_module_call(module, *args, **kwargs)
 
 
-def module_init(module, *args, **kwargs):
-    """The native ``Module`` initializer, republished on ``torch.nn.Module``.
+def module_init_tail(module, *args, **kwargs):
+    """Continue a frontend constructor past the native implementation base.
 
-    Torch subclasses reach it with ``super(nn.Linear, self).__init__()``. A
-    ``super`` lookup reads only each class's own dict along the instance MRO,
-    so this entry has to exist here: without it the lookup walked past
-    ``torch.nn.Module`` down to the adapted class's native layer and demanded
-    that layer's arguments (PEFT's VERA and BoFT adapters call it this way).
+    The native Module is an implementation detail in the Torch MRO. Explicit
+    ``super(torch.nn.Module, self).__init__`` must reach the user's mixin,
+    without invoking the native initializer again and resetting module state.
     """
-    type(module)._torch_native_module.__init__(module, *args, **kwargs)
+    native = type(module)._torch_native_module
+    super(native, module).__init__(*args, **kwargs)
+
+
+def module_init(module, *args, **kwargs):
+    """Initialize native state, with Torch's explicit cooperative opt-in.
+
+    Keep this entry on the public Module and adapted-layer bridge so that
+    ``super(nn.Linear, self).__init__()`` does not call native Linear's
+    shape-requiring constructor. Ordinary Module construction stops here;
+    only ``call_super_init`` forwards arguments to the user's MRO tail.
+    """
+    if module.call_super_init is False:
+        if kwargs:
+            raise TypeError("%s.__init__() got an unexpected keyword argument '%s'"
+                            % (type(module).__name__, next(iter(kwargs))))
+        if args:
+            raise TypeError("%s.__init__() takes 1 positional argument but %s were given"
+                            % (type(module).__name__, len(args) + 1))
+    type(module)._torch_native_module.__init__(module)
+    if module.call_super_init:
+        module_init_tail(module, *args, **kwargs)
 
 
 def python_module_call(module, *args, **kwargs):
@@ -195,8 +214,13 @@ class NNFrontendOwner:
         self.tensor_type = tensor_type
         self.native_module = backend.nn.Module
         self.Parameter = make_parameter_type(backend, tensor_type)
-        self.Module = type("Module", (self.native_module,), {
+        constructor_bridge = type("_ModuleConstructorBridge", (self.native_module,), {
             "__module__": "torch.nn", "__slots__": (),
+            "__init__": module_init_tail,
+        })
+        self.Module = type("Module", (constructor_bridge,), {
+            "__module__": "torch.nn", "__slots__": (),
+            "call_super_init": False,
             "_frontend_tensor_type": tensor_type, "_nn_frontend_owner": self,
             "_torch_native_module": self.native_module,
             "__setattr__": module_setattr, "__call__": module_call,

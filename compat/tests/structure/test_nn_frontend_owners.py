@@ -90,6 +90,46 @@ class TestNNFrontendOwners(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
+    def test_module_constructor_stops_at_native_base_by_default(self):
+        class Tail:
+            def __init__(self, token=None):
+                self.tail_token = token
+
+        class Adapter(self.owner.Module, Tail):
+            def __init__(self):
+                super().__init__()
+
+        instance = Adapter()
+        self.assertFalse(hasattr(instance, "tail_token"))
+        with self.assertRaises(TypeError):
+            self.frontend.module_init(instance, "unexpected")
+
+    def test_explicit_module_mro_tail_preserves_adapter_state(self):
+        class Tail:
+            def __init__(self, token):
+                self.tail_token = token
+
+        class CooperativeAdapter(self.owner.Module, Tail):
+            call_super_init = True
+
+            def __init__(self, token):
+                super().__init__(token)
+                self.adapter_state = "kept"
+
+        instance = CooperativeAdapter("forwarded")
+        self.assertEqual(instance.tail_token, "forwarded")
+        self.assertEqual(instance.adapter_state, "kept")
+
+        owner_module = self.owner.Module
+
+        class ExplicitAdapter(self.owner.Module, Tail):
+            def __init__(self):
+                super().__init__()
+                super(owner_module, self).__init__("explicit")
+
+        explicit = ExplicitAdapter()
+        self.assertEqual(explicit.tail_token, "explicit")
+
     def test_layer_initialization_preserves_native_types_and_parameter_aliases(self):
         class Layer(NativeModule):
             def __init__(self):
