@@ -73,6 +73,13 @@ also **raises directly** if `JITTOR_TORCH_INDEPENDENT` is set to a falsy value,
 because that value names the removed frontend. This variable does not need to be
 set today.
 
+To select a separate compatibility source tree from process startup, set the
+absolute `JITTOR_COMPAT_ROOT` environment variable to a Jittor Python root that
+contains `compat/__init__.py`. Before shim activation, Jittor puts this
+directory first on its package search path. This selects compatibility source
+only; it does not enable the shim or change the installed Jittor core path.
+Startup fails directly when the path is invalid.
+
 There is one ordering requirement: the environment variable makes `torch`
 importable, but **cannot put the module on `sys.path`**. So when `import torch`
 is the first import in the process, a deployed `torch` package is still required

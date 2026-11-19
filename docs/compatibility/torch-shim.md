@@ -63,6 +63,11 @@ import torch
 `JITTOR_TORCH_INDEPENDENT` 被设成假值时**直接抛错**，因为那个值点名的是已移除的前端。
 这个变量今天不需要设。
 
+需要在进程启动时选用独立的兼容源码树时，可以设置绝对路径环境变量
+`JITTOR_COMPAT_ROOT`，指向同时包含 `compat/__init__.py` 的 Jittor Python 根目录。
+Jittor 会在 shim 激活前把该目录放到自己的包搜索路径首位；这只选择 compat
+源码，不会开启 shim，也不会改变已安装的 Jittor 核心路径。路径无效时启动会直接失败。
+
 有一处顺序要求：环境变量能让 `torch` 可导入，但**不能把模块放上 `sys.path`**。
 所以 `import torch` 作为进程里第一个 import 时，仍然需要一份已部署的 `torch` 包
 （或把 `compat/shim/resources` 放进 PYTHONPATH）；先 `import jittor` 则不需要。
