@@ -55,6 +55,43 @@ class TestFlashAttnCompat(unittest.TestCase):
         for gradient in got_gradients:
             self.assertTrue(np.isfinite(gradient).all())
 
+    def test_dense_gqa_uses_query_head_groups(self):
+        import flash_attn
+
+        q_array = self.random.randn(1, 3, 4, 8).astype("float32")
+        k_array = self.random.randn(1, 3, 1, 8).astype("float32")
+        v_array = self.random.randn(1, 3, 1, 8).astype("float32")
+        with _native_jittor.flag_scope(use_cuda=1):
+            q, k, v = (self._tensor(value) for value in (q_array, k_array, v_array))
+            output = flash_attn.flash_attn_func(q, k, v)
+            self.assertTrue(output.is_cuda)
+            got = output.numpy()
+
+        expected = _sdpa_reference(
+            q_array, np.repeat(k_array, 4, axis=2), np.repeat(v_array, 4, axis=2))
+        np.testing.assert_allclose(got, expected, atol=2e-5, rtol=2e-5)
+
+    def test_varlen_gqa_uses_query_head_groups(self):
+        import flash_attn
+
+        q_array = self.random.randn(5, 4, 8).astype("float32")
+        k_array = self.random.randn(5, 1, 8).astype("float32")
+        v_array = self.random.randn(5, 1, 8).astype("float32")
+        with _native_jittor.flag_scope(use_cuda=1):
+            q, k, v = (self._tensor(value) for value in (q_array, k_array, v_array))
+            cu = self._tensor(np.array([0, 2, 5], dtype="int32"))
+            output = flash_attn.flash_attn_varlen_func(q, k, v, cu, cu, 3, 3)
+            self.assertTrue(output.is_cuda)
+            got = output.numpy()
+
+        repeated_k = np.repeat(k_array, 4, axis=1)
+        repeated_v = np.repeat(v_array, 4, axis=1)
+        expected = np.concatenate((
+            _sdpa_reference(q_array[None, :2], repeated_k[None, :2], repeated_v[None, :2])[0],
+            _sdpa_reference(q_array[None, 2:], repeated_k[None, 2:], repeated_v[None, 2:])[0],
+        ), axis=0)
+        np.testing.assert_allclose(got, expected, atol=2e-5, rtol=2e-5)
+
     def test_varlen_segments_do_not_leak(self):
         import flash_attn
 

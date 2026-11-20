@@ -180,7 +180,8 @@ def _sdpa_segment(q, k, v, causal, softmax_scale, dropout_p):
     vh = v.permute(1, 0, 2).unsqueeze(0)   # [1,H,Lk,Cv]
     oh = F.scaled_dot_product_attention(
         qh, kh, vh, dropout_p=dropout_p,
-        is_causal=bool(causal), scale=softmax_scale)
+        is_causal=bool(causal), scale=softmax_scale,
+        enable_gqa=(qh.shape[1] != kh.shape[1] or qh.shape[1] != vh.shape[1]))
     return oh.squeeze(0).permute(1, 0, 2)  # [Lq,H,Cv]
 
 
@@ -263,7 +264,8 @@ def _dense_core(q, k, v, causal, softmax_scale, dropout_p):
     vh = v.permute(0, 2, 1, 3)             # [B,H,Lk,Cv]
     oh = F.scaled_dot_product_attention(
         qh, kh, vh, dropout_p=dropout_p,
-        is_causal=bool(causal), scale=softmax_scale)
+        is_causal=bool(causal), scale=softmax_scale,
+        enable_gqa=(qh.shape[1] != kh.shape[1] or qh.shape[1] != vh.shape[1]))
     return oh.permute(0, 2, 1, 3)          # [B,Lq,H,Cv]
 
 
