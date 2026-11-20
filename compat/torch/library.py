@@ -411,6 +411,19 @@ class Library:
         return None
 
 
+def define(qualname, schema, *, lib=None, tags=()):
+    """Define a namespaced operator from the public nameless-schema form."""
+    if not isinstance(qualname, str) or qualname.count("::") != 1:
+        raise ValueError("operator name must have the form namespace::name")
+    namespace, name = qualname.split("::", 1)
+    if not namespace or not name or not isinstance(schema, str) or not schema.startswith("("):
+        raise ValueError("define requires a namespaced name and a nameless schema")
+    target = lib if lib is not None else Library(namespace, "FRAGMENT")
+    if target.ns != namespace:
+        raise ValueError("library namespace does not match operator name")
+    target.define(name + schema, tags=tags)
+
+
 def custom_op(name=None, fn=None, *args, **kwargs):
     """torch.library.custom_op -- a generic registration API.
 
@@ -539,7 +552,7 @@ def install_torch_library(torch_module, modules):
         state = {"dispatcher": dispatcher, "torch_module": torch_module}
         ctx.state["library_api"] = state
     library_module = ctx.registry.ensure("torch.library")
-    for name in ("Library", "Tag", "custom_op", "infer_schema", "register_fake",
+    for name in ("Library", "Tag", "define", "custom_op", "infer_schema", "register_fake",
                  "register_kernel", "impl", "register_autograd",
                  "register_torch_dispatch", "register_vmap", "opcheck", "get_ctx"):
         setattr(library_module, name, globals()[name])
@@ -558,7 +571,7 @@ def install_torch_library(torch_module, modules):
     if torch_c is not None:
         torch_c.Tag = Tag
     register_api_bindings(library_module, "torch.library",
-                          ("Library", "Tag", "custom_op", "infer_schema", "register_fake",
+                          ("Library", "Tag", "define", "custom_op", "infer_schema", "register_fake",
                            "register_kernel", "impl", "register_autograd"),
                           Fidelity.APPROXIMATE,
                           "Context-owned dispatcher uses actual tensor CPU/CUDA residency and "
@@ -793,6 +806,6 @@ def make_infer_schema(torch_module):
     return infer_schema
 
 
-__all__ = ["Tag", "Library", "custom_op", "infer_schema", "register_fake",
+__all__ = ["Tag", "Library", "define", "custom_op", "infer_schema", "register_fake",
            "register_kernel", "impl", "register_autograd", "register_torch_dispatch",
            "register_vmap", "opcheck", "get_ctx", "install_torch_library", "make_infer_schema"]

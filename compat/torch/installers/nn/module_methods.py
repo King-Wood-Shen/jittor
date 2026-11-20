@@ -6,6 +6,7 @@ import functools as _functools
 import weakref
 import os
 import jittor as jt
+from jittor._core.module import _WriteThroughDict
 from jittor import nn
 from jittor.nn.backends import hooks as _backend_hooks
 from jittor.backends.cuda.kernels.nn.rms_norm_training_cuda import _rms_norm_training_cuda
@@ -46,6 +47,8 @@ _ORIG_MODULE_NAMED_MODULES = nn.Module.named_modules
 _ORIG_MODULE_LOAD_STATE_DICT = nn.Module.load_state_dict
 _ORIG_MODULE_PARAMETERS = nn.Module.parameters
 _ORIG_MODULE_PARAMETER_MAP = nn.Module.__dict__["_parameters"].fget
+_ORIG_MODULE_MODULE_MAP = nn.Module.__dict__["_modules"].fget
+_ORIG_MODULE_STATE_DICT = nn.Module.state_dict
 
 
 # torch models define forward(); jittor calls execute(). Make the base
@@ -622,6 +625,43 @@ def _parameter_map_get(self):
     return _ORIG_MODULE_PARAMETER_MAP(self)
 
 
+def _module_map_get(self):
+    # Transformers installs quantized Linear replacements through this dict.
+    # The native property returns a snapshot, so writes must reach the owner.
+    return _WriteThroughDict(self, _ORIG_MODULE_MODULE_MAP(self).items())
+
+
+def _save_to_state_dict(self, destination, prefix, keep_vars):
+    """Save this module's own registered Vars for custom Torch subclasses."""
+    for name, value, role in self._var_roles():
+        if role in ("parameter", "buffer"):
+            destination[prefix + name] = value if keep_vars else value.detach()
+
+
+def _state_dict(self, to=None, recurse=True, destination=None, prefix="", keep_vars=None):
+    """Keep native state traversal and include subclass serialization extras."""
+    result = _ORIG_MODULE_STATE_DICT(self, to=to, recurse=recurse,
+                                     destination=destination, prefix=prefix,
+                                     keep_vars=keep_vars)
+    modules = self.named_modules() if recurse else (("", self),)
+    for name, module in modules:
+        if type(module)._save_to_state_dict is _save_to_state_dict:
+            continue
+        extra = {}
+        module_prefix = prefix + name + "." if name else prefix
+        module._save_to_state_dict(extra, module_prefix, bool(keep_vars))
+        for key, value in extra.items():
+            if key in result:
+                continue
+            if to == "numpy" and isinstance(value, jt.Var):
+                value = value.numpy()
+            elif to == "torch" and isinstance(value, jt.Var):
+                import torch
+                value = torch.from_numpy(value.numpy())
+            result[key] = value
+    return result
+
+
 def _parameter_map_set(self, value):
     if not isinstance(value, _MutableMapping):
         raise TypeError("Module._parameters must be assigned a mutable mapping")
@@ -831,6 +871,11 @@ def _module_to_conversion(ds, dev, copy, v):
     Split out of ``_module_to`` so this file holds no closures; ``_module_to``
     hands the decoded (dtype, device, copy) triple over with a partial.
     """
+    # Parameter subclasses may implement their own device conversion (for
+    # example, Params4bit turns floating storage into NF4 on CUDA). Sending
+    # their holder through the native Var mover skips that implementation.
+    if (dev is not None and type(v).__dict__.get("to") is not None):
+        return v.to(device=dev, dtype=ds)
     out = v
     if ds is not None and ds in _MODULE_FLOAT_DTYPES:
         is_float = v.dtype.is_float() if hasattr(v.dtype, "is_float") else ("float" in _jittor_dtype_name(v.dtype))
@@ -1284,6 +1329,9 @@ def _install_module_methods(nn, registry=None):
     M.named_modules = _named_modules
     M.load_state_dict = _load_state_dict
     M._parameters = property(_parameter_map_get, _parameter_map_set)
+    M._modules = property(_module_map_get)
+    M._save_to_state_dict = _save_to_state_dict
+    M.state_dict = _state_dict
     M.parameters = _parameters
     M.train = _train
     M.eval = _eval
@@ -1317,7 +1365,7 @@ def _install_module_methods(nn, registry=None):
         M._non_persistent_buffers_set = property(_nonpersist_set)
 
     register_api_bindings(M, 'torch.nn.Module',
-        ('__setattr__', 'buffers', 'cpu', 'cuda', 'double', 'eval', 'execute', 'float', 'forward', 'get_buffer', 'get_execution_pipelining', 'get_parameter', 'get_submodule', 'half', 'load_state_dict', 'named_buffers', 'named_modules', 'named_parameters', 'npu', 'parameters', 'register_parameter', 'set_execution_pipelining', 'to', 'to_empty', 'train', 'type', 'zero_grad') + tuple(()),
+        ('__setattr__', 'buffers', 'cpu', 'cuda', 'double', 'eval', 'execute', 'float', 'forward', 'get_buffer', 'get_execution_pipelining', 'get_parameter', 'get_submodule', 'half', 'load_state_dict', 'named_buffers', 'named_modules', 'named_parameters', 'npu', 'parameters', 'register_parameter', 'set_execution_pipelining', 'state_dict', 'to', 'to_empty', 'train', 'type', 'zero_grad') + tuple(()),
         Fidelity.APPROXIMATE, 'Module state and parameter management over native holders; Torch lazy iterator, meta, and layout semantics are approximate')
     register_api_bindings(M, 'torch.nn.Module', ('extra_repr',),
         Fidelity.EXACT, 'Torch Module default extra_repr is empty; explicit subclass overrides retain normal MRO precedence')

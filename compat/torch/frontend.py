@@ -276,8 +276,20 @@ def make_tensor_type(backend):
         "_frontend_autograd_policy": 3,
         "_frontend_precision_policy": classmethod(_frontend_precision_policy),
         "clone": clone,
+        "_make_subclass": staticmethod(make_subclass),
         **tensor_object_properties(),
     })
+
+
+def make_subclass(subclass, data, requires_grad=False):
+    """Build a leaf holder of ``subclass`` from an existing tensor's storage."""
+    backend = getattr(subclass, "_frontend_backend", None)
+    if backend is None or not isinstance(data, backend.Var):
+        raise TypeError("_make_subclass expects a frontend tensor subclass and tensor data")
+    with tensor_frontend(subclass, like=data):
+        value = backend.Var.detach(data)
+    value.requires_grad = bool(requires_grad)
+    return value
 
 
 def clone(input, *, memory_format=None):
@@ -312,9 +324,11 @@ def parameter_new(cls, data=None, requires_grad=True):
     return value
 
 
-def parameter_init(self, data=None, requires_grad=True):
+def parameter_init(self, data=None, requires_grad=True, **kwargs):
     # The conversion boundary already initialized the native holder. Python
     # subclasses still receive their real __init__ through normal dispatch.
+    # A subclass can consume its own metadata keywords in __new__ without
+    # defining __init__, as bitsandbytes Params4bit does.
     return None
 
 
