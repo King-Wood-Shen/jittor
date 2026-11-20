@@ -135,6 +135,14 @@ class TestLinalg(Base):
             L = torch.linalg.cholesky(jt.array(A)).numpy()
             self.ac(L @ L.T, A, atol=1e-3, msg=f"L@L.T==A {dev}")
             self.assertTrue(np.allclose(np.triu(L, 1), 0, atol=1e-4), f"L lower {dev}")
+            U = torch.linalg.cholesky(jt.array(A), upper=True)
+            self.ac(U.numpy().T @ U.numpy(), A, atol=1e-3,
+                    msg=f"U.T@U==A {dev}")
+            self.assertTrue(np.allclose(np.tril(U.numpy(), -1), 0, atol=1e-4),
+                            f"U upper {dev}")
+            out = torch.empty_like(U)
+            self.assertIs(torch.linalg.cholesky(jt.array(A), upper=True, out=out), out)
+            self.ac(out.numpy(), U.numpy(), atol=1e-5)
         both_devices(body)
 
     def test_svd_values_and_recon(self):

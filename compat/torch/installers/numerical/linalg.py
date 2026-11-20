@@ -125,6 +125,17 @@ def solve(A, B, *, left=True, out=None):
     return result
 
 
+def cholesky(A, *, upper=False, out=None):
+    """Return the lower or upper Cholesky factor on the input's device."""
+    import jittor as jt
+    lower = jt.linalg.cholesky(A)
+    result = lower.transpose(-2, -1).conj() if upper else lower
+    if out is not None:
+        out.assign(result)
+        return out
+    return result
+
+
 def solve_triangular(A, B, *, upper, left=True, unitriangular=False, out=None):
     """Solve a triangular system on the input's device.
 
