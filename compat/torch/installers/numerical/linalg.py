@@ -125,6 +125,30 @@ def solve(A, B, *, left=True, out=None):
     return result
 
 
+def solve_triangular(A, B, *, upper, left=True, unitriangular=False, out=None):
+    """Solve a triangular system on the input's device.
+
+    Mask the unused half before delegating to the native batched solve.  The
+    native CUDA solve executes through CuPy; no host materialization is used.
+    """
+    import jittor as jt
+    if A.ndim < 2 or B.ndim < 2:
+        raise RuntimeError("linalg.solve_triangular: A and B must be matrices")
+    if A.shape[-1] != A.shape[-2]:
+        raise RuntimeError("linalg.solve_triangular: A must be square")
+    if unitriangular:
+        eye = jt.init.eye(int(A.shape[-1]), A.dtype)
+        triangle = jt.triu(A, 1) if upper else jt.tril(A, -1)
+        triangle = triangle + eye
+    else:
+        triangle = jt.triu(A) if upper else jt.tril(A)
+    result = solve(triangle, B, left=left)
+    if out is not None:
+        out.assign(result)
+        return out
+    return result
+
+
 def _trace_impl(input):
     from . import (
         jt,
