@@ -42,6 +42,27 @@ class TestRegistrationOrder(unittest.TestCase):
         names = [name for name, _ in model.named_children()]
         self.assertEqual(names, ["first", "last", "middle"])
 
+    def test_modules_mapping_replacement_writes_through(self):
+        model = _Late()
+        replacement = nn.Linear(2, 2)
+        model._modules["first"] = replacement
+        self.assertIs(model.first, replacement)
+        self.assertIs(model._modules["first"], replacement)
+        self.assertEqual([name for name, _ in model.named_children()],
+                         ["first", "last", "middle"])
+
+    def test_custom_submodule_state_dict_keeps_extra_quantization_state(self):
+        class Quantized(nn.Linear):
+            def _save_to_state_dict(self, destination, prefix, keep_vars):
+                super()._save_to_state_dict(destination, prefix, keep_vars)
+                destination[prefix + "weight.quant_state"] = torch.tensor([7], dtype=torch.uint8)
+
+        model = nn.Sequential(Quantized(2, 2))
+        state = model.state_dict()
+        self.assertIn("0.weight", state)
+        self.assertEqual(state["0.weight.quant_state"].tolist(), [7])
+        self.assertNotIn("0.weight.quant_state", nn.Sequential(nn.Linear(2, 2)).state_dict())
+
 
 if __name__ == "__main__":
     unittest.main()

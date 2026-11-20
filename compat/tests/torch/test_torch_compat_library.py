@@ -55,6 +55,16 @@ class TestInferSchema(unittest.TestCase):
         self.assertIsNone(torch.library.register_autograd("jittor_test::scale", backward))
         self.assertIs(packet._backward, backward)
 
+    def test_module_define_uses_public_nameless_schema(self):
+        self.assertIsNone(torch.library.define(
+            "jittor_module_define::scale", "(Tensor value) -> Tensor"))
+        self.assertEqual(torch.ops.jittor_module_define.scale._schema,
+                         "jittor_module_define::scale(Tensor value) -> Tensor")
+        with self.assertRaises(ValueError):
+            torch.library.define("missing_namespace", "(Tensor value) -> Tensor")
+        with self.assertRaises(ValueError):
+            torch.library.define("jittor_module_define::wrong", "wrong(Tensor value) -> Tensor")
+
     def test_torch_types_module_replaces_python_types_attribute(self):
         self.assertEqual(torch.types.__name__, "torch.types")
         self.assertIs(torch.types._dtype, torch.dtype)

@@ -21,6 +21,52 @@ def _collected(make):
 
 
 class TestFrontendTypeLifetime(unittest.TestCase):
+    def test_make_subclass_keeps_type_leaf_and_device(self):
+        class Quantized(torch.nn.Parameter):
+            pass
+
+        source = torch.tensor([1.0, 2.0], device="cuda")
+        value = torch.Tensor._make_subclass(Quantized, source, False)
+        self.assertIs(type(value), Quantized)
+        self.assertTrue(value.is_leaf)
+        self.assertFalse(value.requires_grad)
+        self.assertEqual(value.device.type, "cuda")
+        np.testing.assert_array_equal(value.cpu().numpy(), [1.0, 2.0])
+        with self.assertRaises(TypeError):
+            torch.Tensor._make_subclass(Quantized, [1.0, 2.0])
+
+    def test_parameter_subclass_new_consumes_metadata_keywords(self):
+        class Quantized(torch.nn.Parameter):
+            def __new__(cls, data, requires_grad=False, compress_statistics=True):
+                value = torch.Tensor._make_subclass(cls, data, requires_grad)
+                value.compress_statistics = compress_statistics
+                return value
+
+        value = Quantized(torch.tensor([3.0], device="cuda"), compress_statistics=False)
+        self.assertIs(type(value), Quantized)
+        self.assertFalse(value.compress_statistics)
+        self.assertFalse(value.requires_grad)
+        self.assertTrue(value.is_leaf)
+        self.assertEqual(value.device.type, "cuda")
+
+    def test_module_to_calls_parameter_subclass_conversion(self):
+        class Converted(torch.nn.Parameter):
+            def to(self, *args, **kwargs):
+                self.convert_count = getattr(self, "convert_count", 0) + 1
+                return super().to(*args, **kwargs)
+
+        class Holder(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = Converted(torch.tensor([1.0]))
+
+        module = Holder()
+        original = module.weight
+        module.to("cuda:0")
+        self.assertIs(module.weight, original)
+        self.assertEqual(original.convert_count, 1)
+        self.assertEqual(module.weight.device.type, "cuda")
+
     def test_module_defined_in_a_function_is_collected(self):
         def make():
             offset = torch.ones(16)

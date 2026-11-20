@@ -57,6 +57,7 @@ _UNCONDITIONAL_OWNERS = (
     ("named_buffers", "_named_buffers"),
     ("named_modules", "_named_modules"),
     ("load_state_dict", "_load_state_dict"),
+    ("state_dict", "_state_dict"),
     ("parameters", "_parameters"),
     ("train", "_train"),
     ("eval", "_eval"),
@@ -115,6 +116,7 @@ _CAPTURED_NATIVES = (
     ("_ORIG_MODULE_NAMED_BUFFERS", "named_buffers"),
     ("_ORIG_MODULE_NAMED_MODULES", "named_modules"),
     ("_ORIG_MODULE_LOAD_STATE_DICT", "load_state_dict"),
+    ("_ORIG_MODULE_STATE_DICT", "state_dict"),
     ("_ORIG_MODULE_PARAMETERS", "parameters"),
 )
 
@@ -154,6 +156,7 @@ _FIDELITY_APIS = (
     "torch.nn.Module.named_buffers",
     "torch.nn.Module.named_modules",
     "torch.nn.Module.load_state_dict",
+    "torch.nn.Module.state_dict",
     "torch.nn.Module.parameters",
     "torch.nn.Module.train",
     "torch.nn.Module.eval",
