@@ -109,7 +109,13 @@ def _cublas_can_take(a, b):
 
 @native_rule("same_float:cublas_matmul")
 def _supports_cublas(a, b, trans_a=False, trans_b=False):
-    return _same_floating_dtype(a, b) and get_library_ops("cublas") is not None
+    # cuBLAS GEMM rejects a zero m, n or k.  An empty product has no work to
+    # launch; let the generic contraction keep its shape and device instead.
+    m = a.shape[-1] if trans_a else a.shape[-2]
+    k = a.shape[-2] if trans_a else a.shape[-1]
+    n = b.shape[-2] if trans_b else b.shape[-1]
+    return (m > 0 and n > 0 and k > 0 and
+            _same_floating_dtype(a, b) and get_library_ops("cublas") is not None)
 
 
 def _cublas_matmul(a, b, trans_a=False, trans_b=False):
