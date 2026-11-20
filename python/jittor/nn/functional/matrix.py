@@ -109,13 +109,7 @@ def _cublas_can_take(a, b):
 
 @native_rule("same_float:cublas_matmul")
 def _supports_cublas(a, b, trans_a=False, trans_b=False):
-    # cuBLAS GEMM rejects a zero m, n or k.  An empty product has no work to
-    # launch; let the generic contraction keep its shape and device instead.
-    m = a.shape[-1] if trans_a else a.shape[-2]
-    k = a.shape[-2] if trans_a else a.shape[-1]
-    n = b.shape[-2] if trans_b else b.shape[-1]
-    return (m > 0 and n > 0 and k > 0 and
-            _same_floating_dtype(a, b) and get_library_ops("cublas") is not None)
+    return _same_floating_dtype(a, b) and get_library_ops("cublas") is not None
 
 
 def _cublas_matmul(a, b, trans_a=False, trans_b=False):
@@ -455,6 +449,14 @@ def _matmul_kernel_dispatch(op, a, b, trans_a, trans_b):
     so the transpose flags, which describe the layout of the operands handed
     in, stay valid for the cast copies.
     """
+    # The native selector replaces _supports_cublas with its same-float rule;
+    # a Python shape check there cannot stop a zero-size cuBLAS launch.
+    # GEMM rejects m=0, n=0 or k=0, so use the caller's generic contraction.
+    m = a.shape[-1] if trans_a else a.shape[-2]
+    k = a.shape[-2] if trans_a else a.shape[-1]
+    n = b.shape[-2] if trans_b else b.shape[-1]
+    if m == 0 or k == 0 or n == 0:
+        return None
     kernel = select_kernel(op, a, b, trans_a, trans_b)
     if kernel is not None:
         return kernel(a, b, trans_a, trans_b)
