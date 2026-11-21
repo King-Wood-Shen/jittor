@@ -74,7 +74,7 @@ def _poisson_nll(input, target, log_input=True, full=False, size_average=None,
 
 from ...context import get_install_context
 from types import MappingProxyType
-from .loss_modules import LOSS_CLASSES, PixelShuffle, PixelUnshuffle
+from .loss_modules import LOSS_CLASSES, PixelShuffle, PixelUnshuffle, CosineSimilarity
 from .extra_api import _adapt_extra
 
 def _softmax(input, dim=-1, _stacklevel=3, dtype=None):
@@ -329,7 +329,7 @@ def _install_functional(ctx):
     if not hasattr(F, "pixel_unshuffle"):
         F.pixel_unshuffle = _pixel_unshuffle
         g.pixel_unshuffle = _pixel_unshuffle
-    for template in (PixelShuffle, PixelUnshuffle):
+    for template in (PixelShuffle, PixelUnshuffle, CosineSimilarity):
         if not hasattr(nn, template.__name__):
             setattr(nn, template.__name__, _adapt_extra(template, ctx.registry))
     # F.logsigmoid (DPO/preference losses), F.gumbel_softmax (discrete/MoE sampling).
@@ -390,6 +390,6 @@ def _install_functional(ctx):
          "huber_loss", "kl_div", "margin_ranking_loss"), Fidelity.APPROXIMATE,
         "Reuses the canonical native loss implementation and supported argument subset")
     register_api_bindings(nn, "torch.nn",
-        tuple(template.__name__ for template in LOSS_CLASSES) + ("PixelShuffle", "PixelUnshuffle"),
+        tuple(template.__name__ for template in LOSS_CLASSES) + ("PixelShuffle", "PixelUnshuffle", "CosineSimilarity"),
         Fidelity.APPROXIMATE, "Module-owned layer implementations reuse native functionals; "
         "installation adapters preserve Tensor and parameter ownership")

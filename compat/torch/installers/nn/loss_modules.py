@@ -68,5 +68,16 @@ class PixelUnshuffle(PixelShuffle):
         return get_install_context(jt).target_namespace.nn.functional.pixel_unshuffle(value, self._f)
 
 
+class CosineSimilarity(Module):
+    def __init__(self, dim=1, eps=1e-8):
+        super().__init__()
+        self.dim = dim
+        self.eps = eps
+
+    def execute(self, x1, x2):
+        return get_install_context(jt).target_namespace.nn.functional.cosine_similarity(
+            x1, x2, dim=self.dim, eps=self.eps)
+
+
 LOSS_CLASSES = (HuberLoss, SmoothL1Loss, MarginRankingLoss, CosineEmbeddingLoss,
                 GaussianNLLLoss, NLLLoss)
