@@ -564,6 +564,10 @@ PyObject* activation_module(PyTypeObject* type, PyObject* dict, PyObject* x) {
     if (kernel_op_registered(relu ? "nn.relu" : "nn.silu")) return nullptr;
     static auto make_unary_mc = op_constructor<VarPtr, Var*, NanoString>("unary");
     if (relu) return wrap_like_input(x, make_unary_mc(v, ns_relu));
+    // Low-precision SiLU widens before the sigmoid and rounds once at the
+    // activation boundary in jittor.nn.silu.  The native narrow sigmoid below
+    // changes BF16/FP16 results, so use that existing implementation.
+    if (v->dtype() == ns_float16 || v->dtype() == ns_bfloat16) return nullptr;
     // `x.sigmoid()` is the native unary unless a kernel is registered for it.
     if (!v->dtype().is_float() || kernel_op_registered("tensor.sigmoid")) return nullptr;
     PyObjHolder gate(wrap_like_input(x, make_unary_mc(v, ns_sigmoid)));
@@ -837,6 +841,10 @@ PyObject* rms_norm_inference(PyObject* module, PyObject* dict, PyObject* x) {
     Var* a = GET_RAW_PTR(VarHolder, x)->var;
     Var* gamma = GET_RAW_PTR(VarHolder, weight)->var;
     int64 hidden = a->shape[a->shape.size() - 1];
+    // The 896-wide BF16 Python provider uses its Torch-order reduction.
+    // This native path only builds the generic source, so let that provider
+    // select the matching kernel instead of changing its arithmetic.
+    if (hidden == 896 && a->dtype() == ns_bfloat16) return nullptr;
     int64 threads = 32;
     while (threads < std::min<int64>(hidden, 1024)) threads *= 2;
     auto key = std::make_pair(hidden, epsilon);

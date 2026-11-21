@@ -110,6 +110,49 @@ _RMS_NORM_SOURCE = r"""
     """
 
 
+# BF16 Qwen2-0.5B (896 channels): mirror Torch 2.11 CUDA mean's
+# vectorized-four, one-warp reduction. This fixes the first proven L2
+# divergence while leaving every other RMSNorm contract unchanged.
+_RMS_NORM_SOURCE_896_BF16 = r"""
+    __global__ static void rms_norm_torch_mean_896(
+            const in0_type* x, const in1_type* gamma, out0_type* y) {
+        int row = blockIdx.x;
+        int lane = threadIdx.x;
+        float a0 = 0.0f, a1 = 0.0f, a2 = 0.0f, a3 = 0.0f;
+        for (int base = lane * 4; base < 896; base += 128) {
+            int index = row * 896 + base;
+            float v0 = static_cast<float>(x[index + 0]);
+            float v1 = static_cast<float>(x[index + 1]);
+            float v2 = static_cast<float>(x[index + 2]);
+            float v3 = static_cast<float>(x[index + 3]);
+            a0 = __fadd_rn(a0, __fmul_rn(v0, v0));
+            a1 = __fadd_rn(a1, __fmul_rn(v1, v1));
+            a2 = __fadd_rn(a2, __fmul_rn(v2, v2));
+            a3 = __fadd_rn(a3, __fmul_rn(v3, v3));
+        }
+        float total = __fadd_rn(__fadd_rn(__fadd_rn(a0, a1), a2), a3);
+        for (int offset = 16; offset > 0; offset >>= 1)
+            total = __fadd_rn(total, __shfl_down_sync(0xffffffffu, total, offset));
+        float inverse = 0.0f;
+        if (lane == 0) {
+            float variance = __fmul_rn(total, 1.0f / 896.0f);
+            inverse = rsqrtf(__fadd_rn(variance, %(epsilon).9gf));
+        }
+        inverse = __shfl_sync(0xffffffffu, inverse, 0);
+        for (int dim = lane; dim < 896; dim += 32) {
+            int index = row * 896 + dim;
+            out0_type normalized = out0_type(
+                __fmul_rn(static_cast<float>(x[index]), inverse));
+            y[index] = out0_type(__fmul_rn(
+                static_cast<float>(normalized), static_cast<float>(gamma[dim])));
+        }
+    }
+    int rows = in0->num / 896;
+    rms_norm_torch_mean_896<<<rows, 32>>>(in0_p, in1_p, out0_p);
+    CHECK(0 == cudaGetLastError());
+    """
+
+
 def _rms_norm_source(hidden_size, threads, warps, epsilon_value):
     """The CUDA source of the kernel below for one contract.
 
@@ -137,7 +180,10 @@ def _rms_norm_cuda(x, gamma, epsilon=1e-6):
     if contract is None:
         return None
     hidden_size, threads, warps, epsilon_value = contract
-    cuda_src = _rms_norm_source(hidden_size, threads, warps, epsilon_value)
+    if hidden_size == 896 and _jittor_dtype_name(x.dtype) == "bfloat16":
+        cuda_src = cached_source(_RMS_NORM_SOURCE_896_BF16, {"epsilon": epsilon_value})
+    else:
+        cuda_src = _rms_norm_source(hidden_size, threads, warps, epsilon_value)
     return _stop_grad_outputs(
         jt.code(x.shape, x.dtype, [x, gamma], cuda_src=cuda_src))
 
