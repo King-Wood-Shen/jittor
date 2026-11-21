@@ -407,7 +407,13 @@ def layer_norm(
     if _output_requires_grad(x, weight, bias):
         fast = _layer_norm_cuda(x, normalized_shape, weight, bias, eps)
     else:
-        fast = _layer_norm_no_grad_cuda(x, normalized_shape, weight, bias, eps)
+        # The existing BF16 CUDA inference kernel matches native Torch's
+        # rounding for the fused reduction and affine step. The composite
+        # path can differ by one BF16 quantum and accumulate across layers.
+        fast = _layer_norm_no_grad_cuda(
+            x, normalized_shape, weight, bias, eps,
+            allow_bfloat16=True,
+        )
     if fast is not None:
         # The restore only ever changes a half-typed result, so ask that
         # question first and keep `_restore_half_dtype` off every call that is

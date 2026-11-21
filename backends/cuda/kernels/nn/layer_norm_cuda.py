@@ -16,7 +16,7 @@ def _supports_layer_norm_inference(
         return False
     input_dtype = _jittor_dtype_name(x.dtype)
     supported_dtypes = ("float16", "float32")
-    if allow_bfloat16:
+    if allow_bfloat16 and getattr(jt.compiler, "is_cuda", False):
         supported_dtypes += ("bfloat16",)
     if len(normalized_shape) != 1 or _jittor_dtype_name(input_dtype) not in supported_dtypes:
         return False

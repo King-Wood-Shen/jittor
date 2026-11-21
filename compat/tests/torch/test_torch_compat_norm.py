@@ -296,6 +296,33 @@ class TestLayerNorm(Base):
                         msg="ln dynamic rows shared source")
 
     @unittest.skipIf(not _test_capability.check_accelerator('cuda', backend=jt).enabled, "No CUDA found")
+    def test_ln_no_grad_cuda_bfloat16_public_fast_path(self):
+        from jittor.nn.functional import normalization as _normalization
+        rng = np.random.RandomState(230)
+        x_np = rng.randn(2, 9, 768).astype("float32")
+        weight_np = rng.randn(768).astype("float32")
+        bias_np = rng.randn(768).astype("float32")
+        original = _normalization._ln_normalize
+
+        def reject_composite(*args, **kwargs):
+            raise AssertionError("BF16 CUDA inference used composite LayerNorm")
+
+        with jt.flag_scope(use_cuda=1), jt.no_grad():
+            x = t(x_np).bfloat16()
+            weight = t(weight_np).bfloat16()
+            bias = t(bias_np).bfloat16()
+            try:
+                _normalization._ln_normalize = reject_composite
+                public = F.layer_norm(x, (768,), weight, bias, 1e-12)
+            finally:
+                _normalization._ln_normalize = original
+            direct = _layer_norm_no_grad_cuda(
+                x, (768,), weight, bias, 1e-12, allow_bfloat16=True)
+            got, expected = jt.fetch_sync([public.float32(), direct.float32()])
+        self.assertEqual(str(public.dtype), "torch.bfloat16")
+        np.testing.assert_array_equal(got, expected)
+
+    @unittest.skipIf(not _test_capability.check_accelerator('cuda', backend=jt).enabled, "No CUDA found")
     @unittest.expectedFailure
     def test_ln_no_grad_cuda_bfloat16_private_opt_in(self):
         # KI-TEST-010: the CUDA no-grad LayerNorm fast path is not taken under the Torch frontend.
