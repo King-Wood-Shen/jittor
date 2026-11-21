@@ -340,11 +340,31 @@ def _source(rows, cin, cout, dtype):
                     scheme != CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE)
                     continue;
             }}
+            cublasLtMatmulAlgo_t algo = cand[c].algo;
+            size_t required_workspace = cand[c].workspaceSize;
+            // A large BF16 K needs enough FP32 partial sums to avoid the
+            // rounding seen in BERT's output projection. The original
+            // heuristic's compute-type split-K 6 differs from native Torch;
+            // split-K 8 matches on the frozen operand and bias tensors.
+            if ({"true" if dtype == "bfloat16" else "false"} && cin >= 2048 &&
+                prefer_compute_reduction) {{
+                int split = 8;
+                if (cublasLtMatmulAlgoConfigSetAttribute(
+                        &algo, CUBLASLT_ALGO_CONFIG_SPLITK_NUM,
+                        &split, sizeof(split)) != CUBLAS_STATUS_SUCCESS)
+                    continue;
+                cublasLtMatmulHeuristicResult_t checked;
+                if (cublasLtMatmulAlgoCheck(
+                        lt, op, la, lb, lc, lc, &algo, &checked) != CUBLAS_STATUS_SUCCESS ||
+                    checked.workspaceSize > wsize)
+                    continue;
+                required_workspace = checked.workspaceSize;
+            }}
             auto once = [&]() {{
                 // Explicit stream: jittor runs on `cudaStreamPerThread`, which
                 // does not synchronise with the legacy default stream.
                 return cublasLtMatmul(lt, op, &alpha, in1_p, la, in0_p, lb, &beta,
-                                      out0_p, lc, out0_p, lc, &cand[c].algo,
+                                      out0_p, lc, out0_p, lc, &algo,
                                       ws, wsize, cudaStreamPerThread);
             }};
             if (once() != CUBLAS_STATUS_SUCCESS) continue;
@@ -357,8 +377,8 @@ def _source(rows, cin, cout, dtype):
             cudaEventElapsedTime(&ms, beg, end);
             if (ms > 0.0f && ms < best) {{
                 best = ms;
-                choice.algo = cand[c].algo;
-                choice.workspace = cand[c].workspaceSize;
+                choice.algo = algo;
+                choice.workspace = required_workspace;
                 choice.usable = true;
             }}
         }}
