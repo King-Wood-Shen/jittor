@@ -15,7 +15,10 @@ through `cublasGemmEx`, which is exactly what PyTorch's `x @ W.t()` measures
 too; but PyTorch's `Linear` goes through cuBLASLt and measures 424.6. Timing
 cuBLASLt's own heuristic candidates one by one: the first is 509.4 us and the
 sixth is 422.3. So the difference is which kernel gets picked, not arithmetic.
-This picks by timing them, once per problem shape, and remembers the winner.
+For float16 and float32 this picks by timing them, once per problem shape,
+and remembers the winner. BF16 instead takes the first usable heuristic:
+on Qwen q_proj, a faster split-K candidate changed the fused bias result
+relative to native PyTorch even with identical BF16 inputs and weights.
 
 Determinism is kept: the algorithm is chosen once and then fixed, and this
 cuBLASLt exposes only deterministic reduction schemes (NONE, INPLACE,
@@ -302,6 +305,7 @@ def _source(rows, cin, cout, dtype):
     # float32 for both -- `cublas_gemm_mode`'s choice for float16 -- so alpha
     # and beta stay floats either way.
     ct, kt = _LT_TYPES[dtype]
+    prefer_first = "true" if dtype == "bfloat16" else "false"
     return f"""
     const int rows = {rows}, cin = {cin}, cout = {cout};
     const float alpha = 1.0f, beta = 0.0f;
@@ -392,6 +396,10 @@ def _source(rows, cin, cout, dtype):
                 choice.algo = cand[c].algo;
                 choice.workspace = cand[c].workspaceSize;
                 choice.usable = true;
+                // BF16 fused bias must use the first valid heuristic: the
+                // fastest split-K choice changed the FP32 reduction order
+                // and rounded differently from native torch on Qwen q_proj.
+                if ({prefer_first}) break;
             }}
         }}
         cudaEventDestroy(beg); cudaEventDestroy(end);
