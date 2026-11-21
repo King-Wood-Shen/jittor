@@ -786,6 +786,15 @@ def linear_init(self, in_features, out_features, bias=True,
     self.to(device=device, dtype=target_dtype)
 
 
+def conv3d_init(self, *args, device=None, dtype=None, **kwargs):
+    _context = get_install_context(jt)
+    _torch_target = _context.target_namespace
+    native_conv3d_init = _context.state["nn_extra_native"]['native_conv3d_init']
+    native_conv3d_init(self, *args, **kwargs)
+    target_dtype = dtype if dtype is not None else _torch_target.get_default_dtype()
+    self.to(device=device, dtype=target_dtype)
+
+
 def embedding_init(self, num_embeddings, embedding_dim, padding_idx=None,
                    max_norm=None, norm_type=2.0,
                    scale_grad_by_freq=False, sparse=False,

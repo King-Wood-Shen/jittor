@@ -49,6 +49,7 @@ from .extra_api import (
     _upsample_bilinear,
     clip_grad_norm_,
     clip_grad_value_,
+    conv3d_init,
     embedding_init,
     linear_init,
     pad_sequence,
@@ -485,6 +486,12 @@ def _install_nn_extras(nn, registry=None):
         linear_cls.__init__ = linear_init
         linear_cls._torch_dtype_patched = True
 
+    conv3d_cls = getattr(nn, "Conv3d", None)
+    if conv3d_cls is not None and not getattr(conv3d_cls, "_torch_dtype_patched", False):
+        native_conv3d_init = conv3d_cls.__init__
+        conv3d_cls.__init__ = conv3d_init
+        conv3d_cls._torch_dtype_patched = True
+
     embedding_cls = getattr(nn, "Embedding", None)
     if (embedding_cls is not None and
             not getattr(embedding_cls, "_torch_dtype_patched", False)):
@@ -498,6 +505,7 @@ def _install_nn_extras(nn, registry=None):
         "dropout_initializers": MappingProxyType(_dropout_initializers),
         "_jt_linear": locals().get("_jt_linear"),
         "native_linear_init": locals().get("native_linear_init"),
+        "native_conv3d_init": locals().get("native_conv3d_init"),
         "native_embedding_init": locals().get("native_embedding_init"),
     })
 
