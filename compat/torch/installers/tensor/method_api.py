@@ -585,6 +585,14 @@ def _data_get(self):
 
 def _data_set(self, value):
     src = value if isinstance(value, _NativeVar) else _owner.jt.array(value)
+    # `parameter.data += delta` assigns the detached data alias back through
+    # this setter. Jittor's in-place addition can promote that alias (for
+    # example BF16 + FP32), while Torch keeps the parameter's original dtype.
+    # An explicit `parameter.data = new_tensor` must still replace its dtype.
+    if (isinstance(value, _NativeVar)
+            and getattr(value, "_torch_data_owner", None) is self
+            and _jittor_dtype_name(src.dtype) != _jittor_dtype_name(self.dtype)):
+        src = src.cast(self.dtype)
     was_trainable = bool(self.requires_grad)
     # torch's `x.data = y` *replaces* x's data, shape and dtype; it does not
     # copy elements into x's existing buffer. `assign` is the in-place

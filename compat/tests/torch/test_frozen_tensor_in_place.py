@@ -23,6 +23,21 @@ def _write(tensor, how):
 
 
 class TestFrozenTensorInPlace(unittest.TestCase):
+    def _check_data_iadd_dtype(self, device):
+        delta = torch.tensor([0.000123], dtype=torch.float32, device=device)
+        for make_parameter in (False, True):
+            weight = torch.tensor([0.123456], dtype=torch.bfloat16, device=device)
+            if make_parameter:
+                weight = torch.nn.Parameter(weight)
+            weight.data += delta
+            self.assertEqual(weight.dtype, torch.bfloat16)
+            self.assertEqual(float(weight.detach().float().cpu().numpy()[0]), 0.12353515625)
+
+        # Explicit replacement has different Torch semantics from `data +=`.
+        weight = torch.nn.Parameter(torch.tensor([0.123456], dtype=torch.bfloat16, device=device))
+        weight.data = weight.data + delta
+        self.assertEqual(weight.dtype, torch.float32)
+
     def _check(self, device):
         for how in ("copy_", "add_", "data", "data_item"):
             frozen = torch.ones(3, device=device, requires_grad=True)
@@ -36,9 +51,16 @@ class TestFrozenTensorInPlace(unittest.TestCase):
     def test_cpu(self):
         self._check("cpu")
 
+    def test_data_iadd_dtype_cpu(self):
+        self._check_data_iadd_dtype("cpu")
+
     @unittest.skipUnless(torch.cuda.is_available(), "No CUDA found")
     def test_cuda(self):
         self._check("cuda")
+
+    @unittest.skipUnless(torch.cuda.is_available(), "No CUDA found")
+    def test_data_iadd_dtype_cuda(self):
+        self._check_data_iadd_dtype("cuda")
 
 
 if __name__ == "__main__":
