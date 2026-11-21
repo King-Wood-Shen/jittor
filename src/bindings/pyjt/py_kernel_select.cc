@@ -213,6 +213,9 @@ Verdict evaluate(const NativeRule& rule, PyObject* args, PyObject* kwargs) {
         Var* b = GET_RAW_PTR(VarHolder, bias)->var;
         // Grad mode is the Python side's to judge.
         if (!no_grad && (requires_grad(x) || requires_grad(w) || requires_grad(b))) return unknown;
+        // BF16 eligibility depends on the caller's allow_bfloat16 opt-in
+        // and the CUDA build. Let the Python predicate inspect both.
+        if (x->dtype() == ns_bfloat16) return unknown;
         if (x->dtype() != ns_float16 && x->dtype() != ns_float32) return declines;
         if (PyTuple_GET_SIZE(shape) != 1) return declines;
         PyObject* size = PyTuple_GET_ITEM(shape, 0);
