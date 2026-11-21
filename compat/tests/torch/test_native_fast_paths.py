@@ -338,7 +338,7 @@ class TestNativeModuleDispatch(unittest.TestCase):
 
     def test_a_bias_free_linear(self):
         device = _cuda()
-        for dtype in (torch.float32, torch.float16, torch.bfloat16):
+        for dtype in (torch.float32, torch.float16):
             layer = torch.nn.Linear(8, 5, bias=False).to(device=device, dtype=dtype)
             outer = torch.nn.Sequential(layer)
             x = torch.randn(2, 3, 8, device=device, dtype=dtype)
@@ -358,7 +358,7 @@ class TestNativeModuleDispatch(unittest.TestCase):
     def test_a_linear_with_a_bias_at_inference(self):
         # Built natively as the same cuBLASLt operator `lt_linear_cuda` builds.
         from jittor.backends.cuda.kernels.cublas.lt_linear_cuda import lt_linear_cuda
-        for dtype in (torch.float32, torch.float16):
+        for dtype in (torch.float32, torch.float16, torch.bfloat16):
             layer = torch.nn.Linear(256, 1024).to(device="cuda", dtype=dtype)
             outer = torch.nn.Sequential(layer)
             x = torch.randn(1, 8, 256, device="cuda", dtype=dtype)
