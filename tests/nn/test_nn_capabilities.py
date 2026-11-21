@@ -486,6 +486,36 @@ class TestEmbeddingCapabilities(unittest.TestCase):
         np.testing.assert_array_equal(actual, weight[:1])
         np.testing.assert_array_equal(actual_weight[0], weight[0])
 
+    def _check_padding_idx_preserves_low_precision_embedding_dtype(self, use_cuda):
+        # The padding mask must not promote a BF16/FP16 embedding to FP32.
+        with jt.flag_scope(use_cuda=use_cuda):
+            indices = jt.array([1, 0, 2], dtype="int32")
+            for dtype in ("bfloat16", "float16"):
+                with self.subTest(dtype=dtype):
+                    weight = jt.array([[0.0], [1.0], [1.0078125]]).cast(dtype)
+                    output = nn.embedding(indices, weight, padding_idx=0)
+                    self.assertEqual(output.dtype, weight.dtype)
+                    gradient = jt.grad(output.sum(), weight)
+                    actual, actual_gradient = jt.fetch_sync(
+                        [output.float32(), gradient.float32()]
+                    )
+                    np.testing.assert_array_equal(
+                        actual,
+                        np.array([[1.0], [0.0], [1.0078125]], dtype="float32"),
+                    )
+                    np.testing.assert_array_equal(
+                        actual_gradient,
+                        np.array([[0.0], [1.0], [1.0]], dtype="float32"),
+                    )
+
+    def test_padding_idx_preserves_low_precision_embedding_dtype_cpu(self):
+        self._check_padding_idx_preserves_low_precision_embedding_dtype(0)
+
+    def test_padding_idx_preserves_low_precision_embedding_dtype_cuda(self):
+        if not _test_capability.check_accelerator("cuda", backend=jt).enabled:
+            self.skipTest("CUDA device unavailable")
+        self._check_padding_idx_preserves_low_precision_embedding_dtype(1)
+
     def test_module_normalizes_negative_padding_index(self):
         with jt.flag_scope(use_cuda=0):
             module = nn.Embedding(3, 2, padding_idx=-1)

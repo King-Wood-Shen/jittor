@@ -57,6 +57,10 @@ def embedding(
     if padding_idx is not None:
         keep = (input != padding_idx).unsqueeze(-1).float32()
         result = result * keep + (result * (1.0 - keep)).stop_grad()
+        if result.dtype != weight.dtype:
+            # The FP32 mask must not promote a low-precision embedding output.
+            result = result.cast(weight.dtype)
+            result.stop_fuse()
     return result
 
 
