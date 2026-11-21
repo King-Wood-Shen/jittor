@@ -559,6 +559,43 @@ def _checkpoint(fn, *args, use_reentrant=None, preserve_rng_state=True,
                                   context_fn=replay_context, **kwargs)
 
 
+def _checkpoint_get_device_states(*args):
+    """Snapshot CUDA RNG streams for tensor arguments to checkpointed code."""
+    import torch
+
+    devices = []
+
+    def visit(value):
+        if isinstance(value, jt.Var):
+            device = value.device
+            if device.type not in ("cpu", "meta"):
+                if device.type != "cuda":
+                    raise NotImplementedError(f"checkpoint RNG state for {device.type}")
+                devices.append(0 if device.index is None else int(device.index))
+        elif isinstance(value, dict):
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, (tuple, list)):
+            for child in value:
+                visit(child)
+
+    visit(args)
+    return devices, [torch.cuda.get_rng_state(device) for device in devices]
+
+
+def _checkpoint_set_device_states(devices, states, *, device_type=None):
+    """Restore the streams returned by :func:`_checkpoint_get_device_states`."""
+    if device_type == "meta":
+        return
+    if device_type not in (None, "cuda"):
+        raise NotImplementedError(f"checkpoint RNG state for {device_type}")
+    if len(devices) != len(states):
+        raise ValueError("checkpoint device and RNG state counts differ")
+    import torch
+    for device, state in zip(devices, states):
+        torch.cuda.set_rng_state(state, device)
+
+
 def _default_convert(value):
     return value
 
@@ -605,6 +642,14 @@ register_fidelity(
     "torch.utils.checkpoint.checkpoint", _checkpoint, Fidelity.APPROXIMATE,
     "native first-order reentrant activation replay with RNG and captured parameter gradients; "
     "non-reentrant and debug/context_fn variants are not implemented",
+)
+register_fidelity(
+    "torch.utils.checkpoint.get_device_states", _checkpoint_get_device_states, Fidelity.APPROXIMATE,
+    "CUDA tensor arguments in nested dict/list/tuple containers; custom pytree nodes are not traversed",
+)
+register_fidelity(
+    "torch.utils.checkpoint.set_device_states", _checkpoint_set_device_states, Fidelity.APPROXIMATE,
+    "restores Jittor CUDA RNG streams; unsupported device types raise",
 )
 register_fidelity(
     "torchdata.stateful_dataloader.StatefulDataLoader", StatefulDataLoader,
@@ -665,5 +710,7 @@ def install(ctx):
     else:
         _ckpt = _modules["torch.utils.checkpoint"]
     _ckpt.checkpoint = _checkpoint
+    _ckpt.get_device_states = _checkpoint_get_device_states
+    _ckpt.set_device_states = _checkpoint_set_device_states
     g.utils.checkpoint = _ckpt
     _install_torchdata_stateful_dataloader(g, ctx.registry)
