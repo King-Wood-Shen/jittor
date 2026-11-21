@@ -771,6 +771,15 @@ def linear_init(self, in_features, out_features, bias=True,
     self.to(device=device, dtype=target_dtype)
 
 
+def layer_norm_init(self, normalized_shape, eps=1e-5,
+                    elementwise_affine=True, bias=True, device=None, dtype=None):
+    _context = get_install_context(jt)
+    native_layer_norm_init = _context.state["nn_extra_native"]["native_layer_norm_init"]
+    native_layer_norm_init(self, normalized_shape, eps, elementwise_affine, bias)
+    target_dtype = dtype if dtype is not None else _context.target_namespace.get_default_dtype()
+    self.to(device=device, dtype=target_dtype)
+
+
 def embedding_init(self, num_embeddings, embedding_dim, padding_idx=None,
                    max_norm=None, norm_type=2.0,
                    scale_grad_by_freq=False, sparse=False,

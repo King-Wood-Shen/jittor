@@ -50,6 +50,7 @@ from .extra_api import (
     clip_grad_norm_,
     clip_grad_value_,
     embedding_init,
+    layer_norm_init,
     linear_init,
     pad_sequence,
     remove_weight_norm,
@@ -485,6 +486,13 @@ def _install_nn_extras(nn, registry=None):
         linear_cls.__init__ = linear_init
         linear_cls._torch_dtype_patched = True
 
+    layer_norm_cls = getattr(nn, "LayerNorm", None)
+    if (layer_norm_cls is not None and
+            not getattr(layer_norm_cls, "_torch_dtype_patched", False)):
+        native_layer_norm_init = layer_norm_cls.__init__
+        layer_norm_cls.__init__ = layer_norm_init
+        layer_norm_cls._torch_dtype_patched = True
+
     embedding_cls = getattr(nn, "Embedding", None)
     if (embedding_cls is not None and
             not getattr(embedding_cls, "_torch_dtype_patched", False)):
@@ -498,6 +506,7 @@ def _install_nn_extras(nn, registry=None):
         "dropout_initializers": MappingProxyType(_dropout_initializers),
         "_jt_linear": locals().get("_jt_linear"),
         "native_linear_init": locals().get("native_linear_init"),
+        "native_layer_norm_init": locals().get("native_layer_norm_init"),
         "native_embedding_init": locals().get("native_embedding_init"),
     })
 

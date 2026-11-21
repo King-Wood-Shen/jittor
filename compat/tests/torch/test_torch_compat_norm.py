@@ -162,6 +162,24 @@ class TestBatchNorm(Base):
 # --------------------------------------------------------------------------- LayerNorm
 
 class TestLayerNorm(Base):
+    def test_ln_constructor_dtype(self):
+        old_dtype = torch.get_default_dtype()
+        try:
+            torch.set_default_dtype(torch.bfloat16)
+            for dev, use_cuda in _DEVICES:
+                with jt.flag_scope(use_cuda=use_cuda):
+                    for name, layer in (
+                        ("default", nn.LayerNorm(5)),
+                        ("explicit", nn.LayerNorm(5, dtype=torch.float32)),
+                        ("bias_false", nn.LayerNorm(5, bias=False)),
+                    ):
+                        expected = torch.float32 if name == "explicit" else torch.bfloat16
+                        self.assertEqual(layer.weight.dtype, expected, (dev, name))
+                        if name != "bias_false":
+                            self.assertEqual(layer.bias.dtype, expected, (dev, name))
+        finally:
+            torch.set_default_dtype(old_dtype)
+
     def test_ln_basic(self):
         rng = np.random.RandomState(210)
         x = rng.randn(4, 5).astype("float32")
