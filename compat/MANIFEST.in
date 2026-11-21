@@ -26,6 +26,8 @@ include shim/resources/stubs/__init__.py
 include shim/resources/stubs/flash_attn/__init__.py
 include shim/resources/stubs/flash_attn/bert_padding.py
 include shim/resources/stubs/flash_attn/flash_attn_interface.py
+include shim/resources/stubs/flash_attn/layers/__init__.py
+include shim/resources/stubs/flash_attn/layers/rotary.py
 include shim/resources/stubs/flash_attn/ops/__init__.py
 include shim/resources/stubs/flash_attn/ops/triton/__init__.py
 include shim/resources/stubs/flash_attn/ops/triton/rotary.py

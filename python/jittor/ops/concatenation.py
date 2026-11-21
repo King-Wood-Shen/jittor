@@ -95,6 +95,22 @@ def _empty_where_the_inputs_are(x, shape, dtype):
     jt = _jt()
     core = jt.core
     device_id = int(x.device_id)
+    backend = int(x.placement_backend)
+    requested = core._current_tensor_placement()
+    # `concat` has no device argument: its output belongs with its inputs.
+    # A caller scope may still carry a different placement (Qwen2.5-VL has a
+    # CPU request around CUDA `unique_consecutive`).  The ordinary
+    # `placement_scope_like` deliberately defers to such requests for *_like
+    # factories, so override it only for this concat destination.
+    if backend >= 0 and requested is not None and tuple(requested) != (
+            backend, max(device_id, 0)):
+        token = core._set_tensor_placement(backend, max(device_id, 0))
+        previous = core._set_construction_placement(backend, max(device_id, 0))
+        try:
+            return jt.empty(shape, dtype=dtype)
+        finally:
+            core._restore_construction_placement(previous)
+            core._reset_tensor_placement(token)
     if ((int(x.placement_backend) < 0 or core._current_tensor_placement() is not None)
             and (device_id < 0 or device_id == int(jt.current_device()))):
         return jt.empty(shape, dtype=dtype)

@@ -792,6 +792,50 @@ def install(ctx):
     _fx.wrap = _api_fx_wrap
     _modules["torch.fx"] = _fx
     g.fx = _fx
+    # Transformers registers cache flatteners at import time.  Keep the FX
+    # registry functional: callers that actually flatten a tree must get the
+    # same leaves or a spec mismatch, never a fabricated successful trace.
+    _fx_pytree = _types2.ModuleType("torch.fx._pytree")
+    _fx_pytree.SUPPORTED_NODES = {}
+    _fx_pytree.SUPPORTED_NODES_EXACT_MATCH = {}
+
+    def _register_fx_pytree(cls, flatten_fn_spec,
+                            flatten_fn_exact_match_spec=None):
+        _fx_pytree.SUPPORTED_NODES[cls] = flatten_fn_spec
+        _fx_pytree.SUPPORTED_NODES_EXACT_MATCH[cls] = (
+            flatten_fn_exact_match_spec)
+
+    def _flatten_fx_pytree_spec(value, spec):
+        if spec.is_leaf():
+            return [value]
+        flatten = _fx_pytree.SUPPORTED_NODES.get(spec.type)
+        if flatten is None:
+            flat, real_spec = g.utils._pytree.tree_flatten(value)
+            if spec != real_spec:
+                raise RuntimeError(
+                    f"Real spec {real_spec} differs from expected spec {spec}")
+            return flat
+        children = flatten(value, spec)
+        specs = spec.children()
+        if len(children) != len(specs):
+            raise ValueError("FX pytree flattener returned wrong child count")
+        return [leaf for child, child_spec in zip(children, specs)
+                for leaf in _flatten_fx_pytree_spec(child, child_spec)]
+
+    _fx_pytree.register_pytree_flatten_spec = _register_fx_pytree
+    _fx_pytree.tree_flatten_spec = _flatten_fx_pytree_spec
+    _fx_pytree._dict_flatten_spec = lambda value, spec: [
+        value[key] for key in spec.context]
+    _register_fx_pytree(dict, _fx_pytree._dict_flatten_spec,
+                        lambda value, spec: len(value) == spec.num_children)
+    _register_fx_pytree(list, lambda value, spec: [
+        value[i] for i in range(spec.num_children)],
+        lambda value, spec: len(value) == spec.num_children)
+    _register_fx_pytree(tuple, lambda value, spec: [
+        value[i] for i in range(spec.num_children)],
+        lambda value, spec: len(value) == spec.num_children)
+    _fx._pytree = _fx_pytree
+    _modules["torch.fx._pytree"] = _fx_pytree
     # torch._dynamo: minimal importable stubs for libraries that probe or
     # decorate with Dynamo APIs. Jittor runs eagerly/JIT through its own stack.
     _dynamo = _types2.ModuleType("torch._dynamo")

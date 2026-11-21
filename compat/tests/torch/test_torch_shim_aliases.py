@@ -331,14 +331,17 @@ print('RESULT=' + json.dumps(sorted(k for k in sys.modules if k == 'torch' or k.
 import json
 import torch
 from flash_attn.ops.triton.rotary import apply_rotary
+from flash_attn.layers.rotary import apply_rotary_emb
 x = torch.tensor([[[[1.0, 2.0, 3.0, 4.0]]]])
 cos = torch.zeros((1, 2))
 sin = torch.ones((1, 2))
 neox = apply_rotary(x, cos, sin)
+layers_neox = apply_rotary_emb(x, cos, sin)
 interleaved = apply_rotary(x, cos, sin, interleaved=True)
 same = apply_rotary(x, torch.ones((1, 2)), torch.zeros((1, 2)), inplace=True)
 print('RESULT=' + json.dumps({
     'neox': neox.numpy().tolist(),
+    'layers_neox': layers_neox.numpy().tolist(),
     'interleaved': interleaved.numpy().tolist(),
     'inplace_identity': same is x,
 }))
@@ -349,6 +352,7 @@ print('RESULT=' + json.dumps({
             result,
             {
                 "neox": [[[[-3.0, -4.0, 1.0, 2.0]]]],
+                "layers_neox": [[[[-3.0, -4.0, 1.0, 2.0]]]],
                 "interleaved": [[[[-2.0, 1.0, -4.0, 3.0]]]],
                 "inplace_identity": True,
             },

@@ -69,6 +69,7 @@ class TestTorchShimStructure(unittest.TestCase):
             "compat/shim/runtime.py",
             "compat/shim/cpp_extension/include/ATen/cuda/detail/UnpackRaw.cuh",
             "compat/shim/resources/stubs/flash_attn/flash_attn_interface.py",
+            "compat/shim/resources/stubs/flash_attn/layers/rotary.py",
             "compat/shim/resources/stubs/flash_attn/ops/triton/rotary.py",
             "compat/shim/resources/flash_attn_dist_info/METADATA",
             "compat/shim/resources/flash_attn_dist_info/top_level.txt",
