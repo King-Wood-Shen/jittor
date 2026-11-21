@@ -5,7 +5,7 @@
 # ***************************************************************
 """`nn.Linear` through cuBLASLt: bias folded in, algorithm picked by timing.
 
-The fast path answers for a forward under no_grad on dense float16/float32; every
+The fast path answers for a forward under no_grad on dense float16/bfloat16/float32; every
 other shape of the problem has to reach the portable path instead, because
 this op has no backward and silently losing a gradient would be worse than
 any speedup. So most of what is pinned here is the falling back.
@@ -160,10 +160,15 @@ class TestLtLinearCuda(unittest.TestCase):
         xn, wn, bn = self._arrays((512, 512), 512, 512)
         x, w, b = jt.array(xn), jt.array(wn), jt.array(bn)
         with jt.no_grad():
-            # bfloat16 needs its own descriptors and its own accumulate rule
-            self.assertIsNone(lt_linear_cuda(x.cast("bfloat16"),
-                                             w.cast("bfloat16"),
-                                             b.cast("bfloat16")))
+            # BF16 uses the fused-bias CUDA route: separate matmul and add
+            # round twice and disagree with torch.nn.functional.linear.
+            xb, wb, bb = (v.cast("bfloat16") for v in (x, w, b))
+            fused_bf16 = lt_linear_cuda(xb, wb, bb)
+            self.assertIsNotNone(fused_bf16)
+            self.assertEqual(str(fused_bf16.dtype), "bfloat16")
+            expected = xb.float32().numpy() @ wb.float32().numpy().T + bb.float32().numpy()
+            np.testing.assert_allclose(fused_bf16.float32().numpy(), expected,
+                                       rtol=2e-2, atol=2e-2)
             # a problem too small to be worth timing
             small = jt.array(self.rs.randn(2, 4).astype("float32"))
             sw = jt.array(self.rs.randn(3, 4).astype("float32"))
