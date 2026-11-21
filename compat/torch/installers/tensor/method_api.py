@@ -446,13 +446,22 @@ class _Storage:
         return _storage_reach_elements(self._var) * _storage_dsize(self._var)
 
 
+def _round_bfloat_add_result(result):
+    # Torch stores each BF16 addition before a following operation. Jittor's
+    # fusion can otherwise carry the FP32 intermediate into the next add (as
+    # in BERT's word + type += position embeddings), skipping both roundings.
+    if isinstance(result, _NativeVar) and _jittor_dtype_name(result.dtype) == "bfloat16":
+        result.stop_fuse()
+    return result
+
+
 def _add(input, other, *, alpha=1, out=None):
     _context = get_install_context(_owner.jt)
     _native = _context.state["tensor_native_api"]
     _native_add = _native['_native_add']
     if alpha != 1:
         other = other * alpha
-    result = _native_add(input, other)
+    result = _round_bfloat_add_result(_native_add(input, other))
     if out is not None:
         return _owner._assign_out(out, result)
     return result
@@ -1421,8 +1430,8 @@ def _tensor_add(self, other):
     if fast is not None:
         out = fast(self, other, 0)
         if out is not None:
-            return out
-    return _promoting_binary(self, other, '__add__', False)
+            return _round_bfloat_add_result(out)
+    return _round_bfloat_add_result(_promoting_binary(self, other, '__add__', False))
 
 
 def _tensor_radd(self, other):
@@ -1430,8 +1439,8 @@ def _tensor_radd(self, other):
     if fast is not None:
         out = fast(self, other, 1)
         if out is not None:
-            return out
-    return _promoting_binary(self, other, '__radd__', True)
+            return _round_bfloat_add_result(out)
+    return _round_bfloat_add_result(_promoting_binary(self, other, '__radd__', True))
 
 
 def _tensor_sub(self, other):

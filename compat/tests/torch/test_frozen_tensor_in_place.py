@@ -23,6 +23,19 @@ def _write(tensor, how):
 
 
 class TestFrozenTensorInPlace(unittest.TestCase):
+    def _check_bfloat_add_rounding(self, device):
+        x = torch.tensor([1.0, 1.0078125, -0.5], dtype=torch.bfloat16, device=device)
+        y = torch.tensor([0.00390625, 0.0078125, 0.25], dtype=torch.bfloat16, device=device)
+        z = torch.tensor([0.00390625, -0.00390625, 0.125], dtype=torch.bfloat16, device=device)
+        expected_first = [1.0, 1.015625, -0.25]
+        expected_final = [1.0, 1.015625, -0.125]
+        for first in (x + y, torch.add(x, y)):
+            self.assertEqual(first.dtype, torch.bfloat16)
+            self.assertEqual(first.float().cpu().tolist(), expected_first)
+            first += z
+            self.assertEqual(first.dtype, torch.bfloat16)
+            self.assertEqual(first.float().cpu().tolist(), expected_final)
+
     def _check_data_iadd_dtype(self, device):
         delta = torch.tensor([0.000123], dtype=torch.float32, device=device)
         for make_parameter in (False, True):
@@ -54,6 +67,9 @@ class TestFrozenTensorInPlace(unittest.TestCase):
     def test_data_iadd_dtype_cpu(self):
         self._check_data_iadd_dtype("cpu")
 
+    def test_bfloat_add_rounding_cpu(self):
+        self._check_bfloat_add_rounding("cpu")
+
     @unittest.skipUnless(torch.cuda.is_available(), "No CUDA found")
     def test_cuda(self):
         self._check("cuda")
@@ -61,6 +77,10 @@ class TestFrozenTensorInPlace(unittest.TestCase):
     @unittest.skipUnless(torch.cuda.is_available(), "No CUDA found")
     def test_data_iadd_dtype_cuda(self):
         self._check_data_iadd_dtype("cuda")
+
+    @unittest.skipUnless(torch.cuda.is_available(), "No CUDA found")
+    def test_bfloat_add_rounding_cuda(self):
+        self._check_bfloat_add_rounding("cuda")
 
 
 if __name__ == "__main__":
