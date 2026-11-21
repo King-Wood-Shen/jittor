@@ -314,10 +314,32 @@ def _source(rows, cin, cout, dtype):
         int found = 0;
         cublasLtMatmulAlgoGetHeuristic(lt, op, la, lb, lc, lc, pref,
                                        {_CANDIDATES}, cand, &found);
+        // Split-K reductions in the output (BF16) type can lose enough
+        // precision to change model predictions. Prefer candidates that
+        // reduce partial sums in the compute (FP32) type when offered.
+        bool prefer_compute_reduction = false;
+        if ({"true" if dtype == "bfloat16" else "false"}) {{
+            for (int c = 0; c < found; c++) {{
+                int scheme = -1; size_t written = 0;
+                if (cublasLtMatmulAlgoConfigGetAttribute(
+                        &cand[c].algo, CUBLASLT_ALGO_CONFIG_REDUCTION_SCHEME,
+                        &scheme, sizeof(scheme), &written) == CUBLAS_STATUS_SUCCESS &&
+                    scheme == CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE)
+                    prefer_compute_reduction = true;
+            }}
+        }}
         cudaEvent_t beg, end;
         cudaEventCreate(&beg); cudaEventCreate(&end);
         float best = 1e30f;
         for (int c = 0; c < found; c++) {{
+            if (prefer_compute_reduction) {{
+                int scheme = -1; size_t written = 0;
+                if (cublasLtMatmulAlgoConfigGetAttribute(
+                        &cand[c].algo, CUBLASLT_ALGO_CONFIG_REDUCTION_SCHEME,
+                        &scheme, sizeof(scheme), &written) != CUBLAS_STATUS_SUCCESS ||
+                    scheme != CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE)
+                    continue;
+            }}
             auto once = [&]() {{
                 // Explicit stream: jittor runs on `cudaStreamPerThread`, which
                 // does not synchronise with the legacy default stream.

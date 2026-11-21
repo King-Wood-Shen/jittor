@@ -338,7 +338,7 @@ class TestNativeModuleDispatch(unittest.TestCase):
 
     def test_a_bias_free_linear(self):
         device = _cuda()
-        for dtype in (torch.float32, torch.float16):
+        for dtype in (torch.float32, torch.float16, torch.bfloat16):
             layer = torch.nn.Linear(8, 5, bias=False).to(device=device, dtype=dtype)
             outer = torch.nn.Sequential(layer)
             x = torch.randn(2, 3, 8, device=device, dtype=dtype)
