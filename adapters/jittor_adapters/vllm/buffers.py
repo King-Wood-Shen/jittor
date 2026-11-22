@@ -13,6 +13,19 @@ _SAMPLE_META_SNAPSHOT = '_jittor_sample_meta_snapshot'
 _H2D_SYNC_BATCH = local()
 
 
+def _writable_host_view(tensor):
+    """Recover Jittor's writable NumPy DataView under Torch `.data` semantics."""
+    import numpy as np
+
+    descriptor = getattr(type(tensor), '_vj_native_data_descriptor', None)
+    if descriptor is None:
+        raise RuntimeError('Jittor native data descriptor is unavailable')
+    view = descriptor.__get__(tensor, type(tensor))
+    if not isinstance(view, np.ndarray) or not view.flags.writeable:
+        raise TypeError('Jittor native data is not a writable NumPy array')
+    return view
+
+
 class _PendingHostCopy:
     """Receive one side-stream ``jt.fetch`` into an owned NumPy snapshot.
 
@@ -1571,7 +1584,7 @@ def patch_cpu_gpu_buffer(module):
     def get_numpy(self):
         if not getattr(self, '_jittor_has_numpy', False):
             raise AttributeError('CpuGpuBuffer was created with with_numpy=False')
-        return self.cpu.data
+        return _writable_host_view(self.cpu)
 
     def enable_numpy(self, value):
         # The upstream constructor assigns cpu.numpy() once, after rejecting
@@ -1604,14 +1617,14 @@ def _host_array_property(array_name, tensor_name):
         tensor = getattr(self, tensor_name, None)
         if tensor is None:
             return self.__dict__[array_name]
-        return tensor.data
+        return _writable_host_view(tensor)
 
     def write(self, value):
         tensor = getattr(self, tensor_name, None)
         if tensor is None:
             self.__dict__[array_name] = value
         else:
-            tensor.data[...] = value
+            _writable_host_view(tensor)[...] = value
 
     return property(read, write)
 
