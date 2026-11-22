@@ -308,9 +308,11 @@ class TestLayerNorm(Base):
             raise AssertionError("BF16 CUDA inference used composite LayerNorm")
 
         with jt.flag_scope(use_cuda=1), jt.no_grad():
-            x = t(x_np).bfloat16()
-            weight = t(weight_np).bfloat16()
-            bias = t(bias_np).bfloat16()
+            # Torch factories default to CPU even when Jittor CUDA is enabled.
+            x = torch.tensor(x_np, device="cuda").bfloat16()
+            weight = torch.tensor(weight_np, device="cuda").bfloat16()
+            bias = torch.tensor(bias_np, device="cuda").bfloat16()
+            self.assertEqual(x.device.type, "cuda")
             try:
                 _normalization._ln_normalize = reject_composite
                 public = F.layer_norm(x, (768,), weight, bias, 1e-12)
