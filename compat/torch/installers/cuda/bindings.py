@@ -454,6 +454,7 @@ def _install_version(g, registry=None):
         swallowed("torch/installers/cuda/bindings.py _install_version: nv = getattr(getattr(jt, 'compiler', None), 'nvcc_versi...", exc)
         version.cuda = None
     version.hip = None
+    version.xpu = None
     version.git_version = "jittor"
     _modules["torch.version"] = version
     g.version = version
