@@ -126,7 +126,7 @@ def arm(transaction=None, *, register_callback=None):
     """
 
     from . import (backend, layers, flash_attn, model_loader, buffers,
-                   runner_policy, serialization, observation)
+                   runner_policy, serialization, observation, capability_policy)
     registrar = register_module_patch if register_callback is None else register_callback
 
     if not any(isinstance(finder, _ArmOnFirstImport) for finder in sys.meta_path):
@@ -149,7 +149,8 @@ def arm(transaction=None, *, register_callback=None):
             transaction.record_undo(restore_finder)
     for patches in (runner_policy.PATCHES, backend.PATCHES, layers.PATCHES,
                     flash_attn.PATCHES, model_loader.PATCHES, buffers.PATCHES,
-                    serialization.PATCHES, observation.PATCHES):
+                    serialization.PATCHES, observation.PATCHES,
+                    capability_policy.PATCHES):
         for path, patch in patches.items():
             registrar(path, patch)
     return True
