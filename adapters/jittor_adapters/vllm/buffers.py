@@ -1597,14 +1597,19 @@ _INPUT_BATCH_HOST_ARRAYS = {
 }
 
 
-def _host_array_property(tensor_name):
-    import jittor as jt
-
+def _host_array_property(array_name, tensor_name):
     def read(self):
-        return getattr(self, tensor_name).data
+        tensor = getattr(self, tensor_name, None)
+        if tensor is None:
+            return self.__dict__[array_name]
+        return tensor.data
 
     def write(self, value):
-        read(self)[...] = value
+        tensor = getattr(self, tensor_name, None)
+        if tensor is None:
+            self.__dict__[array_name] = value
+        else:
+            tensor.data[...] = value
 
     return property(read, write)
 
@@ -1615,7 +1620,7 @@ def patch_input_batch_host_arrays(module):
     if getattr(cls, '_jittor_host_arrays', False):
         return False
     for array_name, tensor_name in _INPUT_BATCH_HOST_ARRAYS.items():
-        set_attr(cls, array_name, _host_array_property(tensor_name))
+        set_attr(cls, array_name, _host_array_property(array_name, tensor_name))
 
     def make_prompt_token_ids_cpu_tensor(self):
         import jittor as jt
