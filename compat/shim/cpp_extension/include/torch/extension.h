@@ -273,9 +273,7 @@ public:
     Tensor view(IntArrayRef shape) const;
     Tensor view(ScalarType st) const;          // bit-reinterpret to same-width dtype
     Tensor reshape(IntArrayRef shape) const { return view(shape); }
-    Tensor transpose(int64_t, int64_t) const {
-        throw std::runtime_error("Tensor::transpose is not implemented in the Jittor torch shim");
-    }
+    Tensor transpose(int64_t dim0, int64_t dim1) const;
     Tensor clone() const;
     // in-place reallocation (diff-gaussian-rasterization's resizeFunctional grows
     // empty byte buffers to the size the rasterizer computes): swaps the underlying

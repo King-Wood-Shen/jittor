@@ -22,6 +22,7 @@
 #include "core/var_holder.h"
 #include "core/executor.h"
 #include "ops/op_register.h"
+#include "ops/composite/transpose_op.h"
 #include "mem/allocator.h"
 #include "runtime/device.h"
 #include "bindings/pyjt/py_obj_holder.h"
@@ -797,6 +798,21 @@ Tensor Tensor::view(IntArrayRef shape) const {
     static auto maker = jittor::get_op_info("reshape")
         .get_constructor<jittor::VarPtr, jittor::Var*, jittor::NanoVector>();
     jittor::VarPtr vp = maker(_vh()->var, to_nv(shape));
+    return detail::adopt(new jittor::VarHolder(std::move(vp)), true);
+}
+Tensor Tensor::transpose(int64_t dim0, int64_t dim1) const {
+    const int64_t ndim = dim();
+    if (dim0 < 0) dim0 += ndim;
+    if (dim1 < 0) dim1 += ndim;
+    if (dim0 < 0 || dim0 >= ndim || dim1 < 0 || dim1 >= ndim)
+        throw std::out_of_range("jtorch::Tensor::transpose dimension out of range");
+    std::vector<int64_t> axes;
+    axes.reserve(ndim);
+    for (int64_t i = 0; i < ndim; ++i)
+        axes.push_back(i == dim0 ? dim1 : i == dim1 ? dim0 : i);
+    static auto maker = jittor::get_op_info("transpose")
+        .get_constructor<jittor::VarPtr, jittor::Var*, jittor::NanoVector>();
+    jittor::VarPtr vp = maker(_vh()->var, to_nv(axes));
     return detail::adopt(new jittor::VarHolder(std::move(vp)), true);
 }
 Tensor Tensor::operator[](int64_t i) const {

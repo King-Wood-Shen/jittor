@@ -224,6 +224,10 @@ torch::Tensor identity(torch::Tensor x) {
     return x;
 }
 
+torch::Tensor transpose_1_2(torch::Tensor x) {
+    return x.transpose(1, 2);
+}
+
 int64_t first_dim(torch::Tensor x) {
     return x.size(0);
 }
@@ -271,7 +275,7 @@ torch::Tensor zeros_like_with_options(torch::Tensor x) {
             name="jt_cpp_extension_test",
             cpp_sources=src,
             functions=[
-                "identity", "first_dim", "is_cpu_tensor",
+                "identity", "transpose_1_2", "first_dim", "is_cpu_tensor",
                 "empty_byte_data_ptr_is_null", "resize_byte_buffer",
                 "sort_values", "select_dim0", "mask_ne", "view_as_bytes",
                 "zeros_like_with_options",
@@ -293,6 +297,27 @@ torch::Tensor zeros_like_with_options(torch::Tensor x) {
         self.assertAlmostEqual(float(y.sum().item()), 10.0)
         self.assertEqual(mod.first_dim(x), 2)
         self.assertTrue(mod.is_cpu_tensor(x))
+
+    def test_cpp_transpose_one_token_gqa_layout(self):
+        import numpy as np
+        import torch
+
+        mod = self._build_probe_extension()
+        values = np.arange(1 * 2 * 3 * 4, dtype=np.float32).reshape(1, 2, 3, 4)
+        with jt.runtime.scope(use_cuda=0, backend_fallback="error"):
+            cpu = mod.transpose_1_2(torch.tensor(values, device="cpu"))
+            self.assertEqual(tuple(cpu.shape), (1, 3, 2, 4))
+            self.assertTrue(mod.is_cpu_tensor(cpu))
+            np.testing.assert_array_equal(cpu.numpy(), values.transpose(0, 2, 1, 3))
+        before = int(jt.core.backend_fallback_count())
+        with jt.runtime.scope(use_cuda=1, backend_fallback="error"):
+            x = torch.tensor(values, device="cuda:0")
+            y = mod.transpose_1_2(x)
+            jt.sync_all()
+            self.assertEqual(tuple(y.shape), (1, 3, 2, 4))
+            self.assertEqual(str(y.device), "cuda:0")
+            np.testing.assert_array_equal(y.numpy(), values.transpose(0, 2, 1, 3))
+        self.assertEqual(int(jt.core.backend_fallback_count()), before)
 
     def test_cuda_extension_preserves_setup_metadata(self):
         from torch.utils.cpp_extension import CUDAExtension
