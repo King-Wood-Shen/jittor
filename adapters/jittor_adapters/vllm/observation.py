@@ -12,12 +12,17 @@ def patch_pool_capture(module):
     path = os.environ.get("JITTOR_VLLM_POOL_CAPTURE")
     if not path:
         return False
+    import jittor as jt
+    fallback_before = int(jt.core.backend_fallback_count())
+    assert fallback_before == 0, fallback_before
     runner = module.GPUModelRunner
     original = runner._pool
 
     @wraps(original)
     def pool(self, *args, **kwargs):
         result = original(self, *args, **kwargs)
+        fallback_after = int(jt.core.backend_fallback_count())
+        assert fallback_after == fallback_before == 0, (fallback_before, fallback_after)
         target = Path(path)
         if not target.exists():
             batch = self.input_batch
@@ -34,7 +39,9 @@ def patch_pool_capture(module):
                 "request_id": result.req_ids[0],
                 "prompt_token_ids": tokens,
                 "pooler_output": [float(value) for value in values],
-                "pooler_output_kind": "vllm classify activation",
+                "pooler_output_kind": "vllm classify raw logits (activation disabled)",
+                "fallback_cumulative_before": fallback_before,
+                "fallback_cumulative_after": fallback_after,
             }
             with target.open("x") as stream:
                 json.dump(record, stream, indent=2)
