@@ -978,6 +978,9 @@ def _acl_compute_v1_slot_mapping(table, counts, starts, positions,
 
 def patch_v1_block_table_metadata(module):
     """Replace only the unavailable Triton slot kernel on Jittor ACL."""
+    import jittor as jt
+    if not _acl_active(jt):
+        return False
     cls = module.BlockTable
     marker = '_jittor_acl_slot_mapping'
     if getattr(cls, marker, False):
