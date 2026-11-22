@@ -26,18 +26,6 @@ def apply_external_runtime_patches(logger=None, transaction=None):
         _warning(logger, "external runtime patch triton skipped: %s" % error)
 
     try:
-        from jittor.compat import vllm as _vllm_compat
-
-        report["vllm_shim"] = {"ok": True, "armed": bool(_vllm_compat.register())}
-    except EXPECTED as error:
-        swallowed("integrations.py apply_external_runtime_patches: from jittor.compat import vllm as _vllm_compat", error)
-        report["vllm_shim"] = {
-            "ok": False,
-            "error": "%s: %s" % (type(error).__name__, error),
-        }
-        _warning(logger, "external runtime patch vllm skipped: %s" % error)
-
-    try:
         from jittor.compat.module_patcher import install_module_patches
 
         transaction = transaction or active_transaction()
