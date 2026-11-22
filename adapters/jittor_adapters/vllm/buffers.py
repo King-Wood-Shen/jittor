@@ -1374,7 +1374,9 @@ def patch_model_runner_host_lengths(module):
     @wraps(original_init)
     def initialize(self, *args, **kwargs):
         original_init(self, *args, **kwargs)
-        self.optimistic_seq_lens_cpu = self.optimistic_seq_lens_cpu.to(device='cpu')
+        host_lengths = getattr(self, 'optimistic_seq_lens_cpu', None)
+        if host_lengths is not None:
+            self.optimistic_seq_lens_cpu = host_lengths.to(device='cpu')
 
     set_attr(cls, '__init__', initialize)
     set_attr(cls, '_jittor_host_lengths', True)
