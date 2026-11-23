@@ -1363,6 +1363,8 @@ def _tensor_mul(self, other):
 
 
 def _tensor_rmul(self, other):
+    if isinstance(other, str):
+        return NotImplemented  # Let Python repeat the string via Tensor.__index__.
     return _promoting_binary(self, other, '__rmul__', True)
 
 
