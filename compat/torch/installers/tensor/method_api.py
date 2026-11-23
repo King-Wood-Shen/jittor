@@ -333,8 +333,18 @@ def _clamp(input, min=None, max=None, min_v=None, max_v=None):
 
 
 def _torch_ne(input, other):
-    a = input if isinstance(input, _NativeVar) else _owner.jt.array(input)
-    b = other if isinstance(other, _NativeVar) else _owner.jt.array(other)
+    if isinstance(input, _NativeVar):
+        a = input
+    elif isinstance(other, _NativeVar):
+        with _new_scope(other, other.device):
+            a = _owner.jt.array(input)
+    else:
+        a = _owner.jt.array(input)
+    if isinstance(other, _NativeVar):
+        b = other
+    else:
+        with _new_scope(a, a.device):
+            b = _owner.jt.array(other)
     if _jittor_dtype_name(a.dtype) == "bool":
         a = a.int32()
     if isinstance(b, _NativeVar) and _jittor_dtype_name(b.dtype) == "bool":
