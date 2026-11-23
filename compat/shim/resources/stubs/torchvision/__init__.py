@@ -71,7 +71,7 @@ def _to_tensor(pic):
     return _jt.array(arr.copy())
 
 def _resize(img, size, interpolation="bilinear", antialias=True, **k):
-    # img: CHW (or NCHW) Var. size: int or (h,w). Route through jittor interpolate.
+    # img: (..., C, H, W) Var. Route each frame through Jittor interpolate.
     interp = getattr(interpolation, "value", interpolation)
     interp = str(interp).lower()
     mode = {"bilinear": "bilinear", "bicubic": "bicubic", "nearest": "nearest",
@@ -83,7 +83,8 @@ def _resize(img, size, interpolation="bilinear", antialias=True, **k):
         else:      nh, nw = int(round(size * h / w)), size
     else:
         nh, nw = int(size[0]), int(size[1])
-    x = img if img.ndim == 4 else img.unsqueeze(0)
+    leading = tuple(img.shape[:-2])
+    x = img if img.ndim == 4 else img.reshape((-1, *img.shape[-3:]))
     was_uint8 = "uint8" in _jittor_dtype_name(x.dtype)
     xf = x.float32()
     align = False if mode in ("bilinear", "bicubic") else None
@@ -95,7 +96,7 @@ def _resize(img, size, interpolation="bilinear", antialias=True, **k):
         y = _nn.interpolate(xf, size=(nh, nw), mode="bilinear", align_corners=False)
     if was_uint8:
         y = y.round().clamp(0, 255).uint8()
-    return y if img.ndim == 4 else y.squeeze(0)
+    return y if img.ndim == 4 else y.reshape((*leading, nh, nw))
 
 def _normalize(img, mean, std, inplace=False, **k):
     m = _jt.array(mean).reshape((-1, 1, 1)).float32()
