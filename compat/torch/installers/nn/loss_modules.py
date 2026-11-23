@@ -54,6 +54,19 @@ class NLLLoss(_FunctionalLoss):
     argument_order = ("weight", "size_average", "ignore_index")
 
 
+class CosineSimilarity(Module):
+    """Compute cosine similarity along a dimension."""
+
+    def __init__(self, dim=1, eps=1e-8):
+        super().__init__()
+        self.dim = dim
+        self.eps = eps
+
+    def execute(self, x1, x2):
+        functional = get_install_context(jt).target_namespace.nn.functional
+        return functional.cosine_similarity(x1, x2, dim=self.dim, eps=self.eps)
+
+
 class PixelShuffle(Module):
     def __init__(self, factor):
         super().__init__()
