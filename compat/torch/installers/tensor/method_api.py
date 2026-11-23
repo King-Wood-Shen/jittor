@@ -1487,6 +1487,25 @@ def _api_normal(self, mean=0.0, std=1.0, generator=None):
     return _ip(self, _owner.jt.normal(float(mean), float(std), self.shape).cast(_jittor_dtype_name(self.dtype)))
 
 
+def _api_exponential(self, lambd=1.0, *, generator=None):
+    from ..nn_init import _assign
+
+    rate = float(lambd)
+    if not rate > 0.0:
+        raise RuntimeError("exponential_ expects a positive rate")
+    dtype = _jittor_dtype_name(self.dtype)
+    if dtype not in ("float16", "bfloat16", "float32", "float64"):
+        raise RuntimeError("exponential_ expects a floating point tensor")
+    torch = get_install_context(_owner.jt).target_namespace
+    calc_dtype = torch.float64 if dtype == "float64" else torch.float32
+    u = torch.rand(tuple(self.shape), dtype=calc_dtype, device=self.device,
+                   generator=generator)
+    # Clamp endpoints against backend-specific uniform generator rounding.
+    eps = torch.finfo(calc_dtype).eps
+    samples = -torch.log1p(-u.clamp(min=eps, max=1.0 - eps)) / rate
+    return _assign(self, samples.cast(dtype))
+
+
 def _api_uniform(self, a=0.0, b=1.0, generator=None):
     return _ip(self, (_owner.jt.rand(self.shape) * (b - a) + a).cast(_jittor_dtype_name(self.dtype)))
 
