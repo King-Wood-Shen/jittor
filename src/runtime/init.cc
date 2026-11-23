@@ -94,6 +94,10 @@ static void init_device_architectures() {
 #endif
 }
 
+static bool init_complete = false;
+
+bool runtime_init_complete() { return init_complete; }
+
 void init() {
     // init default_random_engine
     set_seed(time(0));
@@ -118,6 +122,7 @@ void init() {
     LOGv << "sizeof(Node)" << sizeof(Node);
     LOGv << "sizeof(Var)" << sizeof(Var);
     LOGv << "sizeof(Op)" << sizeof(Op);
+    init_complete = true;
 }
 
 void set_seed(int seed) {

@@ -6,6 +6,7 @@
 // ***************************************************************
 #include "runtime/device.h"
 #include "runtime/backend.h"
+#include "runtime/init.h"
 
 namespace jittor {
 
@@ -60,7 +61,9 @@ void setter_use_cuda(const int& old_value, const int& requested) {
 #else
     USER_CHECK(value == 0) << "No CUDA found.";
 #endif
-    if (old_value != value) {
+    // The environment setter also runs during shared-library loading.
+    // No graph can be pending before the core module is initialized.
+    if (old_value != value && runtime_init_complete()) {
         // Pending graphs were prepared for the old backend. The generated
         // setter rolls back to this value if submission throws.
         runtime_device_state().use_cuda = old_value;

@@ -13,6 +13,7 @@ namespace jittor {
 typedef void (*set_seed_callback)(int);
 
 void init();
+bool runtime_init_complete();
 
 /**
 Sets the seed of jittor random number generator. Also see @jittor.set_global_seed.
