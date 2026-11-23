@@ -95,8 +95,17 @@ def _empty_where_the_inputs_are(x, shape, dtype):
     jt = _jt()
     core = jt.core
     device_id = int(x.device_id)
-    if ((int(x.placement_backend) < 0 or core._current_tensor_placement() is not None)
-            and (device_id < 0 or device_id == int(jt.current_device()))):
+    backend = int(x.placement_backend)
+    if backend >= 0:
+        placement = (backend, max(device_id, 0))
+        if core._current_tensor_placement() == placement:
+            return jt.empty(shape, dtype=dtype)
+        token = core._set_tensor_placement(*placement)
+        try:
+            return jt.empty(shape, dtype=dtype)
+        finally:
+            core._reset_tensor_placement(token)
+    if device_id < 0 or device_id == int(jt.current_device()):
         return jt.empty(shape, dtype=dtype)
     with _allocate_where_the_inputs_are(x):
         return jt.empty(shape, dtype=dtype)
