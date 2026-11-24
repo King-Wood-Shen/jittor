@@ -330,10 +330,9 @@ class _OpsDispatcher:
             return namespaces[name]
         base = object.__getattribute__(self, "_base")
         if base is not None:
-            try:
-                return getattr(base, name)
-            except AttributeError as exc:
-                swallowed("torch/library.py __getattr__: return getattr(base, name)", exc)
+            native = getattr(base, name, None)
+            if native is not None:
+                return native
         with InstallTransaction._lock:
             if name not in namespaces:
                 _set_item(namespaces, name, _OpNamespace(name))

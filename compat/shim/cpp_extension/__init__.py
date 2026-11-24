@@ -154,13 +154,14 @@ def _find_pybind_include():
     vendored under a real torch install, while the active venv cannot import the
     ``pybind11`` Python package.  A C++ extension only needs the headers.
     """
-    try:
+    from importlib.util import find_spec
+
+    if find_spec("pybind11") is not None:
         import pybind11
+
         inc = pybind11.get_include()
         if os.path.isfile(os.path.join(inc, "pybind11", "pybind11.h")):
             return inc
-    except EXPECTED as exc:
-        swallowed("shim/cpp_extension/__init__.py _find_pybind_include: import pybind11", exc)
 
     candidates = []
     for prefix in dict.fromkeys([

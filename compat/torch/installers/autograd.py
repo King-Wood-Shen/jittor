@@ -53,6 +53,10 @@ def install(ctx):
 
 
 def _install_tensordict_compat():
+    from importlib.util import find_spec
+
+    if find_spec("tensordict") is None:
+        return
     try:
         from tensordict.base import TensorDictBase
         from tensordict._lazy import LazyStackedTensorDict
