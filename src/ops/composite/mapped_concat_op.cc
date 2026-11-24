@@ -13,12 +13,12 @@ namespace jittor {
 
 #ifndef JIT
 
-DECLARE_FLAG(bool, no_grad);
+DECLARE_RUNTIME_FLAG(bool, no_grad);
 
 MappedConcatOp::MappedConcatOp(vector<Var*>&& tensors, int dim)
     : tensors(tensors), dim(dim) {
     // The generated constructor still reads its argument to add graph edges.
-    USER_CHECK(no_grad) << "mapped_concat requires no_grad; training is unsupported";
+    USER_CHECK(runtime_flag_no_grad()) << "mapped_concat requires no_grad; training is unsupported";
     USER_CHECK(!this->tensors.empty()) << "mapped_concat requires at least one input";
     auto dtype = this->tensors[0]->dtype();
     for (auto* value : this->tensors)

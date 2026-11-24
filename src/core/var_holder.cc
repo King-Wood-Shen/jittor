@@ -832,7 +832,7 @@ void VarHolder::orphan_views() {
     views = nullptr;
 }
 
-extern bool no_grad;
+DECLARE_RUNTIME_FLAG(bool, no_grad);
 VarHolder* VarHolder::set_view_of(VarHolder* base, VarSlices&& slices,
                                 bool inherit_requires_grad) {
     drop_view();
@@ -846,7 +846,7 @@ VarHolder* VarHolder::set_view_of(VarHolder* base, VarSlices&& slices,
         // A view whose creation recorded no edge can inherit a later source
         // activation. Its public flag must not create an accumulator or turn
         // an already constructed consumer into a recorded edge.
-        bool unrecorded = no_grad || !enabled;
+        bool unrecorded = runtime_flag_no_grad() || !enabled;
         if (unrecorded && var->is_stop_grad()
                 && (var->dtype().is_float() || var->dtype().is_complex()))
             start_grad();
@@ -877,10 +877,10 @@ void VarHolder::attach_view(VarHolder* base, VarViewStep final_step) {
         state->source = source;
         state->version = source->version;
         state->creation_version = *state->version;
-        state->created_without_grad = no_grad;
-        state->recorded_view_history = !no_grad && backward_grad_fn(var);
+        state->created_without_grad = runtime_flag_no_grad();
+        state->recorded_view_history = !runtime_flag_no_grad() && backward_grad_fn(var);
         state->source_edge_enabled = base->get_requires_grad();
-        state->inherit_requires_grad = no_grad || !base->get_requires_grad();
+        state->inherit_requires_grad = runtime_flag_no_grad() || !base->get_requires_grad();
         state->own_requires_grad = !state->inherit_requires_grad && get_requires_grad();
         var->autograd_alias = move(state);
         if (var->autograd_alias->inherit_requires_grad) {
@@ -1085,14 +1085,14 @@ void VarHolder::refresh_transpose_views(bool preserve_grad_policy, VarView* only
             Var* source;
             bool disabled;
             RecordingScope(bool record, Var* source, bool freeze_edge)
-                : previous(no_grad), source(source),
+                : previous(runtime_flag_no_grad()), source(source),
                   disabled(source->flag(VarFlags::_requires_grad_disabled)) {
-                if (record) no_grad = false;
+                if (record) runtime_flag_no_grad() = false;
                 if (freeze_edge) source->set_flag(VarFlags::_requires_grad_disabled);
             }
             ~RecordingScope() {
                 source->set_flag(VarFlags::_requires_grad_disabled, disabled);
-                no_grad = previous;
+                runtime_flag_no_grad() = previous;
             }
         } recording(rebase, var, rebase && state->recorded_view_history
                     && !get_requires_grad());
@@ -1345,7 +1345,7 @@ void VarHolder::rebind_view_result(VarPtr&& v, bool preserve_grad_policy) {
     refresh_transpose_views(preserve_grad_policy);
 }
 
-extern bool no_grad;
+DECLARE_RUNTIME_FLAG(bool, no_grad);
 void VarHolder::set_requires_grad(bool flag) {
     if (autograd_policy.stop_outputs_when_inputs_stopped
             && !flag && get_requires_grad()) {
@@ -1398,7 +1398,7 @@ std::shared_ptr<AutogradAliasState> VarHolder::ensure_autograd_alias() {
 }
 
 VarHolder* VarHolder::check_inplace_autograd() {
-    if (no_grad || !autograd_policy.stop_outputs_when_inputs_stopped) return this;
+    if (runtime_flag_no_grad() || !autograd_policy.stop_outputs_when_inputs_stopped) return this;
     if (get_requires_grad() && var->autograd_alias
             && var->autograd_alias->created_without_grad
             && var->autograd_alias->source
@@ -1452,7 +1452,7 @@ void VarHolder::observe_alias_history() {
 }
 
 Var* VarHolder::grad_input() {
-    if (!no_grad) observe_alias_history();
+    if (!runtime_flag_no_grad()) observe_alias_history();
     return var;
 }
 
@@ -1518,9 +1518,9 @@ VarHolder* VarHolder::start_grad() {
             << " Var: only floating-point and complex values have gradients.";
         user_warning(message.str());
     }
-    bool no_grad_bk = no_grad;
+    bool no_grad_bk = runtime_flag_no_grad();
     AutogradPolicyOverride policy_guard({});
-    no_grad = 0;
+    runtime_flag_no_grad() = 0;
     auto alias_state = var->autograd_alias;
     auto dvar = jittor::detach(var);
     dvar->grad_hook = var->grad_hook;
@@ -1529,7 +1529,7 @@ VarHolder* VarHolder::start_grad() {
     if (var->autograd_alias) {
         var->autograd_alias->own_requires_grad = true;
     }
-    no_grad = no_grad_bk;
+    runtime_flag_no_grad() = no_grad_bk;
     var->set_flag(VarFlags::_explicit_requires_grad);
     var->set_flag(VarFlags::_requires_grad_disabled, 0);
     return this;
@@ -1958,10 +1958,10 @@ your code as below::
 
 static auto make_ternary = op_constructor<VarPtr, Var*, Var*, Var*>("ternary");
 
-extern bool no_grad;
+DECLARE_RUNTIME_FLAG(bool, no_grad);
 
 VarHolder* ternary_out_hint(VarHolder* cond, VarHolder* x, VarHolder* y) {
-    if (!no_grad)
+    if (!runtime_flag_no_grad())
         cond->var->set_flag(VarFlags::_out_hint);
     return new VarHolder(make_ternary(cond->var, x->var, y->var));
 }

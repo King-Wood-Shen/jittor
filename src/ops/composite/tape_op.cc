@@ -15,7 +15,7 @@
 
 namespace jittor {
 
-DECLARE_FLAG(bool, no_grad);
+DECLARE_RUNTIME_FLAG(bool, no_grad);
 
 TapeOp::TapeOp(Var* x) {
     set_flag(OpFlags::_cpu);
@@ -97,7 +97,7 @@ Tapes::Tapes(
         tin[i]->refresh_alias_requires_grad();
         // Check before connecting any external graph edges: a rejected view
         // must not leave neighbours pointing at a partially constructed Tapes.
-        if (!no_grad) tin[i]->check_alias_history();
+        if (!runtime_flag_no_grad()) tin[i]->check_alias_history();
     }
     
 

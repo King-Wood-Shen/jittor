@@ -29,7 +29,7 @@
 
 namespace jittor {
 
-DECLARE_FLAG(bool, no_grad);
+DECLARE_RUNTIME_FLAG(bool, no_grad);
 
 DECLARE_FLAG(string, cache_path);
 
@@ -403,7 +403,7 @@ void Op::init() {
         set_flag(OpFlags::_requires_grad_snapshot);
         for (Var* v : inputs()) {
             v->refresh_alias_requires_grad();
-            if (!no_grad && !is_stop_grad()) v->check_alias_history();
+            if (!runtime_flag_no_grad() && !is_stop_grad()) v->check_alias_history();
             bool disabled = v->flag(VarFlags::_requires_grad_disabled);
             has_disabled_input |= disabled;
             has_unrecorded_view_input |= v->flag(VarFlags::_unrecorded_view);

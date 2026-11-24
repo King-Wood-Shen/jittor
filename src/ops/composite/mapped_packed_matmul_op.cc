@@ -12,12 +12,12 @@ namespace jittor {
 
 #ifndef JIT
 
-DECLARE_FLAG(bool, no_grad);
+DECLARE_RUNTIME_FLAG(bool, no_grad);
 
 MappedPackedMatmulOp::MappedPackedMatmulOp(Var* a, Var* packed_weight,
         int64 in_features, int64 out_features)
     : a(a), b(packed_weight), in_features(in_features), out_features(out_features) {
-    USER_CHECK(no_grad)
+    USER_CHECK(runtime_flag_no_grad())
         << "mapped_packed_matmul requires no_grad; training is unsupported";
     USER_CHECK(a->dtype() == ns_float16 && b->dtype() == ns_float16)
         << "mapped_packed_matmul requires float16 operands, but got activation:"

@@ -59,7 +59,7 @@ DEFINE_FLAG(int, exec_called, 0, "exec sync called");
 DEFINE_FLAG(int, async_execution, 1, "Run an auto-flushed batch (of an inference graph on CUDA; on ACL, with `backend_fallback=error`, of a training forward too) on a worker thread while Python keeps building the graph; every executor entry, and so every read of a Var's data, waits for it first. See runtime/async_exec.h. 0 executes every batch on the calling thread. Without the worker such a flush also has to carry `auto_flush_bytes` of output to be taken; with it, any auto-flush is. On ACL nothing is auto-flushed at all unless the worker takes it (`async_auto_flush_only`): an inline flush there was measured slower at every batch size.");
 DEFINE_FLAG(int, async_flush_ops, 64, "With `async_execution`, such a graph is also flushed to the worker when a module call returns and this many operators have been created since the last flush (`auto_flush_ops` still applies between). 0 flushes at `auto_flush_ops` only.");
 DECLARE_FLAG(int, async_min_caller_us);
-DECLARE_FLAG(bool, no_grad);
+DECLARE_RUNTIME_FLAG(bool, no_grad);
 DECLARE_FLAG(int, keep_graph);
 DECLARE_FLAG(int, profiler_enable);
 DECLARE_FLAG(int, trace_py_var);
@@ -102,7 +102,7 @@ static bool worker_admits_accelerator() {
 // flush costs it nothing (`async_admits_grad`). The backward's own
 // construction window is excluded either way, in `auto_flush`.
 static bool worker_admits_grad() {
-    return no_grad
+    return runtime_flag_no_grad()
         || backend_ops(accelerator_backend_id()).execution.async_admits_grad;
 }
 
