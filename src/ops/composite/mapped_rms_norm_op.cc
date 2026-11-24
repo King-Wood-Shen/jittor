@@ -13,11 +13,11 @@ namespace jittor {
 
 #ifndef JIT
 
-DECLARE_FLAG(bool, no_grad);
+DECLARE_RUNTIME_FLAG(bool, no_grad);
 
 MappedRmsNormOp::MappedRmsNormOp(Var* x, Var* weight, double eps)
     : x(x), weight(weight), eps(eps) {
-    USER_CHECK(no_grad)
+    USER_CHECK(runtime_flag_no_grad())
         << "mapped_rms_norm requires no_grad; use the differentiable RMSNorm path for training";
     USER_CHECK(x->dtype() == ns_float16 && weight->dtype() == ns_float16)
         << "mapped_rms_norm requires float16 input and weight; use the original RMSNorm path for other dtypes, but got"

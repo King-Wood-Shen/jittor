@@ -21,7 +21,7 @@
 
 namespace jittor {
 
-DECLARE_FLAG(bool, no_grad);
+DECLARE_RUNTIME_FLAG(bool, no_grad);
 DECLARE_FLAG(int, amp_reg);
 DECLARE_FLAG(int, auto_mixed_precision_level);
 
@@ -280,7 +280,7 @@ PyObject* linear_without_bias(PyObject* module, PyObject* dict, PyObject* x) {
     // weight gradient the heuristic pick taken here ran 219 us, the best
     // candidate 172. That route makes its own checks and falls back to this
     // same product.
-    if (runtime_flag_use_cuda() && !no_grad && !amp_reg && !w->is_stop_grad()) {
+    if (runtime_flag_use_cuda() && !runtime_flag_no_grad() && !amp_reg && !w->is_stop_grad()) {
         int64 rows = a->num / w->shape[1];
         if (rows >= 1024 && rows * w->shape[0] * w->shape[1] >= (int64(1) << 28)) return nullptr;
     }
@@ -332,7 +332,7 @@ PyObject* wrap_like_input(PyObject* x, VarPtr&& value) {
 // forward. nullptr for anything else -- the first call, which moves the
 // filter, among it.
 PyObject* conv2d_inference(PyObject* dict, PyObject* x) {
-    if (!conv_cudnn_kernel || !cudnn_backend || !conv_filter_key || !no_grad || amp_reg
+    if (!conv_cudnn_kernel || !cudnn_backend || !conv_filter_key || !runtime_flag_no_grad() || amp_reg
             || !runtime_flag_use_cuda() || !dict || !is_var(x))
         return nullptr;
     PyObject* weight = PyDict_GetItemString(dict, "weight");
@@ -435,7 +435,7 @@ PyObject* batch_norm_eval_channels_last(PyObject* dict, PyObject* x) {
     for (auto* v : names) if (!v || !is_var(v)) return nullptr;
     // As `_batch_norm_eval_coefficients` keeps them: only where no gradient
     // flows through them.
-    if (!no_grad)
+    if (!runtime_flag_no_grad())
         for (auto* v : names)
             if (!GET_RAW_PTR(VarHolder, v)->var->is_stop_grad()) return nullptr;
     PyObject* eps = PyDict_GetItemString(dict, "eps");
@@ -623,7 +623,7 @@ PyObject* build_group_norm_nhwc(PyObject* like, Var* source, Var* weight, Var* b
 PyObject* group_norm_inference(PyObject* dict, PyObject* x) {
     if (!group_norm_function || !group_norm_kernel || !group_norm_source_fn
             || !group_norm_build_fn || !partial_type || !group_norm_activations
-            || !no_grad || amp_reg || auto_mixed_precision_level || !dict || !is_var(x))
+            || !runtime_flag_no_grad() || amp_reg || auto_mixed_precision_level || !dict || !is_var(x))
         return nullptr;
     PyObject* groups_obj = PyDict_GetItemString(dict, "num_groups");
     PyObject* channels_obj = PyDict_GetItemString(dict, "num_channels");
@@ -681,7 +681,7 @@ PyObject* group_norm_inference(PyObject* dict, PyObject* x) {
 // builds. 8.6 us of host time to build in Python, 74 times a BERT-base forward.
 PyObject* linear_with_bias_inference(PyObject* dict, PyObject* x) {
     // A cuBLASLt kernel: CUDA only. `use_cuda` is also set on ACL.
-    if (!lt_linear_source_fn || lt_linear_header_text.empty() || !no_grad || amp_reg
+    if (!lt_linear_source_fn || lt_linear_header_text.empty() || !runtime_flag_no_grad() || amp_reg
             || !runtime_flag_use_cuda() || accelerator_backend_id() != BackendId::Cuda
             || !dict || !is_var(x))
         return nullptr;    PyObject* weight = PyDict_GetItemString(dict, "weight");
@@ -754,7 +754,7 @@ bool rms_selector_unchanged() {
 // both providers declined and dispatch_native must continue to the module's
 // forward, without calling either provider a second time.
 PyObject* rms_norm_registered_inference(PyObject* module, PyObject* dict, PyObject* x) {
-    if ((!acl_possible && runtime_flag_use_cuda()) || !no_grad || !dict || !is_var(x)
+    if ((!acl_possible && runtime_flag_use_cuda()) || !runtime_flag_no_grad() || !dict || !is_var(x)
             || !rms_selector_unchanged()) return nullptr;
     // A property can present a different weight/epsilon from the instance's
     // stored values. Preserve Python attribute resolution for those modules.
@@ -888,7 +888,7 @@ PyObject* layer_norm_inference(PyObject* dict, PyObject* x) {
     if (gamma->shape.size() != 1 || gamma->shape[0] != hidden
             || beta->shape.size() != 1 || beta->shape[0] != hidden)
         return nullptr;
-    if (!no_grad && (!a->is_stop_grad() || !gamma->is_stop_grad() || !beta->is_stop_grad()))
+    if (!runtime_flag_no_grad() && (!a->is_stop_grad() || !gamma->is_stop_grad() || !beta->is_stop_grad()))
         return nullptr;
     PyObjHolder call_args(PyTuple_Pack(5, x, shape, weight, bias, eps));
     PyObjHolder chosen(kernel_select(layer_norm_name, call_args.obj, nullptr));

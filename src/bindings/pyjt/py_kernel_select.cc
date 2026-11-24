@@ -10,7 +10,7 @@
 
 namespace jittor {
 
-DECLARE_FLAG(bool, no_grad);
+DECLARE_RUNTIME_FLAG(bool, no_grad);
 DECLARE_FLAG(int, amp_reg);
 
 namespace {
@@ -221,7 +221,7 @@ Verdict evaluate(const NativeRule& rule, PyObject* args, PyObject* kwargs) {
         return has_op(rule.op) ? accepts : unknown;
     }
     if (rule.kind == NativeRule::rms_training)
-        return no_grad ? declines : unknown;
+        return runtime_flag_no_grad() ? declines : unknown;
     if (rule.kind == NativeRule::ln_inference) {
         // `_supports_layer_norm_inference(x, normalized_shape, weight, bias, eps)`
         // for a Var weight and bias; scalar ones read the environment, so
@@ -237,7 +237,7 @@ Verdict evaluate(const NativeRule& rule, PyObject* args, PyObject* kwargs) {
         Var* w = GET_RAW_PTR(VarHolder, weight)->var;
         Var* b = GET_RAW_PTR(VarHolder, bias)->var;
         // Grad mode is the Python side's to judge.
-        if (!no_grad && (requires_grad(x) || requires_grad(w) || requires_grad(b))) return unknown;
+        if (!runtime_flag_no_grad() && (requires_grad(x) || requires_grad(w) || requires_grad(b))) return unknown;
         if (x->dtype() != ns_float16 && x->dtype() != ns_float32) return declines;
         if (PyTuple_GET_SIZE(shape) != 1) return declines;
         PyObject* size = PyTuple_GET_ITEM(shape, 0);
@@ -262,7 +262,7 @@ Verdict evaluate(const NativeRule& rule, PyObject* args, PyObject* kwargs) {
         if (PyErr_Occurred()) { PyErr_Clear(); return unknown; }
     }
     // Grad mode and autocast are the Python side's to judge.
-    if (!no_grad && (requires_grad(x) || requires_grad(gamma))) return unknown;
+    if (!runtime_flag_no_grad() && (requires_grad(x) || requires_grad(gamma))) return unknown;
     if (amp_reg) return unknown;
     int rank = x->shape.size();
     if (!rank) return declines;

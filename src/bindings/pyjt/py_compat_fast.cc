@@ -17,7 +17,7 @@
 
 namespace jittor {
 
-DECLARE_FLAG(bool, no_grad);
+DECLARE_RUNTIME_FLAG(bool, no_grad);
 DECLARE_FLAG(int, amp_reg);
 
 namespace {
@@ -289,7 +289,7 @@ PyObject* fast_getitem(PyObject* self, PyObject* index) {
     if ((registered || getitem_selector_state) && !getitem_selector_unchanged())
         return not_implemented();
     if (registered) {
-        if (!no_grad) return not_implemented();
+        if (!runtime_flag_no_grad()) return not_implemented();
         if (PyTuple_CheckExact(index)) {
             for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(index); ++i) {
                 int accepted = positive_basic_item(PyTuple_GET_ITEM(index, i));
@@ -977,7 +977,7 @@ PyObject* fast_gelu(PyObject* x) {
     if (own != ns_float64 && !amp_reg && runtime_flag_use_cuda()
             && accelerator_backend_id() == BackendId::Cuda && producer
             && producer->is_op(op_ids::code()) && var->num > 0 && var->is_contiguous()
-            && (no_grad || var->is_stop_grad())) {
+            && (runtime_flag_no_grad() || var->is_stop_grad())) {
         PyTensorFrontendScope scope(x, nullptr, 0, false);
         unique_ptr<VarHolder> out(new VarHolder(make_code(var->shape, own, {var},
             "", {}, "", string(gelu_source()), {}, "", {}, "")));
@@ -1094,7 +1094,7 @@ PyObject* transpose_by(PyObject* self, VarHolder* holder, NanoVector axes) {
     // it, and `jt.grad(loss, intermediate)` came back zero.
     unique_ptr<VarHolder> source;
     NanoVector prior;
-    if (no_grad || holder->var->is_stop_grad()) {
+    if (runtime_flag_no_grad() || holder->var->is_stop_grad()) {
         prior = holder->transpose_view_axes();
         if (prior.size()) {
             source.reset(holder->transpose_view_source());

@@ -51,7 +51,13 @@ VarPtr cast_operand_to_compute_dtype(Var* value, NanoString dtype) {
 
 DEFINE_FLAG(fast_shared_ptr<loop_options_t>, compile_options, {}, 
     "Override the default loop transfrom options");
-DEFINE_FLAG(bool, no_grad, 0, 
+bool& runtime_flag_no_grad() {
+    static const bool initial = get_from_env<bool>("no_grad", false);
+    static thread_local bool enabled = initial;
+    return enabled;
+}
+
+DEFINE_RUNTIME_FLAG(bool, no_grad, 0,
     "No grad for all jittor Var creation");
 DEFINE_FLAG(bool, no_fuse, 0, 
     "No fusion optimization for all jittor Var creation");
@@ -184,7 +190,7 @@ Var::Var(NanoVector shape, NanoString dtype)
         device_id = placement.device.backend == BackendId::Cpu ? -1 : placement.device.index;
     // complex dtypes are differentiable too (Wirtinger autograd), so they must not be
     // auto-stop_grad like integer/bool vars are. Only non-float AND non-complex stops grad.
-    flags.set(NodeFlags::_stop_grad, (!dtype.is_float() && !dtype.is_complex()) || no_grad);
+    flags.set(NodeFlags::_stop_grad, (!dtype.is_float() && !dtype.is_complex()) || runtime_flag_no_grad());
     set_flag(VarFlags::_stop_fuse, no_fuse);
     ns = dtype;
     ASSERT(ns.is_dtype());
@@ -340,11 +346,11 @@ void VarPtr::set_stop_grad(bool stop_grad) {
     if (stop_grad)
         ptr->set_stop_grad();
     else {
-        bool no_grad_bk = no_grad;
+        bool no_grad_bk = runtime_flag_no_grad();
         AutogradPolicyOverride policy_guard({});
-        no_grad = 0;
+        runtime_flag_no_grad() = 0;
         *this = clone(ptr);
-        no_grad = no_grad_bk;
+        runtime_flag_no_grad() = no_grad_bk;
     }
 }
 
