@@ -80,7 +80,19 @@ def real_triton():
         except EXPECTED as exc:
             swallowed("triton/backend.py real_triton: import triton as mod # noqa: F401", exc)
             return None
-    # sanity: a real triton has a compiler with ASTSource
+    # A shim or namespace package may be importable without installing the
+    # compiler. That is an unavailable optional backend, not a compiler error.
+    from importlib.machinery import PathFinder
+
+    path = getattr(mod, "__path__", ())
+    if PathFinder.find_spec("triton.compiler", path) is None:
+        return None
+    backends = PathFinder.find_spec("triton.backends", path)
+    if backends is None or backends.submodule_search_locations is None:
+        return None
+    if PathFinder.find_spec("triton.backends.compiler", backends.submodule_search_locations) is None:
+        return None
+
     try:
         from triton.compiler import ASTSource  # noqa: F401
         from triton.backends.compiler import GPUTarget  # noqa: F401
