@@ -191,13 +191,26 @@ def bind_decoder_graph(program, lower, literal, execute_pure):
     if type(result) is not tuple or len(result) != 1:
         raise ValueError("FX output must take one graph result")
 
+    # Preserve a name through its final reader, including graph outputs.
+    # Effects may mutate a buffer in place, so its name remains live until the
+    # last consumer of that exact tensor, regardless of which region wrote it.
+    live_after = set(_references(exit_args))
+    retire_in_reverse = []
+    for partition, _ in reversed(regions):
+        retire_in_reverse.append(tuple(name for name in partition.inputs if name not in live_after))
+        live_after.update(partition.inputs)
+    retire_after = tuple(reversed(retire_in_reverse))
+
     def run(*values):
         bindings = _named_values(inputs, values)
-        for partition, region in regions:
+        for (partition, region), retire in zip(regions, retire_after):
             arguments = tuple(bindings[name] for name in partition.inputs)
             outputs = (execute_pure(partition, region, arguments)
                        if partition.kind == "pure" else region(*arguments))
             bindings.update(_named_values(partition.outputs, outputs))
+            for name in retire:
+                del bindings[name]
+            del arguments, outputs
         return _resolve(result[0], bindings)
 
     return run
