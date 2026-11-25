@@ -46,7 +46,7 @@ class Conv3d(jt.Module):
     #: Class default, so a subclass that skips ``__init__`` still convolves.
     padding_mode = 'zeros'
 
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True, padding_mode='zeros'):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True, padding_mode='zeros', dtype=None):
         _check_padding_options(padding, padding_mode, _triple(stride))
         self.padding_mode = padding_mode
         self.in_channels = in_channels
@@ -73,13 +73,15 @@ class Conv3d(jt.Module):
         assert in_channels % groups == 0, 'in_channels must be divisible by groups'
         assert out_channels % groups == 0, 'out_channels must be divisible by groups'
 
-        self.weight = jt.nn.init.invariant_uniform([out_channels, in_channels//groups, Kh, Kw, Kd], dtype="float")
+        parameter_dtype = "float32" if dtype is None else dtype
+        self.weight = jt.nn.init.invariant_uniform(
+            [out_channels, in_channels // groups, Kh, Kw, Kd], dtype=parameter_dtype)
         if bias:
             fan=1
             for i in self.weight.shape[1:]:
                 fan *= i
             bound = 1 / math.sqrt(fan)
-            self.bias = jt.nn.init.uniform([out_channels], dtype="float", low=-bound, high=bound)
+            self.bias = jt.nn.init.uniform([out_channels], dtype=parameter_dtype, low=-bound, high=bound)
         else:
             self.bias = None
 

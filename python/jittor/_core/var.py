@@ -444,7 +444,7 @@ def ones(*shape, dtype="float32"):
     return _constant_scalar(1, dtype).broadcast(shape)._as_tensor()
 
 @contextmanager
-def placement_scope_like(x):
+def placement_scope_like(x, *, override=False):
     """Run a block under `x`'s explicit tensor placement, if it has one.
 
     Allocation helpers (`jt.empty`, `jt.ones`, ...) follow the *ambient*
@@ -458,15 +458,17 @@ def placement_scope_like(x):
     The reference tensor is a *default*, so a placement the caller asked for
     outranks it: `torch.zeros_like(gpu, device="cpu")` has already placed the
     construction on the host, and re-scoping to the source's device would hand
-    back a CUDA tensor.
+    back a CUDA tensor. Operations with no device override may request
+    the input placement explicitly with ``override=True``.
     """
     import jittor as jt
     # `int` is shadowed in this module by jittor's integer dtype constructor.
     backend = ori_int(x.placement_backend)
-    if backend < 0 or jt.core._current_tensor_placement() is not None:
+    device = max(ori_int(x.device_id), 0)
+    requested = jt.core._current_tensor_placement()
+    if backend < 0 or requested == (backend, device) or (requested is not None and not override):
         yield
         return
-    device = max(ori_int(x.device_id), 0)
     token = jt.core._set_tensor_placement(backend, device)
     # The request alone reaches only bindings inside a frontend scope; a
     # native constructor (`zeros` is `array(0).broadcast`) stamps the

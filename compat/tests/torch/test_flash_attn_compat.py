@@ -138,6 +138,20 @@ class TestPackedEntryDeviceGuard(unittest.TestCase):
             entries,
             "every guard must come from an input tensor")
 
+    def test_packed_causal_classification_precedes_window_expansion(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        from jittor.compat.shim.backends.flash_attention import official_codegen
+
+        with TemporaryDirectory() as tmp:
+            source = Path(official_codegen._official_packed_source(tmp)).read_text()
+        causal = source.index(
+            "params.is_causal = window_size_left < 0 && window_size_right == 0")
+        expand = source.index(
+            "if (window_size_left < 0 && window_size_right >= 0) { window_size_left = seqlen_k; }")
+        self.assertLess(causal, expand)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -255,8 +255,11 @@ def _make_official_backend(low_level: ModuleType, root: pathlib.Path,
         needs_grad = _grad_enabled(q, k, v)
         dropout = float(dropout_p or 0.0)
         _check_dropout_backward(q, dropout, needs_grad)
+        # Use the upstream dense launcher for strict causal attention. Its
+        # tiling and reduction order differ from the packed forward launcher.
+        strict_causal = bool(causal) and jt.flags.cuda_kernel_math == "strict"
         if (packed_low_level is not None and not needs_grad and dropout == 0.0
-                and not return_attn_probs):
+                and not return_attn_probs and not strict_causal):
             return packed_low_level.fwd(q, k, v, float(softmax_scale), bool(causal), wl, wr)
         if needs_grad:
             return _DenseNativeAttention(

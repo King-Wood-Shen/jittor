@@ -49,6 +49,18 @@ class TestExpLog(Base):
         self.chk1(torch.log10, np.log10, self.pos, name="log10")
         self.chk1(torch.log1p, np.log1p, self.pos, name="log1p")
 
+    def test_half_rsqrt_rounds_after_float32_math(self):
+        def body(dev):
+            for dtype in (torch.float16, torch.bfloat16):
+                with self.subTest(device=dev, dtype=dtype):
+                    x = torch.linspace(0.13, 6.4, 731, device=dev, dtype=dtype)
+                    expected = torch.rsqrt(x.float()).to(dtype)
+                    for y in (torch.rsqrt(x), x.rsqrt(), x.clone().rsqrt_()):
+                        self.assertEqual(y.dtype, dtype)
+                        self.assertEqual(y.device, x.device)
+                        self.ac(y.float().cpu().numpy(), expected.float().cpu().numpy(), atol=0, rtol=0)
+        both_devices(body)
+
     def test_sqrt_pow(self):
         self.chk1(torch.sqrt, np.sqrt, self.pos, name="sqrt")
         self.chk1(torch.rsqrt, lambda x: 1.0 / np.sqrt(x), self.pos, rtol=1e-4, name="rsqrt")

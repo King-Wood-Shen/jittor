@@ -1,17 +1,19 @@
 """CUDA depthwise convolution forward and gradient kernels."""
 
 import jittor as jt
+from jittor._core.dtypes import dtype_name
 from jittor._runtime.backend_libraries import library_resource
 
 
 def depthwise_forward(x, weight, output_shape, stride, padding, dilation):
     Kh, Kw = weight.shape[-2:]
+    accumulator_type = "float" if dtype_name(x.dtype) in ("float16", "bfloat16") else "input_type"
     return jt.code(
             output_shape,
             x.dtype,
             [x, weight],
             cuda_header = """
-        template <typename T,
+        template <typename T, typename Acc,
             int filter_height,
             int filter_width,
             int stride_height,
@@ -36,7 +38,7 @@ def depthwise_forward(x, weight, output_shape, stride, padding, dilation):
                     const int c_out = blockIdx.x;
 
                     const int c_in = c_out;
-                    T value = 0;
+                    Acc value = 0;
                     const int h_in_start = -padding_height + h_out * stride_height;
                     const int w_in_start = -padding_width + w_out * stride_width;
                     const int h_in_end = h_in_start + filter_height * dilate_height;
@@ -57,7 +59,8 @@ def depthwise_forward(x, weight, output_shape, stride, padding, dilation):
                             if (h_in >= 0 && h_in < input_height && w_in >= 0 &&
                                 w_in < input_width) {
                                 const int offset = in_offset + h_in * input_width + w_in;
-                                value += r_weight[h_f * filter_width + w_f] * input_data[offset];
+                                value += static_cast<Acc>(r_weight[h_f * filter_width + w_f])
+                                    * static_cast<Acc>(input_data[offset]);
                             }
                         }
                     }
@@ -99,7 +102,7 @@ def depthwise_forward(x, weight, output_shape, stride, padding, dilation):
             dim3 threads(std::min(output_width, thread), blocks, 1);
             dim3 grid(output_channels, batch_size, 1);
             KernelDepthwiseConv<
-                input_type, ksize_height, ksize_width,
+                input_type, {accumulator_type}, ksize_height, ksize_width,
                 stride_height, stride_width>
             <<<grid, threads>>>(
                 input_p, filter_p, batch_size, output_channels, output_height,

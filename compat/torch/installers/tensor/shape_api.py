@@ -240,7 +240,17 @@ def _torch_var_sum(self, *a, **k):
         raise IndexError(
             "Dimension out of range (expected to be in range of [-1, 0], "
             "but got %d)" % int(dims[0]))
-    result = _orig_var_sum(self, *a, **k)
+    result = None
+    if self.ndim >= 2 and not a and not k.keys() - {"dim", "dims", "keepdims"}:
+        axes = k.get("dims", (k.get("dim"),))
+        if axes in ((-2,), (self.ndim - 2,)):
+            from jittor.backends.cuda.kernels.math.sum_columns import sum_columns_strict
+
+            result = sum_columns_strict(self)
+            if result is not None and not k.get("keepdims"):
+                result = result.squeeze(-2)
+    if result is None:
+        result = _orig_var_sum(self, *a, **k)
     if out is not None:
         out.assign(result)
         return out
@@ -307,7 +317,17 @@ def _axis_reduce(name, self, *a, **k):
 
 
 def _method_mean(self, *a, **k):
-    return _plain_reduce('mean', self, *a, **k)
+    orig = get_install_context(jt).state["tensor_shape_api"]["reductions"]["mean"]
+    a, k = _norm_reduce_kw(a, k)
+    if self.ndim and not a and not k.keys() - {"dim", "dims", "keepdims"}:
+        axes = k.get("dims", (k.get("dim"),))
+        if axes in ((-1,), (self.ndim - 1,)):
+            from jittor.backends.cuda.kernels.math.mean_last import mean_last_strict
+
+            result = mean_last_strict(self)
+            if result is not None:
+                return result if k.get("keepdims") else result.squeeze(-1)
+    return orig(self, *a, **k)
 
 
 def _method_prod(self, *a, **k):

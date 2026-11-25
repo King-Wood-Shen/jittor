@@ -5,12 +5,28 @@ import pickle
 import weakref
 
 import numpy as np
+import pytest
 import torch
 
 from _helpers.device_types import instantiate_device_type_tests
 
 
 class TestModuleChildStorage:
+    def test_set_submodule_replaces_numeric_nested_child(self, device):
+        root = torch.nn.Module()
+        root.stack = torch.nn.ModuleList([torch.nn.Identity()])
+        replacement = torch.nn.Linear(2, 1, bias=False).to(device)
+        root.set_submodule("stack.0", replacement, strict=True)
+        assert root.stack[0] is replacement
+        assert root.get_submodule("stack.0") is replacement
+        assert set(root.state_dict()) == {"stack.0.weight"}
+        with pytest.raises(AttributeError):
+            root.set_submodule("stack.0.weight", torch.nn.Identity())
+        with pytest.raises(AttributeError):
+            root.set_submodule("missing", torch.nn.Identity(), strict=True)
+        root.set_submodule("extra", torch.nn.Identity())
+        assert isinstance(root.extra, torch.nn.Identity)
+
     def test_native_child_adoption_rebinds_an_existing_view(self, device):
         import jittor as jt
         from jittor.compat.torch.context import get_install_context

@@ -57,6 +57,7 @@ class TestInferSchema(unittest.TestCase):
 
     def test_torch_types_module_replaces_python_types_attribute(self):
         self.assertEqual(torch.types.__name__, "torch.types")
+        self.assertIs(torch.types._dtype, torch.dtype)
         self.assertEqual(set(get_args(torch.types.Number)), {int, float, bool})
         self.assertEqual(
             set(get_args(torch.types.Device)),

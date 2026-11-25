@@ -143,13 +143,15 @@ class Conv(jt.Module):
         self.is_depthwise_conv = self.groups == self.out_channels and self.groups == self.in_channels
         Kh, Kw = self.kernel_size
 
-        self.weight = jt.nn.init.invariant_uniform([out_channels, in_channels//groups, Kh, Kw], dtype="float")
+        parameter_dtype = "float32" if dtype is None else dtype
+        self.weight = jt.nn.init.invariant_uniform(
+            [out_channels, in_channels // groups, Kh, Kw], dtype=parameter_dtype)
         if bias:
             fan=1
             for i in self.weight.shape[1:]:
                 fan *= i
             bound = 1 / math.sqrt(fan)
-            self.bias = jt.nn.init.uniform([out_channels], dtype="float", low=-bound, high=bound)
+            self.bias = jt.nn.init.uniform([out_channels], dtype=parameter_dtype, low=-bound, high=bound)
         else:
             self.bias = None
 

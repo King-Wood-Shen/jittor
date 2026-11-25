@@ -183,11 +183,12 @@ class LayerNorm(Module):
         self.normalized_shape = tuple(normalized_shape)
         self.eps = eps
         self.elementwise_affine = elementwise_affine
+        parameter_dtype = "float32" if dtype is None else dtype
         self.weight = (
-            _constant_parameter(normalized_shape, "float32", 1.0) if elementwise_affine else 1.0
+            _constant_parameter(normalized_shape, parameter_dtype, 1.0) if elementwise_affine else 1.0
         )
         self.bias = (
-            _constant_parameter(normalized_shape, "float32", 0.0)
+            _constant_parameter(normalized_shape, parameter_dtype, 0.0)
             if elementwise_affine and bias
             else 0.0
         )

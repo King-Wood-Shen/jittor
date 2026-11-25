@@ -867,7 +867,7 @@ def _to(self, *args, **kwargs):
             # `numbers.Integral` rather than `int`, so a numpy integer -- what
             # `np.arange(world_size)[rank]` or a parsed config gives you -- is
             # read the same way instead of falling off the end of the chain.
-            dev = "cuda:%d" % int(a)
+            dev = a
         elif isinstance(a, str):
             bare = a.replace("torch.", "")
             if bare in _owner.dtype._registry:
@@ -893,7 +893,9 @@ def _to(self, *args, **kwargs):
                     "reporting that the move to %r succeeded" % (a,),
                     "This layer places tensors on cpu, cuda and npu only.",
                     stub_result=None)
-    if dev is None:
+    if _owner._is_index(dev):
+        dev = "cuda:%d" % int(dev)
+    elif dev is None:
         dev = self.device
     if getattr(dev, "type", str(dev).split(":")[0]) == "meta":
         source_dtype = _jittor_dtype_name(self.dtype)
@@ -2362,7 +2364,8 @@ def _api_reciprocal_(self):
 
 
 def _api_rsqrt_(self):
-    return _ip(self, 1.0 / _owner.jt.sqrt(self))
+    from ..compiler import _api_rsqrt
+    return _ip(self, _api_rsqrt(self))
 
 
 _UNARY_INPLACE_APIS = {

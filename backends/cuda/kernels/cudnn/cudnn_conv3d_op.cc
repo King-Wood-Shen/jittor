@@ -11,6 +11,7 @@
 #include "cudnn_wrapper.h"
 #include "cudnn_user_checks.h"
 #include "cudnn_conv_algo_key.h"
+#include "cudnn_conv_plan.h"
 #include "core/executor.h"
 #include "ops/op_register.h"
 #include "mem/mem_info.h"
@@ -114,9 +115,7 @@ void CudnnConv3dOp::jit_run() {
     cudnnHandle_t handle_ = cudnn_bind_stream();
     auto& fwd_algo_cache = cudnn_fwd_algo_cache();
 
-    // Owned, so a throw anywhere below releases them. There is no backend
-    // fast path for 3-D yet (6.B14 left these on the legacy API), so unlike
-    // the 2-D ops they are built unconditionally.
+    // Owned descriptors release automatically on either execution path.
     CudnnTensorDescriptor cudnnIdesc;
     CudnnFilterDescriptor cudnnFdesc;
     CudnnTensorDescriptor cudnnOdesc;
@@ -262,6 +261,15 @@ void CudnnConv3dOp::jit_run() {
         >> ";y=" >> y->dtype().to_cstring()
         >> ";workspace_ratio=" >> max_workspace_ratio
         >> ";hash=" >> ConvAlgoKeyHash()(algo_key);
+#ifndef IS_ROCM
+    ConvPlanRequest req = conv_plan_request(
+        CONV_PLAN_FWD,
+        getDataType<Tx>(), getDataType<Tw>(), getDataType<Ty>(),
+        dimX, strideX, dimW, false, dimY, strideY,
+        padA, convstrideA, dilationA, conv_math_type);
+    if (cudnn_conv_backend_run(req, x->ptr<Tx>(), w->ptr<Tw>(), y->ptr<Ty>()))
+        return;
+#endif
     auto iter = fwd_algo_cache.find(algo_key);
     
     if (iter!=fwd_algo_cache.end()) algo = iter->second;

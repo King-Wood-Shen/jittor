@@ -117,6 +117,18 @@ def compare_parameters(m1, m2):
         assert diff < 1e-4, (diff, 'backward', ps2[i].name(), ps1[i].mean(), ps1[i].std(), ps2[i].mean(), ps2[i].std())
 
 class TestDepthwiseConv(unittest.TestCase):
+    @unittest.skipIf(not _test_capability.check_accelerator("cuda", backend=jt).enabled, "Cuda not found")
+    def test_half_depthwise_accumulates_in_float32(self):
+        with jt.runtime.scope(use_cuda=1, backend_fallback="error"):
+            for dtype, large in (("bfloat16", 256), ("float16", 2048)):
+                with self.subTest(dtype=dtype):
+                    x = jt.array([[[[large], [1], [-large]]]]).cast(dtype)
+                    weight = jt.ones((1, 1, 3, 1), dtype=dtype)
+                    result = jt.nn.DepthwiseConv()(x, weight)
+                    self.assertEqual(jt.core.dispatch_context([result])[0], "cuda")
+                    self.assertEqual(result.dtype, x.dtype)
+                    self.assertEqual(result.item(), 1)
+
     @unittest.skipIf(not _test_capability.check_accelerator('cuda', backend=jt).enabled, "Cuda not found")
     @jt.flag_scope(use_cuda=1, float32_cudnn_precision="highest")
     def test_data(self):

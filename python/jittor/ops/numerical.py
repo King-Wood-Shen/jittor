@@ -6,7 +6,7 @@ import math
 from jittor_core import Var
 import jittor_core as _jittor_core
 from jittor_core import ops as _native_ops
-from .._runtime.dispatch import select_kernel, try_dispatch
+from .._runtime.dispatch import dispatch_context, select_kernel, try_dispatch
 
 # `jittor.ops.any_` and `all_` are the native ops (jittor/ops/__init__.py
 # resolves every name it does not define there); asked for directly, without
@@ -345,7 +345,15 @@ def isposinf(x):
 
 def rsqrt(x):
     import jittor as jt
-    return 1/jt.sqrt(x)
+    dtype = _jittor_dtype_name(x.dtype)
+    if dtype == "float32" and dispatch_context(x).backend == "cuda":
+        from jittor.backends.cuda.kernels.math.rsqrt import Rsqrt
+
+        return Rsqrt.apply(x)
+    if dtype in ("float16", "bfloat16"):
+        with jt.flag_scope(amp_reg=jt.amp_flags.disabled):
+            return rsqrt(x.float32()).cast(dtype)
+    return 1 / jt.sqrt(x)
 
 
 def sinc(x):

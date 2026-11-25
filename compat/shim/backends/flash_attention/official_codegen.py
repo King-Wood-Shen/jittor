@@ -197,9 +197,10 @@ static void jt_fill_params(
     if (window_size_left >= seqlen_k) { window_size_left = -1; }
     if (window_size_right >= seqlen_k) { window_size_right = -1; }
     if (is_causal) { window_size_right = 0; }
+    // Classify the unbounded causal window before filling in its finite bounds.
+    params.is_causal = window_size_left < 0 && window_size_right == 0;
     if (window_size_left < 0 && window_size_right >= 0) { window_size_left = seqlen_k; }
     if (window_size_left >= 0 && window_size_right < 0) { window_size_right = seqlen_k; }
-    params.is_causal = window_size_left < 0 && window_size_right == 0;
     params.window_size_left = window_size_left;
     params.window_size_right = window_size_right;
     params.is_seqlens_k_cumulative = true;

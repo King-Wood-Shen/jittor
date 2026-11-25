@@ -438,14 +438,11 @@ class Storage:
 
 def make_torch_types_module():
     module = cast(typing.Any, _python_types.ModuleType("torch.types"))
-    setattr(module, "Number", Number)
-    setattr(module, "Device", Device)
-    setattr(module, "FileLike", FileLike)
-    setattr(module, "Storage", Storage)
-    setattr(module, "_Number", (int, float, bool))
-    setattr(module, "py_sym_types", py_sym_types)
-    setattr(module, "PySymType", Number)
-    setattr(module, "__all__", ["Number", "Device", "FileLike", "Storage"])
+    module.__dict__.update(
+        Number=Number, Device=Device, FileLike=FileLike, Storage=Storage,
+        _dtype=dtype, _Number=(int, float, bool), py_sym_types=py_sym_types,
+        PySymType=Number, __all__=["Number", "Device", "FileLike", "Storage"],
+    )
     return module
 
 

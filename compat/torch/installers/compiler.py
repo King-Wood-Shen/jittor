@@ -388,11 +388,11 @@ def onnx_export(*args, **kwargs):
 def _api_rsqrt(x):
     from ..amp import _preserve_autocast_arithmetic
     from jittor._core.dtypes import dtype_name
-    if (_preserve_autocast_arithmetic()
-            and dtype_name(x.dtype) == "float32"):
+    from jittor.ops.numerical import rsqrt
+    if _preserve_autocast_arithmetic() and dtype_name(x.dtype) == "float32":
         with jt.flag_scope(amp_reg=jt.amp_flags.disabled):
-            return 1.0 / jt.sqrt(x)
-    return 1.0 / jt.sqrt(x)
+            return rsqrt(x)
+    return rsqrt(x)
 
 
 def _api_gt(a, b):

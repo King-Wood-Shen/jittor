@@ -50,6 +50,36 @@ class TestToAcceptsTorchDtypes(unittest.TestCase):
         with self.assertRaises(TypeError):
             self.x.to("gpu")
 
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
+    def test_keyword_cuda_device_index_with_dtype(self):
+        source = torch.tensor([1., -2.], device="cpu")
+        device_index = torch.cuda.current_device()
+        for dtype in (torch.bfloat16, torch.float8_e4m3fn):
+            with self.subTest(dtype=dtype):
+                result = source.to(device=device_index, dtype=dtype)
+                self.assertTrue(result.is_cuda)
+                self.assertEqual(result.get_device(), device_index)
+                self.assertEqual(result.dtype, dtype)
+                self.assertEqual(result.float().cpu().tolist(), [1., -2.])
+
+    def test_check_with_validates_and_defers_message(self):
+        def message():
+            self.fail("successful checks must skip the message")
+
+        torch._check_with(ValueError, True, message)
+        with self.assertRaisesRegex(ValueError, "image mismatch"):
+            torch._check_with(ValueError, False, lambda: "image mismatch")
+        with self.assertRaisesRegex(ValueError, "^42$"):
+            torch._check_with(ValueError, False, lambda: 42)
+        with self.assertRaisesRegex(ValueError, "Expected cond to be True"):
+            torch._check_with(ValueError, False, None)
+        with self.assertRaisesRegex(TypeError, "cond must be a bool"):
+            torch._check_with(ValueError, 1, message)
+        with self.assertRaisesRegex(TypeError, "message must be a callable"):
+            torch._check_with(ValueError, False, "image mismatch")
+        with self.assertRaisesRegex(AssertionError, "subclass of Exception"):
+            torch._check_with(UserWarning, False, message)
+
     def test_dtype_and_device_together(self):
         out = self.x.to(device="cpu", dtype=torch.float16)
         self.assertEqual(str(out.dtype), "float16")

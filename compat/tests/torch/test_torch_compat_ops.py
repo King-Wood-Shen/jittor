@@ -164,6 +164,48 @@ class TestShapeOps(Base):
                     np.swapaxes(x, 0, 2), msg=f"transpose {dev}")
         both_devices(body)
 
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
+    def test_cpu_stack_inside_cuda_module(self):
+        class PositionGrid(torch.nn.Module):
+            def forward(self, image):
+                coordinates = torch.arange(image.shape[0], device="cpu")
+                stacked = torch.stack([coordinates, coordinates + 1])
+                return stacked, torch.cat([stacked, stacked + 2], dim=1)
+
+        with torch.inference_mode():
+            stacked, combined = PositionGrid()(torch.ones(3, device="cuda"))
+        self.assertEqual(stacked.device.type, "cpu")
+        self.assertEqual(stacked.tolist(), [[0, 1, 2], [1, 2, 3]])
+        self.assertEqual(combined.device.type, "cpu")
+        self.assertEqual(combined.tolist(), [[0, 1, 2, 2, 3, 4], [1, 2, 3, 3, 4, 5]])
+
+    def test_convolution_and_layer_norm_preserve_default_parameter_dtype(self):
+        default = torch.get_default_dtype()
+        try:
+            torch.set_default_dtype(torch.bfloat16)
+            with torch.device("meta"):
+                layers = (torch.nn.Conv1d(1, 2, 2), torch.nn.Conv2d(1, 2, 2),
+                          torch.nn.Conv3d(1, 2, 2), torch.nn.LayerNorm(2))
+                for layer in layers:
+                    self.assertEqual(layer.weight.dtype, torch.bfloat16)
+                    self.assertEqual(layer.bias.dtype, torch.bfloat16)
+            conv = torch.nn.Conv3d(1, 2, 2, dtype=torch.float32, device="cpu")
+            self.assertEqual(conv.weight.dtype, torch.float32)
+            self.assertEqual(conv.weight.device.type, "cpu")
+        finally:
+            torch.set_default_dtype(default)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA required")
+    def test_half_gelu_tanh_rounds_after_float32_math(self):
+        for dtype in (torch.float16, torch.bfloat16):
+            with self.subTest(dtype=dtype):
+                x = torch.linspace(-3.5, 3.5, 737, device="cuda", dtype=dtype)
+                actual = torch.nn.functional.gelu(x, approximate="tanh")
+                expected = torch.nn.functional.gelu(x.float(), approximate="tanh").to(dtype)
+                self.assertTrue(actual.is_cuda)
+                self.assertEqual(actual.dtype, dtype)
+                self.ac(actual.float().cpu().numpy(), expected.float().cpu().numpy(), atol=0, rtol=0)
+
     def test_reshape_flatten(self):
         x = self.x
         def body(dev):

@@ -4,7 +4,7 @@
 // file 'LICENSE.txt', which is part of this source code package.
 // ***************************************************************
 #pragma once
-// Backend (graph API) execution of 2-D convolutions with a plan cache.
+// Backend (graph API) execution of 2-D and 3-D convolutions with a plan cache.
 //
 // The legacy cuDNN API redoes its heuristics and builds an execution plan
 // inside every call: on cuDNN 8.9 cudnnGetConvolution*WorkspaceSize plus
@@ -35,10 +35,10 @@ enum ConvPlanKind { CONV_PLAN_FWD = 0, CONV_PLAN_BWD_DATA = 1, CONV_PLAN_BWD_FIL
 
 // All int64 so the struct has no padding: its bytes are the cache key.
 struct ConvPlanRequest {
-    int64 kind;
+    int64 kind, spatial_dims;
     int64 dtype_x, dtype_w, dtype_y;
-    int64 xdim[4], xstride[4], wdim[4], wstride[4], ydim[4], ystride[4];
-    int64 pad[2], stride[2], dilation[2];
+    int64 xdim[5], xstride[5], wdim[5], wstride[5], ydim[5], ystride[5];
+    int64 pad[3], stride[3], dilation[3];
     int64 allow_tf32;   // tensor-op numerics for fp32 operands
     int64 benchmark;    // time the candidate plans instead of trusting heuristic order
 };
@@ -95,10 +95,16 @@ using ConvPlanCache = std::unordered_map<ConvPlanRequest, ConvPlanEntry,
 ConvPlanCache& conv_plan_cache();
 void initialize_conv_plan_owner(ConvPlanEntry& entry);
 
-// Strides of a KCRS filter stored as oihw (NCHW) or ohwi (NHWC).
-inline void conv_plan_filter_strides(int64* s, const int* d, bool nhwc) {
-    if (nhwc) { s[0] = (int64)d[1]*d[2]*d[3]; s[1] = 1; s[2] = (int64)d[3]*d[1]; s[3] = d[1]; }
-    else      { s[0] = (int64)d[1]*d[2]*d[3]; s[1] = (int64)d[2]*d[3]; s[2] = d[3]; s[3] = 1; }
+// Filter dimensions are in [output, input, spatial...] order.
+inline void conv_plan_filter_strides(int64* strides, const int* dims, int rank,
+                                     bool channels_last) {
+    int64 offset = channels_last ? dims[1] : 1;
+    for (int axis = rank - 1; axis >= 2; --axis) {
+        strides[axis] = offset;
+        offset *= dims[axis];
+    }
+    strides[1] = channels_last ? 1 : offset;
+    strides[0] = channels_last ? offset : offset * dims[1];
 }
 
 namespace conv_plan_detail {
@@ -117,11 +123,11 @@ struct Desc {
     void finalize() { if (ok) ok = cudnnBackendFinalize(d) == CUDNN_STATUS_SUCCESS; }
 };
 
-inline bool tensor(Desc& t, int64 uid, int64 dtype, const int64* dims, const int64* strides) {
+inline bool tensor(Desc& t, int64 uid, int64 dtype, const int64* dims, const int64* strides, int64 rank) {
     cudnnDataType_t dt = (cudnnDataType_t)dtype; int64 align = 16;
     t.set(CUDNN_ATTR_TENSOR_DATA_TYPE, CUDNN_TYPE_DATA_TYPE, 1, &dt);
-    t.set(CUDNN_ATTR_TENSOR_DIMENSIONS, CUDNN_TYPE_INT64, 4, dims);
-    t.set(CUDNN_ATTR_TENSOR_STRIDES, CUDNN_TYPE_INT64, 4, strides);
+    t.set(CUDNN_ATTR_TENSOR_DIMENSIONS, CUDNN_TYPE_INT64, rank, dims);
+    t.set(CUDNN_ATTR_TENSOR_STRIDES, CUDNN_TYPE_INT64, rank, strides);
     t.set(CUDNN_ATTR_TENSOR_UNIQUE_ID, CUDNN_TYPE_INT64, 1, &uid);
     t.set(CUDNN_ATTR_TENSOR_BYTE_ALIGNMENT, CUDNN_TYPE_INT64, 1, &align);
     t.finalize();
@@ -172,18 +178,19 @@ inline void build(const ConvPlanRequest& r, ConvPlanEntry& e, void* x, void* w, 
     e.valid = false;
     bool fp32 = r.dtype_x == CUDNN_DATA_FLOAT;
     Desc X(CUDNN_BACKEND_TENSOR_DESCRIPTOR), W(CUDNN_BACKEND_TENSOR_DESCRIPTOR), Y(CUDNN_BACKEND_TENSOR_DESCRIPTOR);
-    if (!tensor(X, 1, r.dtype_x, r.xdim, r.xstride)) return;
-    if (!tensor(W, 2, r.dtype_w, r.wdim, r.wstride)) return;
-    if (!tensor(Y, 3, r.dtype_y, r.ydim, r.ystride)) return;
+    int64 nd = r.spatial_dims;
+    if (!tensor(X, 1, r.dtype_x, r.xdim, r.xstride, nd + 2)) return;
+    if (!tensor(W, 2, r.dtype_w, r.wdim, r.wstride, nd + 2)) return;
+    if (!tensor(Y, 3, r.dtype_y, r.ydim, r.ystride, nd + 2)) return;
     Desc conv(CUDNN_BACKEND_CONVOLUTION_DESCRIPTOR);
-    cudnnDataType_t comp = CUDNN_DATA_FLOAT; cudnnConvolutionMode_t mode = CUDNN_CROSS_CORRELATION; int64 nd = 2;
+    cudnnDataType_t comp = CUDNN_DATA_FLOAT; cudnnConvolutionMode_t mode = CUDNN_CROSS_CORRELATION;
     conv.set(CUDNN_ATTR_CONVOLUTION_COMP_TYPE, CUDNN_TYPE_DATA_TYPE, 1, &comp);
     conv.set(CUDNN_ATTR_CONVOLUTION_CONV_MODE, CUDNN_TYPE_CONVOLUTION_MODE, 1, &mode);
     conv.set(CUDNN_ATTR_CONVOLUTION_SPATIAL_DIMS, CUDNN_TYPE_INT64, 1, &nd);
-    conv.set(CUDNN_ATTR_CONVOLUTION_PRE_PADDINGS, CUDNN_TYPE_INT64, 2, r.pad);
-    conv.set(CUDNN_ATTR_CONVOLUTION_POST_PADDINGS, CUDNN_TYPE_INT64, 2, r.pad);
-    conv.set(CUDNN_ATTR_CONVOLUTION_DILATIONS, CUDNN_TYPE_INT64, 2, r.dilation);
-    conv.set(CUDNN_ATTR_CONVOLUTION_FILTER_STRIDES, CUDNN_TYPE_INT64, 2, r.stride);
+    conv.set(CUDNN_ATTR_CONVOLUTION_PRE_PADDINGS, CUDNN_TYPE_INT64, nd, r.pad);
+    conv.set(CUDNN_ATTR_CONVOLUTION_POST_PADDINGS, CUDNN_TYPE_INT64, nd, r.pad);
+    conv.set(CUDNN_ATTR_CONVOLUTION_DILATIONS, CUDNN_TYPE_INT64, nd, r.dilation);
+    conv.set(CUDNN_ATTR_CONVOLUTION_FILTER_STRIDES, CUDNN_TYPE_INT64, nd, r.stride);
     conv.finalize();
     if (!conv.ok) return;
     cudnnBackendDescriptorType_t optype; cudnnBackendAttributeName_t ax, aw, ay, aconv, aalpha, abeta;
@@ -291,7 +298,7 @@ inline void build(const ConvPlanRequest& r, ConvPlanEntry& e, void* x, void* w, 
 
 } // conv_plan_detail
 
-/** Fill a request from the geometry the three 2-D convolution ops all have.
+/** Fill a request from the convolution tensor geometry.
 
     They differed in exactly one line -- `req.kind` -- and repeated the other
     fourteen verbatim. The struct's bytes *are* the cache key
@@ -304,27 +311,34 @@ inline void build(const ConvPlanRequest& r, ConvPlanEntry& e, void* x, void* w, 
     between members is hashed with everything else, so an uninitialised gap
     would make the same configuration miss its own cache entry.
  */
+template <int Rank, int Spatial>
 inline ConvPlanRequest conv_plan_request(
         int64 kind,
         cudnnDataType_t dtype_x, cudnnDataType_t dtype_w, cudnnDataType_t dtype_y,
-        const int dimX[4], const int strideX[4],
-        const int dimW[4], bool filter_is_nhwc,
-        const int dimY[4], const int strideY[4],
-        const int pad[2], const int conv_stride[2], const int dilation[2],
+        const int (&dimX)[Rank], const int (&strideX)[Rank],
+        const int (&dimW)[Rank], bool filter_is_channels_last,
+        const int (&dimY)[Rank], const int (&strideY)[Rank],
+        const int (&pad)[Spatial], const int (&conv_stride)[Spatial],
+        const int (&dilation)[Spatial],
         cudnnMathType_t math_type) {
+    static_assert(Rank == Spatial + 2 && (Spatial == 2 || Spatial == 3),
+                  "invalid convolution plan rank");
     ConvPlanRequest r;
     memset(&r, 0, sizeof(r));
     r.kind = kind;
+    r.spatial_dims = Spatial;
     r.dtype_x = dtype_x; r.dtype_w = dtype_w; r.dtype_y = dtype_y;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < Rank; i++) {
         r.xdim[i] = dimX[i]; r.xstride[i] = strideX[i];
         r.ydim[i] = dimY[i]; r.ystride[i] = strideY[i];
         r.wdim[i] = dimW[i];
     }
-    conv_plan_filter_strides(r.wstride, dimW, filter_is_nhwc);
-    r.pad[0] = pad[0]; r.pad[1] = pad[1];
-    r.stride[0] = conv_stride[0]; r.stride[1] = conv_stride[1];
-    r.dilation[0] = dilation[0]; r.dilation[1] = dilation[1];
+    conv_plan_filter_strides(r.wstride, dimW, Rank, filter_is_channels_last);
+    for (int i = 0; i < Spatial; ++i) {
+        r.pad[i] = pad[i];
+        r.stride[i] = conv_stride[i];
+        r.dilation[i] = dilation[i];
+    }
     // Tensor-op numerics for fp32 operands, and whether to time the
     // candidates: both belong in the key, because both change which plan the
     // build picks.

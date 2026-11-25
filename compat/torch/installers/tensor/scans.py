@@ -28,9 +28,14 @@ def _cumulative(native, input, dim, dtype, out):
 def cumsum(input, dim=-1, dtype=None, out=None, axis=None, **kwargs):
     """Return a cumulative sum along ``dim`` with Torch's dtype promotion."""
     from importlib import import_module as _import_module
+    from jittor.backends.cuda.kernels.math.cumsum_last import cumsum_last_strict
     _owner = _import_module(__package__)
+    dim = dim if axis is None else axis
+    result = cumsum_last_strict(input, dim) if dtype is None else None
+    if result is not None:
+        return _assign_out(out, result) if out is not None else result
     return _owner._cumulative(
-        _owner._NATIVE_CUMSUM, input, dim if axis is None else axis, dtype, out)
+        _owner._NATIVE_CUMSUM, input, dim, dtype, out)
 
 
 def cumprod(input, dim=-1, dtype=None, out=None, axis=None, **kwargs):

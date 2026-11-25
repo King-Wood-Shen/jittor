@@ -24,11 +24,11 @@ def _official_build_dir(root: pathlib.Path) -> str:
         ).strip()
         if head:
             digest_key += "|" + head
-    except _facade.EXPECTED as exc:
+    except (_facade.EXPECTED + (_facade.subprocess.CalledProcessError,)) as exc:
         _facade.swallowed("shim/backends/flash_attention.py _official_build_dir: head = subprocess.check_output(", exc)
     digest_key += "|head_dims=" + ",".join(_facade._official_head_dims(root))
     digest_key += "|dtypes=" + ",".join(_facade._official_dtypes())
-    digest_key += "|native_forward_backward_dropout=1"
+    digest_key += "|native_forward_backward_dropout=3"
     digest = _facade.hashlib.sha256(digest_key.encode("utf-8")).hexdigest()[:16]
     return _facade._default_build_root("flashattn_jittor", "official_flash_attn", digest)
 
@@ -45,11 +45,11 @@ def _official_packed_build_dir(root: pathlib.Path) -> str:
         ).strip()
         if head:
             digest_key += "|" + head
-    except _facade.EXPECTED as exc:
+    except (_facade.EXPECTED + (_facade.subprocess.CalledProcessError,)) as exc:
         _facade.swallowed("shim/backends/flash_attention.py _official_packed_build_dir: head = subprocess.check_output(", exc)
     digest_key += "|head_dims=" + ",".join(_facade._official_head_dims(root))
     digest_key += "|dtypes=" + ",".join(_facade._official_dtypes())
-    digest_key += "|direct_packed_forward=6"
+    digest_key += "|direct_packed_forward=9"
     digest = _facade.hashlib.sha256(digest_key.encode("utf-8")).hexdigest()[:16]
     return _facade._default_build_root("flashattn_jittor", "official_flash_attn_packed", digest)
 
@@ -207,7 +207,8 @@ def _official_flags() -> Tuple[List[str], List[str]]:
         "-U__CUDA_NO_BFLOAT16_CONVERSIONS__",
         "--expt-relaxed-constexpr",
         "--expt-extended-lambda",
-        "--use_fast_math",
+        # Match PyTorch's default CUDA math and its softmax rounding.
+        "-DUNFUSE_FMA",
         "-DFLASHATTENTION_DISABLE_ALIBI",
         "-DFLASHATTENTION_DISABLE_SOFTCAP",
     ]

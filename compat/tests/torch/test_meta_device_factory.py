@@ -11,6 +11,21 @@ import pytest
 import torch
 
 
+def test_tensor_reports_meta_device_for_checkpoint_initialization():
+    source = torch.ones(2, device="cpu")
+    with torch.device("meta"):
+        empty = torch.tensor([])
+        copied = torch.tensor(source)
+        explicit_cpu = torch.tensor([], device="cpu")
+        assert empty.device.type == "meta"
+        assert copied.is_meta
+        assert explicit_cpu.device.type == "cpu"
+        assert source.device.type == "cpu"
+    assert empty.is_meta and copied.is_meta
+    assert torch.tensor([1], device="meta").is_meta
+    assert torch.tensor([]).device.type == "cpu"
+
+
 def test_factory_meta_argument_reports_meta():
     value = torch.empty((2, 3), device="meta")
     assert value.device.type == "meta"

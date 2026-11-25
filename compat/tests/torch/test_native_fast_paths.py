@@ -1413,11 +1413,12 @@ class TestNativeRules(unittest.TestCase):
             (torch.randn(4, 32, device="cuda"), (32,), w, b),
             (torch.randn(4, 32, device="cuda").half(), (32,), w.half(), b.half()),
             (torch.randn(4, 32, device="cuda").bfloat16(), (32,), w, b),
+            (torch.randn(4, 32, device="cuda").bfloat16(), (32,), w.bfloat16(), b.bfloat16()),
             (torch.randn(4, 16, device="cuda"), (16,), w, b),
             (torch.randn(4, 32, device="cuda"), (4, 32), w, b),
             (torch.randn(4, 32, device="cuda"), (32,), w, 0.0),
         ]
-        with torch.no_grad():
+        with torch.no_grad(), jt.flag_scope(cuda_kernel_math="strict"):
             for x, shape, weight, bias in cases:
                 python = layer_norm_cuda._supports_layer_norm_inference(x, shape, weight, bias, 1e-5)
                 chosen = select_kernel("nn.layer_norm.inference", x, shape, weight, bias, 1e-5)

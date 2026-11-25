@@ -251,8 +251,9 @@ PyObject* fast_cat(PyObject* tensors, int64 dim) {
     if (active < 0) return nullptr;
     if (active) return not_implemented();
 
-    // The frontend and placement the generated bindings of `empty` and
-    // `setitem` would each have entered.
+    // Cat follows its operands even inside a module on another device.
+    TensorPlacementScope placement(first->placement.explicit_backend
+        ? first->placement : current_tensor_placement());
     NanoVector out_shape;
     for (int d = 0; d < ndim; d++) out_shape.push_back(d == dim ? total : shape[d]);
     VarPtr out = make_empty(out_shape, dtype);

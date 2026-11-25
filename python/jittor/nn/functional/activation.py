@@ -4,7 +4,7 @@ from jittor._core.dtypes import dtype_name as _jittor_dtype_name
 import numpy as np
 
 import jittor as jt
-from jittor._runtime.dispatch import try_dispatch
+from jittor._runtime.dispatch import dispatch_context, try_dispatch
 from jittor.nn.functional._layout import channels_last_source
 
 from ... import _arg_policy
@@ -293,8 +293,13 @@ def gelu(x, approximate='none'):
     if fast is not None:
         return fast
     if approximate == 'tanh':
-        _sqrt_2_over_pi = 0.7978845608028654
-        return 0.5*x*(1+jt.tanh(_sqrt_2_over_pi*(x+0.044715*(x*x*x))))
+        input_dtype = _jittor_dtype_name(x.dtype)
+        low_precision = input_dtype in ('float16', 'bfloat16')
+        compute_x = x.float32() if low_precision else x
+        sqrt_2_over_pi = 0.7978845608028654
+        result = 0.5 * compute_x * (1 + jt.tanh(sqrt_2_over_pi *
+            (compute_x + 0.044715 * (compute_x * compute_x * compute_x))))
+        return result.cast(input_dtype) if low_precision else result
     elif approximate == 'none':
         # Keep the exact GELU kernel in the tensor's compute dtype. Dividing a
         # float32 Var by a Python float intentionally uses a float64 intermediate
@@ -351,7 +356,13 @@ def silu(x, inplace=False):     # inplace: accepted for torch/mmcv compat, ignor
     fast = try_dispatch("nn.silu", x, inplace=inplace)
     if fast is not None:
         return fast
-    if _jittor_dtype_name(x.dtype) in ("float16", "bfloat16"):
+    dtype_name = _jittor_dtype_name(x.dtype)
+    if (dtype_name == "float32" and jt.flags.cuda_kernel_math == "strict"
+            and dispatch_context(x).backend == "cuda"):
+        # A separate reciprocal rounds before multiplication. The CUDA SiLU
+        # operator used by Torch rounds the division by the denominator once.
+        return x / (1.0 + (-x).exp())
+    if dtype_name in ("float16", "bfloat16"):
         # SiLU rounds once at its public boundary. A narrow sigmoid followed
         # by a narrow multiply adds a rounding step absent from the opmath
         # implementation. Keep native AD connected through the widening cast.

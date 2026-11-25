@@ -26,7 +26,7 @@ from ...nested import _NestedTensor, _rebuild_var_from_numpy, _TorchSize, _torch
 
 from ...tensor_state import get_tensor_state
 
-from ..factories import _install_random_and_linspace, _set_use_cuda, _wrap_constructors
+from ..factories import _install_random_and_linspace, _is_meta_device_request, _set_use_cuda, _wrap_constructors
 
 from ..numerical import log_softmax as _numerical_log_softmax, masked_select as _numerical_masked_select, softmax as _numerical_softmax
 
@@ -526,7 +526,9 @@ def _array_keep_dtype(data):
 def tensor(data, dtype=None, device=None, requires_grad=False, **kw):
     g = compatibility_owner(jt)
     Var = g.Var
-    with tensor_frontend(Var, device=device, like=data):
+    requested = _DEVICE_CTX_STACK[-1] if device is None and _DEVICE_CTX_STACK else device
+    meta = _is_meta_device_request(requested)
+    with tensor_frontend(Var, device="cpu" if meta else device, like=data):
         import numpy as _np
         ds = _dtype_to_str(dtype)
         numpy_dtypes = {"bool", "uint8", "int8", "int16", "int32", "int64",
@@ -580,6 +582,8 @@ def tensor(data, dtype=None, device=None, requires_grad=False, **kw):
         if requires_grad:
             v.requires_grad_(True)
             _torch_register_leaf(v)
+        if meta:
+            v._jittor_torch_meta = True
         return v
 
 
@@ -874,6 +878,28 @@ def _check_condition(condition, message, exception):
         text = message() if callable(message) else message
         raise exception(text if text is not None else "Expected cond to be True, but got False")
 
+def _check_with(error_type, cond, message):
+    if not isinstance(cond, bool):
+        raise TypeError(f"cond must be a bool, but got {type(cond)}")
+    if cond:
+        return
+    if not issubclass(error_type, Exception) or issubclass(error_type, Warning):
+        raise AssertionError(
+            f"error_type must be a subclass of Exception but not Warning, got {error_type}"
+        )
+    if message is None:
+        text = (
+            "Expected cond to be True, but got False. (Could this error "
+            "message be improved? If so, please report an enhancement request "
+            "to PyTorch.)"
+        )
+    else:
+        if not callable(message):
+            raise TypeError("message must be a callable")
+        text = str(message())
+    raise error_type(text)
+
+
 def _check(condition, message=None):
     return _check_condition(condition, message, RuntimeError)
 
@@ -1000,6 +1026,7 @@ def install(ctx):
     # may be a zero-arg callable that torch invokes lazily only on failure. The
     # condition is usually a python bool but can be a bool tensor (_check_tensor_all).
     g._check = _check
+    g._check_with = _check_with
     g._check_is_size = _check_is_size
     g._check_index = _check_index
     g._check_value = _check_value

@@ -345,6 +345,7 @@ class TestSDPA(Base):
 
         def fake_flash(q, k, v, *args, **kwargs):
             seen["shapes"] = (tuple(q.shape), tuple(k.shape), tuple(v.shape))
+            self.assertTrue(all(x.is_contiguous() for x in (q, k, v)))
             return jt.zeros(q.shape, dtype=q.dtype)
 
         backend.flash_attn_func = fake_flash
@@ -355,12 +356,14 @@ class TestSDPA(Base):
                 mock.patch.object(flashattn_jittor, "required", return_value=False), \
                 mock.patch.object(flashattn_jittor, "backend_name",
                                   return_value="gqa_flash_backend"):
-            q = jt.ones((1, 4, 2, 32), dtype="float16")
-            k = jt.ones((1, 2, 3, 32), dtype="float16")
-            v = jt.ones((1, 2, 3, 32), dtype="float16")
+            q = torch.ones((1, 4, 2, 32), device="cuda", dtype=torch.float16)
+            k = torch.ones((1, 2, 3, 32), device="cuda", dtype=torch.float16)
+            v = torch.ones((1, 2, 3, 32), device="cuda", dtype=torch.float16)
             out = torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, enable_gqa=True)
 
+        self.assertIsInstance(out, torch.Tensor)
+        self.assertTrue(out.is_cuda)
         self.assertEqual(tuple(out.shape), (1, 4, 2, 32))
         self.assertEqual(seen["shapes"], (
             (1, 2, 4, 32),

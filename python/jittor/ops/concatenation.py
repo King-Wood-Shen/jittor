@@ -36,7 +36,7 @@ def _placement_scope(x):
     if fn is None:
         from .._core.var import placement_scope_like as fn
         _placement_scope_like = fn
-    return fn(x)
+    return fn(x, override=True)
 
 
 @contextmanager
@@ -94,8 +94,10 @@ def _empty_where_the_inputs_are(x, shape, dtype):
     """
     jt = _jt()
     core = jt.core
+    backend = int(x.placement_backend)
     device_id = int(x.device_id)
-    if ((int(x.placement_backend) < 0 or core._current_tensor_placement() is not None)
+    requested = core._current_tensor_placement()
+    if ((backend < 0 or requested == (backend, max(device_id, 0)))
             and (device_id < 0 or device_id == int(jt.current_device()))):
         return jt.empty(shape, dtype=dtype)
     with _allocate_where_the_inputs_are(x):

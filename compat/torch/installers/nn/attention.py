@@ -12,6 +12,7 @@ from ....diagnostics import EXPECTED, swallowed, sdpa_flash_stats
 
 from ...context import get_install_context
 from ...fidelity import Fidelity, register_fidelity
+from ...frontend import tensor_frontend
 
 from jittor._runtime.environment import getenv as _getenv
 
@@ -254,13 +255,11 @@ def _try_flash_scaled_dot_product_attention(query, key, value, attn_mask,
     heads, lq, head_dim = query_heads, int(q_shape[-2]), int(q_shape[-1])
     lk = int(k_shape[-2])
     q_axes = tuple(list(range(p)) + [p + 1, p, p + 2])
-    # Native flash-attn is an external C++/CUDA extension. Crossing that
-    # boundary with a lazy permute/reshape expression can leave the bridge
-    # holding transient metadata; clone materializes a stable row-major
-    # tensor while keeping the kernel path fused.
-    q_dense = query.permute(*q_axes).reshape((batch, lq, heads, head_dim)).clone()
-    k_dense = key.permute(*q_axes).reshape((batch, lk, key_heads, head_dim)).clone()
-    v_dense = value.permute(*q_axes).reshape((batch, lk, value_heads, head_dim)).clone()
+    # The extension reads packed BSHD buffers. Torch clone preserves
+    # strides on dense views, so a transposed input needs contiguous().
+    q_dense = query.permute(*q_axes).reshape((batch, lq, heads, head_dim)).contiguous()
+    k_dense = key.permute(*q_axes).reshape((batch, lk, key_heads, head_dim)).contiguous()
+    v_dense = value.permute(*q_axes).reshape((batch, lk, value_heads, head_dim)).contiguous()
     try:
         out = fn(
             q_dense, k_dense, v_dense, dropout, float(sf), bool(is_causal))
@@ -278,12 +277,15 @@ def _try_flash_scaled_dot_product_attention(query, key, value, attn_mask,
             )
         _sdpa_flash_miss("returned_none")
         return None
-    out = out.reshape(tuple(prefix) + (lq, heads, head_dim))
     out_axes = tuple(list(range(p)) + [p + 1, p, p + 2])
+    target = get_install_context(jt).target_namespace
+    # External CUDA extensions can return a native Var. The public SDPA
+    # result must use the Torch tensor frontend while keeping its graph.
+    with tensor_frontend(target.Var, like=query, default_placement=False):
+        out = out.reshape(tuple(prefix) + (lq, heads, head_dim)).permute(*out_axes)
+        if cast_back and _jittor_dtype_name(out.dtype) != original_dtype:
+            out = out.to(original_dtype)
     _sdpa_flash_hit(_fa_jittor.backend_name())
-    out = out.permute(*out_axes)
-    if cast_back and _jittor_dtype_name(out.dtype) != original_dtype:
-        out = out.to(original_dtype)
     return out
 
 
