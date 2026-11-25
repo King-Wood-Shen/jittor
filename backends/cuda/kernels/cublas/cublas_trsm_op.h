@@ -14,8 +14,8 @@ namespace jittor {
 // frontend differentiates it as a jt.Function.
 struct CublasTrsmOp : Op {
     Var* a, * b, * x;
-    bool upper;
-    CublasTrsmOp(Var* a, Var* b, bool upper);
+    bool upper, column_io;
+    CublasTrsmOp(Var* a, Var* b, bool upper, bool column_io=false);
 
     const char* name() const override { return "cublas_trsm"; }
     void infer_shape() override;

@@ -22,6 +22,7 @@ from functools import lru_cache
 
 import jittor as jt
 from jittor._runtime.backend_libraries import library_resource
+from jittor._runtime.core_api import _output_requires_grad, _stop_grad_outputs
 from jittor._runtime.dispatch import dispatch_context, optional_kernel
 
 
@@ -154,6 +155,50 @@ def _is_full_reduction(args, kwargs):
     return not (kwargs.get("keepdims") or kwargs.get("keepdim"))
 
 
+@lru_cache(maxsize=8)
+def _vector_mean_source(threads):
+    return f"""
+    __global__ static void vector_mean(@ARGS_DEF) {{
+        @PRECALC
+        const int lane = threadIdx.x, n = in0_shape0;
+        float part[4] = {{0.f, 0.f, 0.f, 0.f}};
+        for (int i = lane * 4; i + 3 < n; i += {threads} * 4) {{
+            #pragma unroll
+            for (int j = 0; j < 4; ++j) part[j] += in0_p[i + j];
+        }}
+        const int tail = n - n % 4 + lane;
+        if (tail < n) part[0] += in0_p[tail];
+        __shared__ float partial[{threads}];
+        partial[lane] = ((part[0] + part[1]) + part[2]) + part[3];
+        for (int offset = {threads} / 2; offset >= 32; offset >>= 1) {{
+            __syncthreads();
+            if (lane < offset) partial[lane] += partial[lane + offset];
+        }}
+        __syncthreads();
+        if (lane < 32) {{
+            float sum = partial[lane];
+            for (int offset = 16; offset > 0; offset >>= 1)
+                sum += __shfl_down_sync(0xffffffffu, sum, offset);
+            if (lane == 0) out0_p[0] = sum * (1.f / float(n));
+        }}
+    }}
+    vector_mean<<<1,{threads}>>>(@ARGS);
+    """
+
+
+def _strict_vector_mean(x, count):
+    # Preserve the accumulation order of the vectorized CUDA float32 mean.
+    # A one-ULP difference here can change GPTQ's regularized Cholesky input.
+    if (x.ndim != 1 or not 128 <= count <= 8192 or not x.is_contiguous()
+            or _jittor_dtype_name(x.dtype) != "float32"
+            or jt.flags.cuda_kernel_math != "strict" or _output_requires_grad(x)
+            or dispatch_context(x).backend != "cuda"):
+        return None
+    threads = min(512, 1 << ((count // 4).bit_length() - 1))
+    result = jt.code((1,), x.dtype, [x], cuda_src=_vector_mean_source(threads))
+    return _stop_grad_outputs(result.reshape(()))
+
+
 def _route(native, mean):
     """Wrap one reduction entry point so a whole-Var call takes the fast path.
 
@@ -167,6 +212,10 @@ def _route(native, mean):
             divisor = int(x.numel()) if mean and isinstance(x, jt.Var) else None
             if mean and divisor is None:
                 return native(x, *args, **kwargs)
+            if mean and not args and not kwargs:
+                exact = _strict_vector_mean(x, divisor)
+                if exact is not None:
+                    return exact
             fast = _full_reduce_cuda(x, divisor=divisor)
             if fast is not None:
                 return fast

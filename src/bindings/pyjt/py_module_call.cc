@@ -11,6 +11,7 @@
 #include "core/grad.h"
 #include "core/var_holder.h"
 #include "runtime/float32_precision.h"
+#include "runtime/jit_policy.h"
 #include <stdexcept>
 #include <tuple>
 #include "runtime/device_state.h"
@@ -96,7 +97,7 @@ PyObject* partial_type = nullptr;
 PyObject* group_norm_name = nullptr;
 PyObject* lt_linear_header = nullptr;
 PyObject* lt_linear_source_fn = nullptr;
-std::map<std::tuple<int64, int64, int64, bool>, string> lt_linear_sources;
+std::map<std::tuple<int64, int64, int64, bool, bool>, string> lt_linear_sources;
 string lt_linear_header_text;
 auto make_code = op_constructor<VarPtr, NanoVector, NanoString, vector<Var*>&&, string&&,
     vector<string>&&, string&&, string&&, vector<string>&&, string&&, DataMap&&, string&&>("code");
@@ -109,7 +110,7 @@ PyObject* layer_norm_execute = nullptr;
 PyObject* layer_norm_impl = nullptr;
 PyObject* layer_norm_source_fn = nullptr;
 PyObject* layer_norm_name = nullptr;
-std::map<std::tuple<int64, double, bool>, string> layer_norm_sources;
+std::map<std::tuple<int64, double, bool, bool>, string> layer_norm_sources;
 
 struct TypeInfo {
     PyObject* tensor_type = nullptr;
@@ -713,11 +714,13 @@ PyObject* linear_with_bias_inference(PyObject* dict, PyObject* x) {
     int64 rows = cin ? a->num / cin : 0;
     if (rows * cout * cin < (int64(1) << 18)) return nullptr;
     bool half = dtype == ns_float16;
-    auto key = std::make_tuple(rows, cin, cout, half);
+    const bool match_torch = half && runtime_flag_cuda_kernel_math() == "strict";
+    auto key = std::make_tuple(rows, cin, cout, half, match_torch);
     auto found = lt_linear_sources.find(key);
     if (found == lt_linear_sources.end()) {
-        PyObjHolder src(PyObject_CallFunction(lt_linear_source_fn, "LLLs",
-            (long long)rows, (long long)cin, (long long)cout, half ? "float16" : "float32"));
+        PyObjHolder src(PyObject_CallFunction(lt_linear_source_fn, "LLLsO",
+            (long long)rows, (long long)cin, (long long)cout,
+            half ? "float16" : "float32", match_torch ? Py_True : Py_False));
         Py_ssize_t size;
         const char* text = PyUnicode_AsUTF8AndSize(src.obj, &size);
         if (!text) return nullptr;
@@ -897,11 +900,14 @@ PyObject* layer_norm_inference(PyObject* dict, PyObject* x) {
         return nullptr;
     }
     bool warp = hidden <= 1024 && a->num / hidden >= 1024;
-    auto key = std::make_tuple(hidden, epsilon, warp);
+    const bool match_torch = hidden > 0 && hidden <= (1 << 24) && hidden % 4 == 0 && a->num > 0
+        && a->dtype() == ns_float16 && gamma->dtype() == ns_float16 && beta->dtype() == ns_float16
+        && accelerator_backend_id() == BackendId::Cuda && runtime_flag_cuda_kernel_math() == "strict";
+    auto key = std::make_tuple(hidden, epsilon, warp, match_torch);
     auto found = layer_norm_sources.find(key);
     if (found == layer_norm_sources.end()) {
-        PyObjHolder src(PyObject_CallFunction(layer_norm_source_fn, "LdO",
-            (long long)hidden, epsilon, warp ? Py_True : Py_False));
+        PyObjHolder src(PyObject_CallFunction(layer_norm_source_fn, "LdOO",
+            (long long)hidden, epsilon, warp ? Py_True : Py_False, match_torch ? Py_True : Py_False));
         Py_ssize_t length;
         const char* text = PyUnicode_AsUTF8AndSize(src.obj, &length);
         if (!text) return nullptr;

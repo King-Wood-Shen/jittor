@@ -464,6 +464,17 @@ class TestBinaryOpPromotion(Base):
 
 # ------------------------------------------------------------------ integer dtype methods
 
+def test_clamp_zero_dimensional_integer_bound_preserves_float32():
+    def check(device):
+        values = torch.tensor([-2.0, 2.0, 20.0], dtype=torch.float32, device=device)
+        maximum = torch.tensor(15, dtype=torch.int64, device=device)
+        for result in (torch.clamp(values, 0, maximum), values.clamp(0, maximum)):
+            assert result.dtype == torch.float32
+            np.testing.assert_array_equal(result.cpu().numpy(), [0.0, 2.0, 15.0])
+
+    both_devices(check)
+
+
 class TestCastMethods(Base):
     # torch's documented per-method target dtype.
     _METHOD = {

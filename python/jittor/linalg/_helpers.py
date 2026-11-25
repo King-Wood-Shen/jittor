@@ -296,6 +296,14 @@ def _cuda_inv(a):
     return _cusolver_ops().cusolver_inv(a)
 
 
+def _supports_cuda_cholesky(a, upper):
+    return a.ndim == 2 and getattr(_cusolver_ops(), "cusolver_cholesky", None) is not None
+
+
+def _cuda_cholesky(a, upper):
+    return _cusolver_ops().cusolver_cholesky(a.contiguous(), upper)
+
+
 def _cuda_qr(a):
     q, r = _cusolver_ops().cusolver_qr(a)
     return q, r
@@ -311,6 +319,8 @@ register_kernel("linalg_inv", "cuda", _cuda_inv, dtypes=_LAPACK_DTYPES,
                 supports=_supports_cuda_square)
 register_kernel("linalg_qr", "cuda", _cuda_qr, dtypes=_LAPACK_DTYPES,
                 supports=_supports_cuda_square)
+register_kernel("linalg_cholesky", "cuda", _cuda_cholesky, dtypes=_LAPACK_DTYPES,
+                supports=_supports_cuda_cholesky)
 register_kernel("linalg_solve_triangular", "cuda", _cuda_solve_triangular,
                 dtypes=_LAPACK_DTYPES, supports=_supports_cuda_trsm)
 

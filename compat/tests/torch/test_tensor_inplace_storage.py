@@ -10,6 +10,23 @@ from _helpers.device_types import instantiate_device_type_tests
 
 
 class TestTensorInplaceStorage:
+    def test_parameter_data_augmentation_preserves_bfloat16(self, device):
+        parameter = torch.nn.Parameter(
+            torch.tensor([1., 2.], dtype=torch.bfloat16, device=device)
+        )
+        delta = torch.tensor([0.02, -0.06], dtype=torch.float32, device=device)
+        reference = (parameter.detach().float() + delta).to(torch.bfloat16)
+        alias = parameter.data
+
+        parameter.data += delta
+
+        assert parameter.dtype == alias.dtype == torch.bfloat16
+        assert parameter.requires_grad
+        np.testing.assert_array_equal(parameter.detach().float().cpu().numpy(),
+                                      reference.float().cpu().numpy())
+        np.testing.assert_array_equal(alias.float().cpu().numpy(),
+                                      reference.float().cpu().numpy())
+
     def test_low_precision_slice_mutations_preserve_aliases(self, device):
         for dtype in (torch.float16, torch.bfloat16):
             for operation, expected in ((lambda x: x.copy_(torch.tensor([6., 8.], device=device)), [6., 8.]),

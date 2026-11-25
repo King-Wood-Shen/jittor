@@ -101,12 +101,48 @@ class TestLinalg(Base):
             self.ac(grad.numpy(), ref, atol=1e-3, msg=f"right solve grad {dev}")
         both_devices(body)
 
+    def test_solve_triangular(self):
+        A = np.array([[2., 91., 92.], [3., 4., 93.], [5., 6., 7.]], dtype="float32")
+        B = np.array([[2., 3.], [7., 11.], [13., 17.]], dtype="float32")
+        def body(dev):
+            matrix, rhs = jt.array(A), jt.array(B)
+            for upper in (False, True):
+                for unitriangular in (False, True):
+                    triangle = np.triu(A) if upper else np.tril(A)
+                    if unitriangular:
+                        np.fill_diagonal(triangle, 1.)
+                    left = torch.linalg.solve_triangular(
+                        matrix, rhs, upper=upper, unitriangular=unitriangular)
+                    self.ac(triangle @ left.numpy(), B, atol=1e-3,
+                            msg=f"triangular left {dev} {upper} {unitriangular}")
+                    right_rhs = jt.array(B.T)
+                    right = torch.linalg.solve_triangular(
+                        matrix, right_rhs, upper=upper, left=False,
+                        unitriangular=unitriangular)
+                    self.ac(right.numpy() @ triangle, B.T, atol=1e-3,
+                            msg=f"triangular right {dev} {upper} {unitriangular}")
+                    out = torch.empty_like(left)
+                    self.assertIs(torch.linalg.solve_triangular(
+                        matrix, rhs, upper=upper, unitriangular=unitriangular,
+                        out=out), out)
+                    self.ac(out.numpy(), left.numpy(), atol=1e-5)
+            self.assertIs(torch._C._LinAlgError, np.linalg.LinAlgError)
+        both_devices(body)
+
     def test_cholesky(self):
         A = self.spd(4, 4)
         def body(dev):
             L = torch.linalg.cholesky(jt.array(A)).numpy()
             self.ac(L @ L.T, A, atol=1e-3, msg=f"L@L.T==A {dev}")
             self.assertTrue(np.allclose(np.triu(L, 1), 0, atol=1e-4), f"L lower {dev}")
+            U = torch.linalg.cholesky(jt.array(A), upper=True)
+            self.ac(U.numpy().T @ U.numpy(), A, atol=1e-3,
+                    msg=f"U.T@U==A {dev}")
+            self.assertTrue(np.allclose(np.tril(U.numpy(), -1), 0, atol=1e-4),
+                            f"U upper {dev}")
+            out = torch.empty_like(U)
+            self.assertIs(torch.linalg.cholesky(jt.array(A), upper=True, out=out), out)
+            self.ac(out.numpy(), U.numpy(), atol=1e-5)
         both_devices(body)
 
     def test_svd_values_and_recon(self):

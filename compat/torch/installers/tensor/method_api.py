@@ -516,6 +516,9 @@ def _new_tensor(self, data, dtype=None, device=None, requires_grad=False, **kw):
         return _new_finish(_owner.jt.array(data).cast(dt), device, requires_grad)
 
 
+_INTEGRAL_CLAMP_BOUNDS = frozenset(("bool", "uint8", "int8", "int16", "int32", "int64"))
+
+
 def _clamp(input, min=None, max=None, min_v=None, max_v=None):
     # accept BOTH torch (min/max) and jittor-native (min_v/max_v) kwarg names:
     # this override REPLACES jt.clamp, and jittor's own ops (e.g. nn.hardswish ->
@@ -523,8 +526,20 @@ def _clamp(input, min=None, max=None, min_v=None, max_v=None):
     _context = get_install_context(_owner.jt)
     _native = _context.state["tensor_native_api"]
     _native_clamp = _native['_native_clamp']
-    return _native_clamp(input, min if min is not None else min_v,
-                         max if max is not None else max_v)
+    lower = min if min is not None else min_v
+    upper = max if max is not None else max_v
+    # A zero-dimensional integer bound keeps the floating input dtype in
+    # Torch. Native Jittor's int64/float32 promotion would produce float64.
+    dtype = _jittor_dtype_name(input.dtype)
+    if dtype in _FLOATING_NAMES:
+        lower, upper = (
+            bound.cast(dtype)
+            if isinstance(bound, _NativeVar) and bound.ndim == 0
+            and _jittor_dtype_name(bound.dtype) in _INTEGRAL_CLAMP_BOUNDS
+            else bound
+            for bound in (lower, upper)
+        )
+    return _native_clamp(input, lower, upper)
 
 
 def _ne_operand(value, peer):
@@ -1985,23 +2000,28 @@ def _api_zero_batch(tensors):
                 tensor._copy_into(zeros)
 
 
+def _store_inplace_arithmetic(self, result):
+    from ..core import can_cast
+
+    if tuple(result.shape) != tuple(self.shape):
+        raise RuntimeError("in-place output shape cannot expand to the broadcast shape")
+    if result.dtype != self.dtype:
+        if not can_cast(result.dtype, self.dtype):
+            raise RuntimeError("result type cannot be cast to the in-place destination dtype")
+        result = result.cast(_jittor_dtype_name(self.dtype))
+    return _ip(self, result, preserve_storage=True)
+
+
 def _api_add(self, o, alpha=1):
-    return _ip(self, self + o * alpha, preserve_storage=True)
+    return _store_inplace_arithmetic(self, self + o * alpha)
 
 
 def _scaled_add_inplace(self, term, value):
     from numbers import Number
-    from ..core import can_cast
 
     if not isinstance(value, Number):
         raise TypeError("value must be a number")
-    result = self + term * value
-    if tuple(result.shape) != tuple(self.shape):
-        raise RuntimeError("in-place output shape cannot expand to the broadcast shape")
-    if not can_cast(result.dtype, self.dtype):
-        raise RuntimeError("result type cannot be cast to the in-place destination dtype")
-    result = _cast_if_needed(result, _jittor_dtype_name(self.dtype))
-    return _ip(self, result, preserve_storage=True)
+    return _store_inplace_arithmetic(self, self + term * value)
 
 
 def _api_addcmul(self, tensor1, tensor2, *, value=1):
@@ -2016,7 +2036,6 @@ def _api_addcdiv(self, tensor1, tensor2, *, value=1):
 
 def _api_lerp_inplace(self, end, weight):
     from numbers import Number
-    from ..core import can_cast
     from ..numerical.elementwise import lerp
 
     self._check_inplace_autograd()
@@ -2031,25 +2050,19 @@ def _api_lerp_inplace(self, end, weight):
             raise RuntimeError("lerp weight must have the same dtype as the destination")
     elif not isinstance(weight, Number):
         raise TypeError("lerp weight must be a number or Tensor")
-    result = lerp(self, end, weight)
-    if tuple(result.shape) != tuple(self.shape):
-        raise RuntimeError("in-place output shape cannot expand to the broadcast shape")
-    if not can_cast(result.dtype, self.dtype):
-        raise RuntimeError("result type cannot be cast to the in-place destination dtype")
-    result = _cast_if_needed(result, _jittor_dtype_name(self.dtype))
-    return _ip(self, result, preserve_storage=True)
+    return _store_inplace_arithmetic(self, lerp(self, end, weight))
 
 
 def _api_sub(self, o, alpha=1):
-    return _ip(self, self - o * alpha, preserve_storage=True)
+    return _store_inplace_arithmetic(self, self - o * alpha)
 
 
 def _api_mul(self, o):
-    return _ip(self, self * o, preserve_storage=True)
+    return _store_inplace_arithmetic(self, self * o)
 
 
 def _api_div(self, o):
-    return _ip(self, self / o, preserve_storage=True)
+    return _store_inplace_arithmetic(self, self / o)
 
 
 def _api_clamp_min(input, v):

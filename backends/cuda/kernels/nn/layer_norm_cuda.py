@@ -6,7 +6,7 @@ import os
 
 import jittor as jt
 from jittor._runtime.core_api import _output_requires_grad, _stop_grad_outputs
-from jittor._runtime.dispatch import native_rule, optional_kernel
+from jittor._runtime.dispatch import dispatch_context, native_rule, optional_kernel
 
 
 @native_rule("layer_norm_inference")
@@ -453,18 +453,82 @@ def _layer_norm_no_grad_cuda(
             cuda_src=_block_rows_source_scalar(eps_value, hidden, offset_literal, scale_literal),
         )
         return y
+    match_torch = (
+        0 < hidden <= 2**24 and hidden % 4 == 0 and x.numel() > 0
+        and jt.flags.cuda_kernel_math == "strict"
+        and dispatch_context(x).backend == "cuda"
+        and all(_jittor_dtype_name(t.dtype) == "float16" for t in (x, weight, bias))
+    )
     y = jt.code(x.shape, x.dtype, [x, weight, bias],
-                cuda_src=_affine_source(hidden, eps_value, _warp_rows(x, hidden)))
+                cuda_src=_affine_source(hidden, eps_value, _warp_rows(x, hidden), match_torch))
     return _stop_grad_outputs(y)
 
 
+def _welford_affine_source(hidden, eps):
+    # Match the FP16 CUDA inference reduction tree and affine rounding used
+    # by PyTorch. GPTQ feeds the normalized result into its Hessian estimate.
+    return f"""
+    __global__ static void welford_layer_norm(@ARGS_DEF) {{
+        @PRECALC
+        struct Stats {{ float mean, m2, count; }};
+        auto combine = [](Stats a, Stats b) {{
+            const float count = a.count + b.count;
+            if (count == 0.f) return Stats{{0.f, 0.f, 0.f}};
+            const float delta = b.mean - a.mean;
+            const float reciprocal = 1.f / count;
+            const float p = a.count * reciprocal, q = b.count * reciprocal;
+            return Stats{{fmaf(p, a.mean, q * b.mean),
+                          fmaf(delta * delta * a.count, q, a.m2 + b.m2), count}};
+        }};
+        constexpr int width = {hidden};
+        const int lane = threadIdx.x & 31, warp = threadIdx.x >> 5;
+        const auto* x = in0_p + static_cast<long long>(blockIdx.x) * width;
+        auto* y = out0_p + static_cast<long long>(blockIdx.x) * width;
+        Stats local{{0.f, 0.f, 0.f}};
+        for (int k = threadIdx.x * 4; k < width; k += 128 * 4) {{
+            #pragma unroll
+            for (int j = 0; j < 4; ++j) {{
+                const float value = static_cast<float>(x[k + j]);
+                const float delta = value - local.mean;
+                local.count += 1.f;
+                local.mean = fmaf(delta, 1.f / local.count, local.mean);
+                local.m2 = fmaf(delta, value - local.mean, local.m2);
+            }}
+        }}
+        for (int offset = 16; offset > 0; offset >>= 1) {{
+            const Stats other{{
+                __shfl_down_sync(0xffffffffu, local.mean, offset),
+                __shfl_down_sync(0xffffffffu, local.m2, offset),
+                __shfl_down_sync(0xffffffffu, local.count, offset)}};
+            local = combine(other, local);
+        }}
+        __shared__ Stats warps[4];
+        if (lane == 0) warps[warp] = local;
+        __syncthreads();
+        if (threadIdx.x == 0)
+            warps[0] = combine(combine(warps[3], warps[1]), combine(warps[2], warps[0]));
+        __syncthreads();
+        const float inv_std = rsqrtf(warps[0].m2 / float(width) + {eps:.9e}f);
+        for (int j = threadIdx.x; j < width; j += 128) {{
+            const float centered = static_cast<float>(x[j]) - warps[0].mean;
+            const float weight = static_cast<float>(in1_p[j]);
+            const float bias = static_cast<float>(in2_p[j]);
+            y[j] = out0_type(fmaf(weight, inv_std * centered, bias));
+        }}
+    }}
+    welford_layer_norm<<<in0->num / {hidden}, 128>>>(@ARGS);
+    """
+
+
 @functools.lru_cache(maxsize=256)
-def _affine_source(hidden, eps_value, warp):
+def _affine_source(hidden, eps_value, warp, match_torch=False):
     """The kernel for a Var weight and bias: a warp a row, or a block.
 
     Also what the native module call builds a `LayerNorm`'s inference
     operator from (`src/bindings/pyjt/py_module_call.cc`).
     """
+    if match_torch:
+        return _welford_affine_source(hidden, eps_value)
     if warp:
         affine = ("in1_type* weight, in2_type* bias, ",
                   "* static_cast<float>(weight[j]) + static_cast<float>(bias[j])",

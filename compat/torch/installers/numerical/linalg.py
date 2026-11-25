@@ -125,6 +125,70 @@ def solve(A, B, *, left=True, out=None):
     return result
 
 
+def cholesky(A, *, upper=False, out=None):
+    """Return the lower or upper Cholesky factor on the input's device."""
+    from jittor.linalg import cholesky as native_cholesky
+    from jittor._runtime.core_api import _output_requires_grad
+    from jittor._runtime.dispatch import select_kernel
+    kernel = None if _output_requires_grad(A) else select_kernel("linalg_cholesky", A, upper)
+    if kernel is not None:
+        result = kernel(A, upper)
+    else:
+        lower = native_cholesky(A)
+        result = lower.transpose(-2, -1).conj() if upper else lower
+    if out is not None:
+        out.assign(result)
+        return out
+    return result
+
+
+def solve_triangular(A, B, *, upper, left=True, unitriangular=False, out=None):
+    """Solve a triangular system on the input's device.
+
+    Use a column-major cuBLAS solve for CUDA inference and the native
+    differentiable solve for other inputs.
+    """
+    import jittor as jt
+    if A.ndim < 2 or B.ndim < 2:
+        raise RuntimeError("linalg.solve_triangular: A and B must be matrices")
+    if A.shape[-1] != A.shape[-2]:
+        raise RuntimeError("linalg.solve_triangular: A must be square")
+    if unitriangular:
+        eye = jt.init.eye(int(A.shape[-1]), A.dtype)
+        triangle = jt.triu(A, 1) if upper else jt.tril(A, -1)
+        triangle = triangle + eye
+    else:
+        triangle = jt.triu(A) if upper else jt.tril(A)
+    column_solve = None
+    if left and A.ndim == B.ndim == 2 and A.dtype == B.dtype:
+        from jittor._core.dtypes import dtype_name
+        from jittor._runtime.core_api import _output_requires_grad
+        from jittor._runtime.dispatch import dispatch_context
+        from jittor.linalg._helpers import _LAPACK_DTYPES, _cublas_ops
+        if (dtype_name(A.dtype) in _LAPACK_DTYPES and not _output_requires_grad(A, B)
+                and dispatch_context(A, B).backend == "cuda"):
+            column_solve = getattr(_cublas_ops(), "cublas_trsm", None)
+    if column_solve is not None:
+        # These transposes make the buffers column-major for cuBLAS.
+        a_col = triangle.transpose(-2, -1).contiguous()
+        b_col = B.transpose(-2, -1).contiguous()
+        result = column_solve(a_col, b_col, upper, True).transpose(-2, -1).contiguous()
+    else:
+        from jittor.linalg.solving import _solve_triangular
+        if left:
+            result = _solve_triangular(triangle.contiguous(), B.contiguous(), upper)
+        else:
+            result = _solve_triangular(
+                triangle.transpose(-2, -1).contiguous(),
+                B.transpose(-2, -1).contiguous(),
+                not upper,
+            ).transpose(-2, -1)
+    if out is not None:
+        out.assign(result)
+        return out
+    return result
+
+
 def _trace_impl(input):
     from . import (
         jt,

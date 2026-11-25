@@ -733,6 +733,7 @@ class Module:
     #: lookups below. Clearing it would be the unsafe direction -- a module
     #: that still has hooks would stop running them.
     _hook_table_created = False
+    _forward_hook_revision = 0
 
     #: How many module calls are on the stack. Class-level, not per instance:
     #: it is a property of the call stack, not of any module.
@@ -761,7 +762,15 @@ class Module:
         hooks[key] = (func, info)
         if prepend:
             hooks.move_to_end(key, last=False)
-        return _RemovableHandle(lambda: hooks.pop(key, None))
+        forward = name in ("_forward_pre_hooks", "_forward_hooks")
+        if forward:
+            Module._forward_hook_revision += 1
+
+        def remove():
+            if hooks.pop(key, None) is not None and forward:
+                Module._forward_hook_revision += 1
+
+        return _RemovableHandle(remove)
 
     def _run_forward_hooks(self, hooks, args, kw, ret):
         for func, info in hooks:
@@ -878,7 +887,8 @@ class Module:
         jittor's documented spelling, kept as-is. To drop one hook, use the
         handle its ``register_forward_hook`` returned.
         '''
-        self.__dict__.pop("_forward_hooks", None)
+        if self.__dict__.pop("_forward_hooks", None):
+            Module._forward_hook_revision += 1
 
     def register_pre_forward_hook(self, func):
         ''' Register a forward function hook that will be called before Module.execute.
@@ -910,7 +920,8 @@ class Module:
 
     def remove_pre_forward_hook(self):
         ''' Removes EVERY pre-forward hook on this module. '''
-        self.__dict__.pop("_forward_pre_hooks", None)
+        if self.__dict__.pop("_forward_pre_hooks", None):
+            Module._forward_hook_revision += 1
 
     def register_input_backward_hook(self, func):
         ''' Hook the gradients flowing into this module. Returns a handle. '''

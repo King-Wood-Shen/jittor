@@ -1001,6 +1001,17 @@ class GraphReplay:
         return self._refused
 
 
+def _discard_auto_recordings(state):
+    if state.replay is not None:
+        state.replay.invalidate()
+        state.replay = None
+    for entry in state.entries.values():
+        if entry.step is not None:
+            entry.step.invalidate()
+    state.entries.clear()
+    state.previous = None
+
+
 def release_auto_replay(module):
     """Take `module` away from the automatic policy, captures included.
 
@@ -1014,13 +1025,7 @@ def release_auto_replay(module):
     state = module.__dict__.get("_auto_graph_replay")
     if state is None:
         state = module.__dict__["_auto_graph_replay"] = _AutoState()
-    for entry in state.entries.values():
-        if entry.step is not None:
-            entry.step.invalidate()
-    state.entries.clear()
-    if state.replay is not None:
-        state.replay.invalidate()
-        state.replay = None
+    _discard_auto_recordings(state)
     state.give_up = True
 
 
@@ -1196,7 +1201,8 @@ _HOST_STATE_LIMIT = 4096
 
 class _AutoState:
     __slots__ = ("signature", "seen", "replay", "recaptures", "give_up",
-                 "entries", "unstable", "previous", "retain_bytes")
+                 "entries", "unstable", "previous", "retain_bytes",
+                 "hook_revision", "has_forward_hooks")
 
     def __init__(self):
         self.signature = None
@@ -1210,6 +1216,8 @@ class _AutoState:
         # The signature of the last call that passed objects.
         self.previous = None
         self.retain_bytes = None
+        self.hook_revision = 0
+        self.has_forward_hooks = False
 
 
 def _element_size(dtype):
@@ -1383,19 +1391,26 @@ def auto_replay_for(module, args, kw):
         state = module.__dict__["_auto_graph_replay"] = _AutoState()
     if state.give_up:
         return None
+    # A replay skips Python child calls, including calibration hooks that
+    # may be installed after this parent has already captured its graph.
+    hook_revision = jt.Module._forward_hook_revision
+    if state.hook_revision != hook_revision:
+        state.hook_revision = hook_revision
+        state.has_forward_hooks = any(
+            child._hooks("_forward_pre_hooks") or child._hooks("_forward_hooks")
+            for child in jt.Module.modules(module)
+        )
+        if state.has_forward_hooks:
+            _discard_auto_recordings(state)
+            state.seen = 0
+    if state.has_forward_hooks:
+        return None
     retain_bytes = flags.auto_graph_replay_retain_bytes
     if state.retain_bytes != retain_bytes:
         # A runtime scope must also constrain graphs captured before it.
         # Release every signature's recording through its existing owner;
         # replacing the budget on a wrapper would leave fixed buffers alive.
-        if state.replay is not None:
-            state.replay.invalidate()
-            state.replay = None
-        for entry in state.entries.values():
-            if entry.step is not None:
-                entry.step.invalidate()
-        state.entries.clear()
-        state.previous = None
+        _discard_auto_recordings(state)
         state.retain_bytes = retain_bytes
     if nbytes > flags.auto_graph_replay_bytes:
         return None

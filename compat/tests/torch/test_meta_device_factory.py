@@ -79,3 +79,14 @@ def test_assign_state_replaces_meta_placement_with_checkpoint_placement():
     layer.load_state_dict({"weight": real}, assign=True)
     assert layer.weight.is_cpu and not layer.weight.is_meta
     torch.testing.assert_close(layer.weight, real)
+
+
+def test_layer_norm_uses_default_or_explicit_parameter_dtype():
+    before = torch.get_default_dtype()
+    try:
+        torch.set_default_dtype(torch.float16)
+        assert torch.nn.LayerNorm(4).weight.dtype == torch.float16
+        layer = torch.nn.LayerNorm(4, dtype=torch.bfloat16)
+        assert layer.weight.dtype == layer.bias.dtype == torch.bfloat16
+    finally:
+        torch.set_default_dtype(before)

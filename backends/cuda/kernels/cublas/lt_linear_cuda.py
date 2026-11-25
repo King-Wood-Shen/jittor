@@ -298,10 +298,14 @@ def _supports(x, weight, bias, *args, **kwargs):
 
 
 @functools.lru_cache(maxsize=256)
-def _source(rows, cin, cout, dtype):
+def _source(rows, cin, cout, dtype, match_torch=False):
     # The one place the element type enters the kernel. The accumulate is
     # float32 for both -- `cublas_gemm_mode`'s choice for float16 -- so alpha
     # and beta stay floats either way.
+    # Torch CUDA picks the first cuBLASLt heuristic with a 1 MiB default
+    # workspace. GPTQ calibration observes the FP16 rounding of that choice.
+    candidates = 1 if match_torch else _CANDIDATES
+    workspace = 1 << 20 if match_torch else _WORKSPACE
     ct, kt = _LT_TYPES[dtype]
     return f"""
     const int rows = {rows}, cin = {cin}, cout = {cout};
@@ -358,17 +362,17 @@ def _source(rows, cin, cout, dtype):
     JtLtChoice& choice = choices[slot];
     if (!choice.ready) {{
         choice.ready = true;
-        JtLtWorkspace probe({_WORKSPACE});
+        JtLtWorkspace probe({workspace});
         void* ws = probe.ptr;
-        size_t wsize = ws ? (size_t){_WORKSPACE} : 0;
+        size_t wsize = ws ? (size_t){workspace} : 0;
         cublasLtMatmulPreference_t pref = nullptr;
         cublasLtMatmulPreferenceCreate(&pref);
         cublasLtMatmulPreferenceSetAttribute(
             pref, CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsize, sizeof(wsize));
-        cublasLtMatmulHeuristicResult_t cand[{_CANDIDATES}];
+        cublasLtMatmulHeuristicResult_t cand[{candidates}];
         int found = 0;
         cublasLtMatmulAlgoGetHeuristic(lt, op, la, lb, lc, lc, pref,
-                                       {_CANDIDATES}, cand, &found);
+                                       {candidates}, cand, &found);
         // A wall-clock winner changes with process timing. For the same
         // shape/weights, split-K 28 and 32 rounded logits differently. Keep
         // the cuBLASLt capability probe, then select by algorithm config.
@@ -767,8 +771,9 @@ def lt_linear_cuda(x, weight, bias):
         weight = weight.cast(dtype)
     if _jittor_dtype_name(bias.dtype) != dtype:
         bias = bias.cast(dtype)
+    match_torch = dtype == "float16" and jt.flags.cuda_kernel_math == "strict"
     return jt.code(shape[:-1] + [cout], dtype, [x, weight, bias],
-                   cuda_header=_HEADER, cuda_src=_source(rows, cin, cout, dtype))
+                   cuda_header=_HEADER, cuda_src=_source(rows, cin, cout, dtype, match_torch))
 
 
 __all__ = ["lt_linear_cuda", "lt_linear_train_cuda", "lt_linear_wgrad_cuda",

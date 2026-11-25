@@ -464,6 +464,28 @@ class TestGraphReplay(unittest.TestCase):
             self.assertIn("slower", replay.refused)
             self.assertEqual(replay.stats["replayed"], 0)
 
+    def test_automatic_replay_observes_new_child_forward_hooks(self):
+        model = _Net()
+        calls = []
+        inputs = jt.ones((2, 8))
+
+        def on_output(name):
+            def hook(module, args, output):
+                calls.append(name)
+                return output
+            return hook
+
+        with jt.flag_scope(auto_graph_replay=1), jt.no_grad():
+            for _ in range(3):
+                model(inputs).sync()
+            for name in ("l1", "l2"):
+                with getattr(model, name).register_forward_hook(on_output(name)):
+                    for _ in range(3):
+                        model(inputs).sync()
+            model(inputs).sync()
+
+        self.assertEqual(calls, ["l1"] * 3 + ["l2"] * 3)
+
     def test_the_automatic_policy_replays_a_keyword_call(self):
         # Transformers calls every model by keyword. The policy used to give up
         # on any keyword argument, so no Hugging Face model was ever replayed.
