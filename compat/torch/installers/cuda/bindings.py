@@ -322,6 +322,7 @@ def _install_cuda(g, registry=None):
 
     if "torch._C" not in _modules:
         c_mod = _types.ModuleType("torch._C")
+        c_mod._has_xpu = False
         c_mod._TensorMeta = type(getattr(g, "Tensor", jt.Var))
         c_mod._get_tracing_state = _api_c_mod__get_tracing_state
         c_mod._log_api_usage_once = _api_c_mod__log_api_usage_once
@@ -440,9 +441,13 @@ def _install_version(g, registry=None):
     """Install torch.version for libraries that probe torch.cuda/hip versions."""
     _modules = registry_for(g, registry).module_map
     import types as _types
-    torch_api_version = "2.11.0"
+    from ...version import TorchVersion
+    torch_api_version = TorchVersion("2.11.0")
     jittor_version = getattr(g, "__jittor_version__", getattr(g, "__version__", getattr(jt, "__version__", None)))
+    jittor_version = TorchVersion(jittor_version) if isinstance(jittor_version, str) else jittor_version
     g.__jittor_version__ = jittor_version
+    if isinstance(getattr(g, "__version__", None), str):
+        g.__version__ = TorchVersion(g.__version__)
     g.__torch_version__ = torch_api_version
     version = _types.ModuleType("torch.version")
     version.__version__ = torch_api_version

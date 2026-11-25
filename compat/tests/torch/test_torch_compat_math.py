@@ -61,6 +61,20 @@ class TestExpLog(Base):
                         self.ac(y.float().cpu().numpy(), expected.float().cpu().numpy(), atol=0, rtol=0)
         both_devices(body)
 
+    def test_scalar_ne_preserves_cpu_index_in_cuda_scope(self):
+        import jittor as jt
+
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA is unavailable")
+        with jt.runtime.scope(use_cuda=1, device_id=0, backend_fallback="error"):
+            index = torch.arange(4, device="cpu").reshape(1, 2, 2)
+            index = torch.nn.functional.pad(index, (0, 1, 0, 1), "constant", -100)
+            mask = index != -100
+            self.assertEqual(mask.device.type, "cpu")
+            self.assertEqual(mask.tolist(), [[[True, True, False],
+                                               [True, True, False],
+                                               [False, False, False]]])
+
     def test_sqrt_pow(self):
         self.chk1(torch.sqrt, np.sqrt, self.pos, name="sqrt")
         self.chk1(torch.rsqrt, lambda x: 1.0 / np.sqrt(x), self.pos, rtol=1e-4, name="rsqrt")

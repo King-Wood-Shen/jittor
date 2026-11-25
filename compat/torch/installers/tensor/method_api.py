@@ -539,6 +539,14 @@ def _ne_operand(value, peer):
 
 
 def _torch_ne(input, other):
+    scalars = (bool, int, float, complex, _owner.np.generic)
+    # Native scalar conversion inherits the tensor placement. Creating a
+    # separate scalar can use the enclosing CUDA module's default device even
+    # when the input is an explicitly CPU-resident index tensor.
+    if isinstance(input, _NativeVar) and isinstance(other, scalars):
+        return _NativeVar.__ne__(input, other)
+    if isinstance(other, _NativeVar) and isinstance(input, scalars):
+        return _NativeVar.__ne__(other, input)
     a = _ne_operand(input, other)
     b = _ne_operand(other, a)
     if _jittor_dtype_name(a.dtype) == "bool":

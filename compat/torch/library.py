@@ -534,7 +534,20 @@ def infer_schema(prototype_function, *, mutates_args, op_name=None):
                          _library_state()["torch_module"])
 
 
-register_kernel = impl
+def register_kernel(op, device_types, func=None, *, lib=None):
+    """Register kernels using public device names rather than dispatch keys."""
+    if isinstance(op, _RegisteredOp):
+        op = f"{op.namespace}::{op.name}"
+    aliases = {
+        "cpu": "CPU",
+        "cuda": "CUDA",
+        "default": "CompositeExplicitAutograd",
+        None: "CompositeExplicitAutograd",
+    }
+    devices = ((device_types,) if isinstance(device_types, str) or device_types is None
+               else tuple(device_types))
+    return impl(op, tuple(aliases.get(device, device) for device in devices),
+                func=func, lib=lib)
 
 
 def install_torch_library(torch_module, modules):

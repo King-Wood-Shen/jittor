@@ -65,6 +65,16 @@ class TestInferSchema(unittest.TestCase):
         with self.assertRaises(ValueError):
             torch.library.define("jittor_module_define::wrong", "wrong(Tensor value) -> Tensor")
 
+    def test_register_kernel_resolves_device_names(self):
+        torch.library.define("jittor_kernel_device::scale", "(Tensor value) -> Tensor")
+        op = torch.ops.jittor_kernel_device.scale
+        torch.library.register_kernel(op, "default", lambda x: x + 1)
+        torch.library.register_kernel(op, "cpu", lambda x: x + 2)
+        torch.library.register_kernel(op, "cuda", lambda x: x + 3)
+        self.assertEqual(op(torch.tensor([1.0], device="cpu")).tolist(), [3.0])
+        if torch.cuda.is_available():
+            self.assertEqual(op(torch.tensor([1.0], device="cuda")).tolist(), [4.0])
+
     def test_torch_types_module_replaces_python_types_attribute(self):
         self.assertEqual(torch.types.__name__, "torch.types")
         self.assertIs(torch.types._dtype, torch.dtype)

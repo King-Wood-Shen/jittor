@@ -42,6 +42,12 @@ class TestTorchApiVersionReporting(unittest.TestCase):
         self.assertEqual(got, torch.__torch_version__)
         self.assertEqual(torch.__version__, torch.__torch_version__)
 
+    def test_version_compares_to_release_sequences(self):
+        self.assertIsInstance(torch.__version__, str)
+        self.assertGreaterEqual(torch.__version__, (2, 0))
+        self.assertGreater(torch.compat_report_torch_api_version(True), (2, 6))
+        self.assertFalse(torch._C._has_xpu)
+
     def test_it_is_reversible(self):
         torch.compat_report_torch_api_version(True)
         got = torch.compat_report_torch_api_version(False)
