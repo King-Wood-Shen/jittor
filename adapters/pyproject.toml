@@ -22,3 +22,6 @@ include = ["jittor_adapters*"]
 [tool.jittor.sdist]
 include = ["README.md", "tests/**/*.py"]
 exclude = ["build/**", "dist/**"]
+
+[tool.setuptools.package-data]
+"jittor_adapters.vllm" = ["*.patch", "*.sha256"]
