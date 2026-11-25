@@ -91,8 +91,10 @@ def _library():
             else:
                 # cuDNN has to be loaded (globally) before the library that
                 # leaves its symbols undefined.
+                from jittor.build.compiler import preload_cuda_library
                 from jittor._runtime.backend_libraries import get_library_ops
-                if get_library_ops("cudnn") is None:
+                if (get_library_ops("cudnn") is None
+                        or preload_cuda_library("nvrtc") is None):
                     _state["library"] = None
                 else:
                     _state["library"] = _build(frontend)

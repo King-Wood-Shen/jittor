@@ -17,7 +17,7 @@ _ST = {
     "BF16": (None, 2), "I64": (np.int64, 8), "I32": (np.int32, 4),
     "I16": (np.int16, 2), "I8": (np.int8, 1), "U8": (np.uint8, 1),
     "U16": (np.uint16, 2), "U32": (np.uint32, 4), "U64": (np.uint64, 8),
-    "BOOL": (np.bool_, 1), "F8_E4M3": (None, 1), "F8_E5M2": (None, 1),
+    "BOOL": (np.bool_, 1), "F8_E4M3": (np.uint8, 1), "F8_E5M2": (None, 1),
 }
 
 
@@ -25,12 +25,12 @@ _NP_TO_ST = {
     "float64": "F64", "float32": "F32", "float16": "F16",
     "int64": "I64", "int32": "I32", "int16": "I16", "int8": "I8",
     "uint8": "U8", "uint16": "U16", "uint32": "U32", "uint64": "U64",
-    "bool": "BOOL", "bfloat16": "BF16",
+    "bool": "BOOL", "bfloat16": "BF16", "float8_e4m3fn": "F8_E4M3",
 }
 
 
 def _bytes_to_np(raw, st_dtype, shape):
-    if st_dtype.startswith("F8_"):
+    if st_dtype == "F8_E5M2":
         raise NotImplementedError(
             "safetensors dtype %s has no supported Jittor decoder" % _jittor_dtype_name(st_dtype))
     npd, _itemsize = _ST[st_dtype]
@@ -51,6 +51,8 @@ def _to_tensor(array, st_dtype, device):
     target_device = "cpu" if device is None else device
     if isinstance(target_device, (int, np.integer)) and not isinstance(target_device, bool):
         target_device = "cuda:%d" % int(target_device)
+    if st_dtype == "F8_E4M3":
+        tensor = jt.reinterpret_view(tensor, array.shape, "float8_e4m3fn")
     return tensor.to(device=target_device)
 
 

@@ -38,6 +38,7 @@ constexpr int ns_max_len = 16;
     m(bfloat16) \
     m(complex64) \
     m(complex128) \
+    m(float8_e4m3fn) \
 \
     m(pow) \
     m(maximum) \

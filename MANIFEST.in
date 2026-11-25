@@ -695,6 +695,9 @@ include docs/results/2026-11-01-python-float-division.en.md
 include docs/results/2026-11-01-python-float-division.md
 include docs/results/2026-11-01-vllm-runtime-integration.en.md
 include docs/results/2026-11-01-vllm-runtime-integration.md
+include docs/results/2026-11-06-custom-torch-optimizer-compat.md
+include docs/results/2026-11-17-fused-adamw-fa124-mixed-dtype-cuda.md
+include docs/results/2026-11-17-swift-loss-scale-qwen2-bounded-cuda.md
 include docs/results/index.en.md
 include docs/results/index.md
 include docs/tutorials/index.en.md
@@ -1132,6 +1135,7 @@ include src/type/cuda_limits.h
 include src/type/floor_divide_compute.h
 include src/type/fp16_compute.h
 include src/type/fp16_op_type.cc
+include src/type/fp8_compute.h
 include src/type/fp_class_compute.h
 include src/type/intrin.h
 include src/type/minmax_compute.h

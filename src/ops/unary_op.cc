@@ -1254,6 +1254,8 @@ void UnaryOp::jit_prepare(JK& jk) {
     jk << "«Tx:" << x->dtype()
         << "«Ty:" << y->dtype()
         << "«OP:" << ns
+        << "«FP8_CAST=" << JK::hex(ns == ns_cast &&
+            (x->dtype() == ns_float8_e4m3fn || y->dtype() == ns_float8_e4m3fn))
         << "«DIM=" << JK::hex(x->shape.size())
         << "«XSTRIDED=" << JK::hex(strided);
     // Only when it is read, so a contiguous operand keeps the key it had.
@@ -1289,7 +1291,11 @@ void UnaryOp::jit_run() {
         ,
             index_t xi = i;
         )
-        yp[i] = @expand_op(@OP, @Ty, xp[xi], @Tx);
+        @if(FP8_CAST,
+            yp[i] = Ty(float(xp[xi]));
+        ,
+            yp[i] = @expand_op(@OP, @Ty, xp[xi], @Tx);
+        )
     }
 }
 #endif // JIT

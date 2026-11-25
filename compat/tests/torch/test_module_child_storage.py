@@ -105,6 +105,21 @@ class TestModuleChildStorage:
         root.alias = None
         assert storage["alias"] is None and not list(root.children())
 
+    def test_padding_embedding_preserves_bfloat16_and_skips_padding_gradient(self, device):
+        weights = torch.tensor([[1., 2.], [3., 4.]], device=device, dtype=torch.bfloat16)
+        module = torch.nn.Embedding(2, 2, padding_idx=0, device=device,
+                                    dtype=torch.bfloat16)
+        with torch.no_grad():
+            module.weight.copy_(weights)
+        output = module(torch.tensor([0, 1, 0], device=device))
+
+        assert output.dtype == torch.bfloat16
+        np.testing.assert_array_equal(output.detach().float().cpu().numpy(),
+                                      [[1., 2.], [3., 4.], [1., 2.]])
+        output.float().sum().backward()
+        np.testing.assert_array_equal(module.weight.grad.float().cpu().numpy(),
+                                      [[0., 0.], [1., 1.]])
+
     def test_deepcopy_frozen_embedding_restores_a_leaf(self, device):
         # PEFT's ModulesToSaveWrapper deep-copies frozen modules, then makes
         # the copy trainable. The copied parameter must be a leaf so that this

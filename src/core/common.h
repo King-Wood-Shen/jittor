@@ -8,6 +8,7 @@
 #include <memory>
 #include <functional>
 #include "utils/log.h"
+#include "type/fp8_compute.h"
 
 #define JIT_TEST(name) extern void jit_test_ ## name ()
 void expect_error(std::function<void()> func);

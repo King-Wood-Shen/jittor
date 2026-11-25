@@ -401,6 +401,17 @@ class TestBinaryOpPromotion(Base):
             np.array([1074937067, 1047132944, 1035060061], dtype=np.uint32),
         )
 
+    def test_reflected_bfloat16_division_rounds_reciprocal(self):
+        def body(dev):
+            source = torch.tensor([0.0703125, -0.0703125], dtype=torch.bfloat16)
+            for scalar in (448, 448.0):
+                result = scalar / source
+                self.assertEqual(result.dtype, torch.bfloat16, dev)
+                np.testing.assert_array_equal(
+                    result.float().numpy(), [6400.0, -6400.0], err_msg=dev
+                )
+        both_devices(body)
+
     def test_mixed_values_correct(self):
         # promotion must not just relabel the dtype -- the VALUES must be the
         # widened arithmetic (numpy is the independent reference).

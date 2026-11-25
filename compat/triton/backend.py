@@ -538,7 +538,7 @@ _DT = {
     "float64": "fp64", "float32": "fp32", "float16": "fp16", "bfloat16": "bf16",
     "int64": "i64", "int32": "i32", "int16": "i16", "int8": "i8",
     "uint64": "u64", "uint32": "u32", "uint16": "u16", "uint8": "u8",
-    "bool": "i1",
+    "bool": "i1", "float8_e4m3fn": "fp8e4nv",
 }
 
 
@@ -608,7 +608,7 @@ def _tensor_ptr(v):
 
 #: bytes per element, by triton type code (the value side of ``_DT``)
 _TCODE_BYTES = {
-    "fp64": 8, "fp32": 4, "fp16": 2, "bf16": 2,
+    "fp64": 8, "fp32": 4, "fp16": 2, "bf16": 2, "fp8e4nv": 1,
     "i64": 8, "i32": 4, "i16": 2, "i8": 1,
     "u64": 8, "u32": 4, "u16": 2, "u8": 1, "i1": 1,
 }

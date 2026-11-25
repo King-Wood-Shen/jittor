@@ -41,6 +41,7 @@ class dtype:
     _supported = frozenset({
         "bool", "uint8", "uint16", "uint32", "uint64", "int8", "int16", "int32",
         "int64", "float16", "bfloat16", "float32", "float64", "complex64", "complex128",
+        "float8_e4m3fn",
     })
 
     def __new__(cls, name, is_floating_point=False):
@@ -143,8 +144,8 @@ def _make_dtypes(ns):
         # dtype tables by them so the objects must exist + be distinct.
         ("qint8", False), ("quint8", False), ("qint32", False),
         ("quint4x2", False), ("quint2x4", False),
-        # low-precision float8 / float4 -- unsupported for compute, but the
-        # dtype objects must exist (transformers/safetensors reference them).
+        # E4M3FN has native storage and casts. The other FP8/FP4 formats
+        # are metadata-only but Transformers and safetensors import them.
         ("float8_e4m3fn", True), ("float8_e4m3fnuz", True),
         ("float8_e5m2", True), ("float8_e5m2fnuz", True),
         ("float8_e8m0fnu", True), ("float4_e2m1fn_x2", True),

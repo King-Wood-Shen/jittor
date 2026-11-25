@@ -769,6 +769,8 @@ def _data_get(self):
     ):
         return _native_data_descriptor.__get__(self, Var)
     view = self._storage_data_alias()
+    if self.is_meta:
+        view._jittor_torch_meta = True
     if getattr(self, "_torch_0d", False):
         view._torch_0d = True
     view._torch_data_owner = self
@@ -870,7 +872,7 @@ def _to(self, *args, **kwargs):
             bare = a.replace("torch.", "")
             if bare in _owner.dtype._registry:
                 ds = bare
-            elif bare.split(":")[0] in ("cpu", "cuda", "npu"):
+            elif bare.split(":")[0] in ("cpu", "cuda", "npu", "meta"):
                 dev = bare
             else:
                 # An unrecognised string used to fall off the end of this
@@ -893,6 +895,13 @@ def _to(self, *args, **kwargs):
                     stub_result=None)
     if dev is None:
         dev = self.device
+    if getattr(dev, "type", str(dev).split(":")[0]) == "meta":
+        source_dtype = _jittor_dtype_name(self.dtype)
+        if self.is_meta and not copy and ds in (None, source_dtype):
+            return self
+        torch = get_install_context(_owner.jt).target_namespace
+        return torch.empty_like(self, dtype=ds or self.dtype, device="meta",
+                                requires_grad=self.requires_grad)
     out = self.clone() if copy else self
     if ds is not None:
         out = _cast_if_needed(out, ds)
@@ -1669,13 +1678,20 @@ def _true_division(self, other, opname):
                 b = _owner.jt.array(other, dtype=calc_dt)
         else:
             b = other
-        if (opname == "__rtruediv__" and src_dt in ("float32", "float64")
+        if (opname == "__rtruediv__" and src_dt == "bfloat16"
+                and type(other) in (int, float)):
+            # PyTorch rounds the reciprocal to BF16 before multiplying by
+            # the scalar in float32 opmath.
+            with _owner.jt.no_grad():
+                one = _owner.jt.array(1, dtype=calc_dt).stop_grad()
+            reciprocal = _binary_native("__truediv__", one, a).cast(src_dt)
+            out = _binary_native("__mul__", reciprocal.cast(calc_dt), b)
+        elif (opname == "__rtruediv__" and src_dt in ("float32", "float64")
                 and sd.startswith("float")):
             # torch answers `pyfloat / t` as `t_dtype(scalar) * (1 / t)`, not
             # as a division: over 20000 values that form matches it bit for
             # bit in both float32 and float64 (0 differ) while an IEEE
-            # division differs on 5106 and 5109 of them. Half precision does
-            # not follow it, so it keeps the division below.
+            # division differs on 5106 and 5109 of them.
             with _owner.jt.no_grad():
                 one = _owner.jt.array(1, dtype=calc_dt).stop_grad()
             out = _binary_native(
@@ -2073,6 +2089,8 @@ def _random_inplace(self, draw, *parameters, generator=None):
         if self._view_base_is_trainable_leaf():
             raise RuntimeError("a view of a leaf Variable that requires grad is being used in an in-place operation.")
     value = draw(self, *parameters, generator=generator)
+    if value is self:
+        return self
     if tracks_grad:
         # Overwriting a non-leaf has a zero derivative through its old graph.
         # As in zero_(), selection clears even NaN/Inf without multiplying by 0.

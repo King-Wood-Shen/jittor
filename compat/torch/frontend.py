@@ -327,7 +327,9 @@ def tensor_make_subclass(cls, data, requires_grad=False):
     return value
 
 
-def parameter_new(cls, data=None, requires_grad=True):
+def parameter_new(cls, data=None, requires_grad=True, *, _jittor_torch_meta=False):
+    # Accelerate forwards the old parameter's attributes when replacing it.
+    # The source tensor establishes the new parameter's device.
     backend = cls._parameter_backend
     with tensor_frontend(cls, like=data):
         if data is None:
@@ -335,6 +337,8 @@ def parameter_new(cls, data=None, requires_grad=True):
         else:
             source = data if isinstance(data, backend.Var) else backend.array(data)
             value = backend.Var.detach(source)
+            if getattr(source, 'is_meta', False):
+                value._jittor_torch_meta = True
     value.requires_grad = bool(requires_grad)
     return value
 

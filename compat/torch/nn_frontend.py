@@ -12,17 +12,6 @@ def module_setattr(module, name, value):
     attributes = vars(module)
     if attributes.get("_native_parameter_construction", False):
         return owner.native_module.__setattr__(module, name, value)
-    if isinstance(value, owner.backend.Var) and not name.startswith("_"):
-        parameters = attributes.setdefault("_parameter_names", set())
-        non_parameters = attributes.setdefault("_non_parameter_names", set())
-        if isinstance(value, owner.Parameter):
-            parameters.add(name)
-            non_parameters.discard(name)
-            attributes.setdefault("_buffer_names", set()).discard(name)
-            attributes.setdefault("_non_persistent_buffer_names", set()).discard(name)
-        elif name not in attributes.get("_buffer_names", ()):
-            if name not in parameters:
-                non_parameters.add(name)
     # torch registers a submodule or parameter when one is first assigned. A
     # name that held something else until then -- diffusers writes
     # `self.mid_block = None` and builds the block later -- is registered at
@@ -34,6 +23,11 @@ def module_setattr(module, name, value):
     if name in attributes and isinstance(value, (owner.native_module, owner.Parameter)) \
             and not isinstance(attributes[name], (owner.native_module, owner.backend.Var)):
         del attributes[name]
+    if isinstance(value, owner.backend.Var) and not name.startswith("_"):
+        if isinstance(value, owner.Parameter):
+            return module.register_parameter(name, value)
+        if name not in attributes.get("_buffer_names", ()) and name not in attributes.get("_parameter_names", ()):
+            attributes.setdefault("_non_parameter_names", set()).add(name)
     if isinstance(value, owner.native_module) or value is None:
         return owner.native_module.__setattr__(module, name, value)
     object.__setattr__(module, name, value)

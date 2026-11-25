@@ -70,6 +70,8 @@ def _normal_values(tensor, mean=0.0, std=1.0, generator=None):
     mean, std = float(mean), float(std)
     if not std >= 0:
         raise RuntimeError("normal expects std >= 0.0")
+    if tensor.is_meta:
+        return tensor
     dtype, compute_dtype = _initialization_dtype(tensor)
     target = get_install_context(jt).target_namespace
     # Factories own generator validation, device placement and native draws.
@@ -82,7 +84,8 @@ def _normal_values(tensor, mean=0.0, std=1.0, generator=None):
 
 def normal_(tensor, mean=0.0, std=1.0, generator=None):
     if _not_var(tensor): return tensor
-    return _assign(tensor, _normal_values(tensor, mean, std, generator))
+    value = _normal_values(tensor, mean, std, generator)
+    return tensor if value is tensor else _assign(tensor, value)
 
 
 def _uniform_values(tensor, a=0.0, b=1.0, generator=None):

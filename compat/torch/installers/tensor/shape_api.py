@@ -104,7 +104,7 @@ def _bitcast(self, dt):
         shape[-1] = last_bytes // int(itemsize)
     reinterpret_view = getattr(jt, "reinterpret_view", None)
     npd = _np_view_of.get(ds, _np.uint8)
-    if reinterpret_view is not None and ds in _np_view_of:
+    if reinterpret_view is not None and (ds in _np_view_of or ds == "float8_e4m3fn"):
         result = reinterpret_view(self, shape, ds)
         return result._set_dtype_view_of(self)
     return jt.array(_np.ascontiguousarray(self.numpy()).view(npd))

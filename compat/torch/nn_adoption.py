@@ -126,5 +126,7 @@ def adopt_owned_children(owner, module, external, frozen=False):
         rewrite = ParameterRewrite(adoption.protected, replacements)
         for name, value in tuple(vars(module).items()):
             replacement = rewrite.replace(value)
-            if replacement is not value:
+            if isinstance(replacement, owner.Parameter) and id(value) in replacements:
+                module.register_parameter(name, replacement)
+            elif replacement is not value:
                 setattr(module, name, replacement)

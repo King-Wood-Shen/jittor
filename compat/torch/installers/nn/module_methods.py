@@ -570,6 +570,14 @@ def _load_state_dict(self, state_dict, strict=True, assign=False):
     # copies. The native loader must not invoke them a second time.
     with self._state_dict_hook_scope(False):
         _ORIG_MODULE_LOAD_STATE_DICT(self, load_state)
+    if assign:
+        for name, source in load_state.items():
+            target = _find_state_target(self, name)
+            if isinstance(target, jt.Var):
+                if getattr(source, "is_meta", False):
+                    target._jittor_torch_meta = True
+                else:
+                    target.__dict__.pop("_jittor_torch_meta", None)
     try:
         for n, p in self.named_parameters():
             if n in trainable and p.is_stop_grad():
