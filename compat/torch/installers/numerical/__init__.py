@@ -1374,8 +1374,13 @@ def install_parity(ctx):
     from ...namespace import native_module_facade
     linalg = native_module_facade(linalg, "torch.linalg")
     # torch's solve takes `left=`/`out=`; the native one is the left solve.
-    from .linalg import solve
+    from .linalg import cholesky, solve, solve_triangular
+    linalg.cholesky = cholesky
     linalg.solve = solve
+    linalg.solve_triangular = solve_triangular
+    # Native Jittor/CuPy linear algebra reports this narrow exception class.
+    # GPTQModel catches torch._C._LinAlgError while increasing damping.
+    g._C._LinAlgError = np.linalg.LinAlgError
     registry.publish("torch.linalg", linalg)
     g.linalg = linalg
 

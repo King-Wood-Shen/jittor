@@ -141,5 +141,16 @@ class TestErf(Base):
         both_devices(body)
 
 
+class TestTensorRepeat(Base):
+    def test_repeat_accepts_integer_scalar_tensor(self):
+        def body(dev):
+            positions = torch.tensor([[1, 2], [3, 4]], device=dev)
+            count = torch.tensor(3, device=dev)
+            result = positions.repeat(count, 1)
+            self.assertEqual(result.device, positions.device)
+            np.testing.assert_array_equal(result.cpu().numpy(), [[1, 2], [3, 4]] * 3)
+        both_devices(body)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -79,6 +79,17 @@ class TestCompileArguments(_PolicyBase):
         for backend in ("inductor", "eager", None):
             self.assertIs(torch.compile(model, backend=backend), model)
 
+    def test_dynamo_cache_size_limit_can_be_tuned_by_importers(self):
+        config = torch._dynamo.config
+        original = config.cache_size_limit
+        self.assertEqual(original, 8)
+        try:
+            config.cache_size_limit = 128
+            self.assertEqual(config.cache_size_limit, 128)
+            self.assertFalse(torch._dynamo.is_compiling())
+        finally:
+            config.cache_size_limit = original
+
     def test_allow_stub_restores_the_silent_acceptance(self):
         stub_policy.set_allow_stub(True)
         try:

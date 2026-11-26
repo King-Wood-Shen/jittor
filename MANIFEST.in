@@ -241,6 +241,8 @@ include backends/cuda/kernels/cufft/cufft_fft_op.h
 include backends/cuda/kernels/curand/curand_capabilities.cc
 include backends/cuda/kernels/curand/curand_random_op.cc
 include backends/cuda/kernels/curand/curand_random_op.h
+include backends/cuda/kernels/cusolver/cusolver_cholesky_op.cc
+include backends/cuda/kernels/cusolver/cusolver_cholesky_op.h
 include backends/cuda/kernels/cusolver/cusolver_inv_op.cc
 include backends/cuda/kernels/cusolver/cusolver_inv_op.h
 include backends/cuda/kernels/cusolver/cusolver_qr_op.cc

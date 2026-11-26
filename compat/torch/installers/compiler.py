@@ -810,7 +810,7 @@ def install(ctx):
     _dynamo.assume_constant_result = _api_dynamo_assume_constant_result
     _dynamo.is_compiling = _api_dynamo_is_compiling
     _dynamo.is_dynamo_compiling = _api_dynamo_is_dynamo_compiling
-    _dynamo.config = _types2.SimpleNamespace()
+    _dynamo.config = _types2.SimpleNamespace(cache_size_limit=8)
     _dynamo.mark_static_address = _api_dynamo_mark_static_address
     _dynamo.mark_dynamic = _api_dynamo_mark_dynamic
     _dynamo.graph_break = _api_dynamo_graph_break

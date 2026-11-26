@@ -1,6 +1,7 @@
 """Tensor repetition, chunking, and broadcast shape transforms."""
 
 from collections.abc import Sequence
+from operator import index
 
 import numpy as np
 
@@ -31,6 +32,7 @@ def repeat(x, *shape):
     '''
     if len(shape) == 1 and isinstance(shape[0], Sequence):
         shape = shape[0]
+    shape = tuple(index(size) for size in shape)
     len_x_shape = len(x.shape)
     len_shape = len(shape)
     x_shape = x.shape
