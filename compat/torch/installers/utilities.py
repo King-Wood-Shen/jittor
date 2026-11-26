@@ -420,6 +420,38 @@ def _tree_flatten(x):
     return leaves, rec(x)
 
 
+def _register_pytree_flatten_spec(cls, flatten_fn_spec, flatten_fn_exact_match_spec=None):
+    context = _utilities_context()
+    context.state.setdefault("fx_pytree_flatten_specs", {})[cls] = (
+        flatten_fn_spec, flatten_fn_exact_match_spec,
+    )
+
+
+def _tree_flatten_spec(tree, spec):
+    if isinstance(spec, LeafSpec):
+        return [tree]
+
+    context = _utilities_context()
+    registered = context.state.get("fx_pytree_flatten_specs", {}).get(spec.type)
+    if registered is not None:
+        children = registered[0](tree, spec)
+    elif spec.type is dict and isinstance(tree, dict):
+        children = [tree[key] for key in spec.context]
+    else:
+        node_type = _get_node_type(tree)
+        if node_type is not spec.type:
+            raise RuntimeError(f"Expected pytree node {spec.type}, got {node_type}")
+        children, actual_context = context.state["pytree_nodes"][node_type].flatten_fn(tree)
+        if actual_context != spec.context or len(children) != len(spec.children_specs):
+            raise RuntimeError(f"Pytree does not match the expected spec for {node_type}")
+
+    return [
+        leaf
+        for child, child_spec in zip(children, spec.children_specs)
+        for leaf in _tree_flatten_spec(child, child_spec)
+    ]
+
+
 def _tree_unflatten(leaves, spec):
     values = list(leaves)
     position = 0

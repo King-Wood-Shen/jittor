@@ -66,3 +66,18 @@ class TestRegistrationOrder(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_container_replacement_preserves_named_slots():
+    from collections import OrderedDict
+
+    original = torch.nn.Linear(2, 2)
+    replacement = torch.nn.Linear(2, 2)
+    layers = torch.nn.Sequential(OrderedDict([("first", original), ("last", torch.nn.Identity())]))
+    layers[0] = replacement
+    layers[-1] = None
+
+    assert layers[0] is replacement
+    assert layers[-1] is None
+    assert list(layers._modules) == ["first", "last"]
+    assert list(layers.state_dict()) == ["first.weight", "first.bias"]

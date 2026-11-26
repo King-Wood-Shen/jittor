@@ -10,6 +10,15 @@ from _helpers.device_types import instantiate_device_type_tests
 
 
 class TestTensorInplaceStorage:
+    def test_untyped_storage_reports_allocation_origin(self, device):
+        root = torch.tensor([1., 2., 3., 4.], dtype=torch.float16, device=device)
+        view = root.narrow(0, 1, 3)
+        origin = root.data_ptr()
+        assert root.untyped_storage().data_ptr() == origin
+        assert view.data_ptr() == origin + root.element_size()
+        assert view.untyped_storage().data_ptr() == origin
+        assert root.untyped_storage().nbytes() == root.numel() * root.element_size()
+
     def test_low_precision_slice_mutations_preserve_aliases(self, device):
         for dtype in (torch.float16, torch.bfloat16):
             for operation, expected in ((lambda x: x.copy_(torch.tensor([6., 8.], device=device)), [6., 8.]),

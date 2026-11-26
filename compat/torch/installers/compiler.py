@@ -11,6 +11,7 @@ from ..library import install_torch_library
 from ..context import get_install_context
 from ..context import TransformGetItemToIndex as _TransformGetItemToIndex
 from .factories import _install_empty_like
+from .utilities import _register_pytree_flatten_spec, _tree_flatten_spec
 
 
 _COMPILE_DEFAULT_BACKENDS = (None, "", "inductor", "eager", "aot_eager")
@@ -796,6 +797,11 @@ def install(ctx):
     _fx.Proxy = Proxy
     _fx.Node = Node
     _fx.wrap = _api_fx_wrap
+    _fx_pytree = _types2.ModuleType("torch.fx._pytree")
+    _fx_pytree.register_pytree_flatten_spec = _register_pytree_flatten_spec
+    _fx_pytree.tree_flatten_spec = _tree_flatten_spec
+    _fx._pytree = _fx_pytree
+    _modules["torch.fx._pytree"] = _fx_pytree
     _modules["torch.fx"] = _fx
     g.fx = _fx
     # torch._dynamo: minimal importable stubs for libraries that probe or

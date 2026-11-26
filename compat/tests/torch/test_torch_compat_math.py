@@ -141,6 +141,21 @@ class TestErf(Base):
         both_devices(body)
 
 
+class TestTensorPow(Base):
+    def test_method_preserves_half_dtype_for_scalar_exponents(self):
+        def body(dev):
+            value = torch.tensor([0.15, 0.375, 2.5], dtype=torch.float16, device=dev)
+            result = value.pow(exponent=0.3)
+            self.assertEqual(result.dtype, torch.float16)
+            self.assertEqual(result.device, value.device)
+            np.testing.assert_array_equal(result.cpu().numpy(), (value ** 0.3).cpu().numpy())
+            if result.is_cuda:
+                rounded = np.float32(np.float16(0.3))
+                expected = np.power(value.cpu().numpy().astype(np.float32), rounded).astype(np.float16)
+                np.testing.assert_array_equal(result.cpu().numpy(), expected)
+        both_devices(body)
+
+
 class TestTensorRepeat(Base):
     def test_repeat_accepts_integer_scalar_tensor(self):
         def body(dev):

@@ -617,7 +617,10 @@ class _Storage:
     def __init__(self, var):
         self._var = var
     def data_ptr(self):
-        return id(self._var)
+        address = self._var.data_ptr()
+        if not address:
+            return 0
+        return address - int(self._var._storage_offset()) * _storage_dsize(self._var)
     def size(self):
         return int(self._var.numel())
     def nbytes(self):
@@ -1841,13 +1844,17 @@ def _tensor_rmod(self, other):
 
 
 def _tensor_pow(self, other):
-    if (_preserve_autocast_arithmetic()
-            and _own_dtype_name(
-                self, get_install_context(_owner.jt).state["tensor_native_api"])
-            == "float32"):
+    dtype = _own_dtype_name(self, get_install_context(_owner.jt).state["tensor_native_api"])
+    if dtype == "float16" and self.is_cuda and type(other) in (int, float):
+        # The CUDA half kernel rounds the scalar exponent to half before
+        # evaluating the power in float32 and rounding the result to half.
+        exponent = float(_owner.np.float16(other))
         with _owner.jt.flag_scope(amp_reg=_owner.jt.amp_flags.disabled):
-            return _promoting_binary(self, other, '__pow__', False)
-    return _promoting_binary(self, other, '__pow__', False)
+            return _promoting_binary(self.float32(), exponent, "__pow__", False).cast(dtype)
+    if _preserve_autocast_arithmetic() and dtype == "float32":
+        with _owner.jt.flag_scope(amp_reg=_owner.jt.amp_flags.disabled):
+            return _promoting_binary(self, other, "__pow__", False)
+    return _promoting_binary(self, other, "__pow__", False)
 
 
 def _tensor_rpow(self, other):

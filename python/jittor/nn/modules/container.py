@@ -36,6 +36,13 @@ class Sequential(jt.Module):
             return list(self.layers.values())[idx]
         return self.layers[idx]
 
+    def __setitem__(self, index, module):
+        key = list(self.layers)[index]
+        if module is None:
+            self.layers[key] = None
+        else:
+            self.add_module(key, module)
+
     def __iter__(self):
         return self.layers.values().__iter__()
 

@@ -8,6 +8,22 @@ from torch.utils import _pytree as pytree
 
 
 class TestCustomPytreeNodes(unittest.TestCase):
+    def test_fx_flatten_spec_respects_registered_nodes_and_key_order(self):
+        from torch.fx._pytree import register_pytree_flatten_spec, tree_flatten_spec
+
+        class Node:
+            def __init__(self, value):
+                self.value = value
+
+        pytree.register_pytree_node(Node, lambda tree: ([tree.value], None),
+                                   lambda children, context: Node(children[0]))
+        register_pytree_flatten_spec(Node, lambda tree, spec: [tree.value])
+
+        original = {"z": Node((1, 2)), "a": [3]}
+        _, spec = pytree.tree_flatten(original)
+        changed = {"a": [30], "z": Node((10, 20))}
+        self.assertEqual(tree_flatten_spec(changed, spec), [10, 20, 30])
+
     def test_dict_key_order_and_key_types(self):
         keyed, context = pytree._dict_flatten_with_keys({"z": 2, "a": 3})
         self.assertEqual(context, ["z", "a"])
