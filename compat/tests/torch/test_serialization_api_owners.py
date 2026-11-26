@@ -160,6 +160,33 @@ def test_portable_snapshot_fills_one_value_per_operand_including_views():
     assert (view.data_ptr(), tuple(view.stride())) == before
 
 
+@pytest.mark.parametrize("device", ("cpu", "cuda"))
+def test_portable_snapshot_limits_staging_batches(monkeypatch, device):
+    if device == "cuda" and not _test_capability.check_accelerator("cuda", backend=jt).enabled:
+        pytest.skip("requires CUDA snapshot source")
+    torch = compatibility_owner(jt)
+    expected = [np.arange(length, dtype=np.float32) for length in (4, 4, 4, 12, 4)]
+    values = [torch.tensor(value, device=device) for value in expected]
+    addresses = [value.data_ptr() for value in values]
+    fetch = portable._fetch_snapshot_batch
+    batch_sizes = []
+
+    def track_batch(batch):
+        batch_sizes.append(sum(value.numel() * value.element_size() for value in batch))
+        return fetch(batch)
+
+    monkeypatch.setattr(portable, "_SNAPSHOT_BATCH_BYTES", 32)
+    monkeypatch.setattr(portable, "_fetch_snapshot_batch", track_batch)
+    with jt.runtime.scope(use_cuda=int(device == "cuda"), backend_fallback="error"):
+        snapshots = portable._snapshot_tensors({"params": [*values, values[0]]})
+    assert batch_sizes == [32, 16, 48, 16]
+    assert len(snapshots) == len(values)
+    for value, reference, address in zip(values, expected, addresses):
+        np.testing.assert_array_equal(snapshots[id(value)], reference)
+        assert value.device.type == device
+        assert value.data_ptr() == address
+
+
 def test_portable_snapshot_waits_for_fetch_callback(monkeypatch):
     torch = compatibility_owner(jt)
     value = torch.tensor(np.array([1.25, -2.5], dtype=np.float32))
@@ -283,6 +310,44 @@ def test_safetensors_dtype_bytes_reader_and_numpy_delegate(tmp_path):
     assert path.read_bytes() == before
     with pytest.raises(NotImplementedError, match="F8"):
         safe_owner._bytes_to_np(b"\x00", "F8_E5M2", [1])
+
+
+@pytest.mark.parametrize("device", ("cpu", "cuda"))
+def test_safetensors_streams_shard_and_preserves_existing_file(monkeypatch, tmp_path, device):
+    if device == "cuda" and not _test_capability.check_accelerator("cuda", backend=jt).enabled:
+        pytest.skip("requires CUDA snapshot source")
+    torch = compatibility_owner(jt)
+    tensors = {
+        "view": torch.arange(6, dtype=torch.float32, device=device).reshape(2, 3).T,
+        "scalar": torch.tensor(1.25, dtype=torch.bfloat16, device=device),
+    }
+    path = tmp_path / "weights.safetensors"
+    fetch = safe_owner._fetch_snapshot_batch
+    batches = []
+
+    def tracked_fetch(batch):
+        batches.append(len(batch))
+        return fetch(batch)
+
+    monkeypatch.setattr(portable, "_SNAPSHOT_BATCH_TENSORS", 1)
+    monkeypatch.setattr(safe_owner, "_fetch_snapshot_batch", tracked_fetch)
+    with jt.runtime.scope(use_cuda=int(device == "cuda"), backend_fallback="error"):
+        expected = safe_owner._save_dict(tensors, {"format": "pt"})
+        safe_owner._save_file(tensors, path, {"format": "pt"})
+        assert batches == [1, 1]
+        assert path.read_bytes() == expected
+
+        def fail_fetch(batch):
+            if batch[0] is tensors["scalar"]:
+                raise RuntimeError("interrupted fetch")
+            return fetch(batch)
+
+        monkeypatch.setattr(safe_owner, "_fetch_snapshot_batch", fail_fetch)
+        with pytest.raises(RuntimeError, match="interrupted fetch"):
+            safe_owner._save_file(tensors, path)
+    assert path.read_bytes() == expected
+    assert list(tmp_path.iterdir()) == [path]
+    assert all(value.device.type == device for value in tensors.values())
 
 
 def test_safetensors_e4m3fn_preserves_storage_bytes(tmp_path):

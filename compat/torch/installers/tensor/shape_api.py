@@ -319,6 +319,12 @@ def _axis_reduce(name, self, *a, **k):
 def _method_mean(self, *a, **k):
     orig = get_install_context(jt).state["tensor_shape_api"]["reductions"]["mean"]
     a, k = _norm_reduce_kw(a, k)
+    if self.ndim == 1 and not a and not k:
+        from jittor.backends.cuda.kernels.math.mean_last import mean_vector_strict
+
+        result = mean_vector_strict(self)
+        if result is not None:
+            return result
     if self.ndim and not a and not k.keys() - {"dim", "dims", "keepdims"}:
         axes = k.get("dims", (k.get("dim"),))
         if axes in ((-1,), (self.ndim - 1,)):

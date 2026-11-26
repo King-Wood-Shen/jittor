@@ -723,17 +723,21 @@ def _save_to_state_dict(self, destination, prefix, keep_vars):
 
 
 def _state_dict(self, to=None, recurse=True, destination=None, prefix="", keep_vars=None):
-    """Keep native state traversal and include subclass serialization extras."""
+    """Keep subclass serialization extras beside their module's state."""
     result = _ORIG_MODULE_STATE_DICT(self, to=to, recurse=recurse,
                                      destination=destination, prefix=prefix,
                                      keep_vars=keep_vars)
     modules = self.named_modules() if recurse else (("", self),)
+    after = {}
+    unanchored = {}
     for name, module in modules:
         if type(module)._save_to_state_dict is _save_to_state_dict:
             continue
         extra = {}
         module_prefix = prefix + name + "." if name else prefix
         module._save_to_state_dict(extra, module_prefix, bool(keep_vars))
+        anchor = next((key for key in reversed(extra) if key in result), None)
+        additions = unanchored if anchor is None else after.setdefault(anchor, {})
         for key, value in extra.items():
             if key in result:
                 continue
@@ -742,7 +746,15 @@ def _state_dict(self, to=None, recurse=True, destination=None, prefix="", keep_v
             elif to == "torch" and isinstance(value, jt.Var):
                 import torch
                 value = torch.from_numpy(value.numpy())
-            result[key] = value
+            additions[key] = value
+    if after:
+        ordered = {}
+        for key, value in result.items():
+            ordered[key] = value
+            ordered.update(after.get(key, {}))
+        result.clear()
+        result.update(ordered)
+    result.update(unanchored)
     return result
 
 

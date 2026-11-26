@@ -2,12 +2,13 @@
 import json
 import os
 import struct
+import tempfile
 from types import MappingProxyType
 import numpy as np
 import jittor as jt
 from jittor._core.dtypes import dtype_name as _jittor_dtype_name
 from ..context import get_install_context, registry_for
-from .portable import _snapshot_tensors
+from .portable import _fetch_snapshot_batch, _snapshot_batches, _snapshot_tensors
 from ..fidelity import Fidelity, register_api_bindings
 from ...diagnostics import EXPECTED, swallowed
 from ...transaction import runtime_hook, set_attr, _MISSING
@@ -214,6 +215,46 @@ def _reject_shared_storage(tensors):
             % [set(group) for group in shared])
 
 
+def _tensor_blob(array, dtype):
+    if dtype == "BF16":
+        # The Jittor readback exposes BF16 values in float32.
+        bits = array.astype(np.float32, copy=False).view(np.uint32)
+        return (bits >> 16).astype(np.uint16).tobytes(order="C")
+    return array.astype(_ST[dtype][0], copy=False).tobytes(order="C")
+
+
+def _write_tensor_file(stream, tensors, metadata):
+    header = {}
+    offset = 0
+    for name, tensor in tensors.items():
+        dtype = _jittor_dtype_name(tensor.dtype)
+        if dtype not in _NP_TO_ST:
+            raise NotImplementedError("safetensors cannot save dtype %s" % dtype)
+        st_dtype = _NP_TO_ST[dtype]
+        length = tensor.numel() * _ST[st_dtype][1]
+        header[name] = dict(dtype=st_dtype, shape=list(tensor.shape),
+                            data_offsets=[offset, offset + length])
+        offset += length
+    tensor_entries = tuple(header.values())
+    if metadata:
+        header["__metadata__"] = {str(key): str(value) for key, value in metadata.items()}
+    raw_header = json.dumps(header, separators=(",", ":")).encode("utf-8")
+    stream.write(struct.pack("<Q", len(raw_header)))
+    stream.write(raw_header)
+    entries = iter(tensor_entries)
+    for batch in _snapshot_batches(tensors.values()):
+        arrays = _fetch_snapshot_batch(batch)
+        if len(arrays) != len(batch):
+            raise RuntimeError("checkpoint tensor fetch did not complete")
+        for array in arrays:
+            entry = next(entries)
+            payload = _tensor_blob(np.asarray(array), entry["dtype"])
+            start, end = entry["data_offsets"]
+            if list(array.shape) != entry["shape"] or len(payload) != end - start:
+                raise RuntimeError("tensor shape or size changed during safetensors save")
+            stream.write(payload)
+
+
 def _save_dict(tensors, metadata=None):
     _reject_shared_storage(tensors)
     # A state_dict's entries alias live parameters, and `numpy()` would move
@@ -232,13 +273,7 @@ def _save_dict(tensors, metadata=None):
         if dtype not in _NP_TO_ST:
             raise NotImplementedError("safetensors cannot save dtype %s" % _jittor_dtype_name(dtype))
         st_dtype = _NP_TO_ST[dtype]
-        if _jittor_dtype_name(st_dtype) == "BF16":
-            # Native BF16 numpy() exposes exact values in float32. Encode
-            # their upper 16 bits, not a float32 payload with a BF16 label.
-            bits = arr.astype(np.float32, copy=False).view(np.uint32)
-            blob = (bits >> 16).astype(np.uint16).tobytes(order="C")
-        else:
-            blob = arr.astype(_ST[st_dtype][0], copy=False).tobytes(order="C")
+        blob = _tensor_blob(arr, st_dtype)
         header[key] = {
             "dtype": st_dtype,
             "shape": shape,
@@ -253,9 +288,20 @@ def _save_dict(tensors, metadata=None):
 
 
 def _save_file(tensors, filename, metadata=None):
-    payload = _save_dict(tensors, metadata)
-    with open(filename, "wb") as fh:
-        fh.write(payload)
+    if any(not isinstance(tensor, jt.Var) for tensor in tensors.values()):
+        payload = _save_dict(tensors, metadata)
+        with open(filename, "wb") as stream:
+            stream.write(payload)
+        return
+    _reject_shared_storage(tensors)
+    # Publish a complete file after the final batch, including on write error.
+    filename = os.fspath(filename)
+    directory = os.path.dirname(os.path.abspath(filename))
+    with tempfile.TemporaryDirectory(dir=directory) as temporary_dir:
+        temporary = os.path.join(temporary_dir, "weights")
+        with open(temporary, "wb") as stream:
+            _write_tensor_file(stream, tensors, metadata)
+        os.replace(temporary, filename)
 
 
 def _safe_open(filename, framework="pt", device="cpu", backend="mmap"):

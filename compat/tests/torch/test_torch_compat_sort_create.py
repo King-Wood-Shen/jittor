@@ -180,6 +180,22 @@ class TestCreation(Base):
                     atol=1e-6, msg=f"linspace {dev}")
         both_devices(body)
 
+    def test_fp32_linspace_rounds_from_both_endpoints(self):
+        def body(device):
+            start, end = np.float32(0.1), np.float32(1)
+            for steps in (0, 1, 9, 17, 33, 65):
+                result = torch.linspace(float(start), float(end), steps, device=device)
+                self.assertEqual(result.device.type, device)
+                indices = np.arange(steps, dtype=np.float64)
+                if steps < 2:
+                    expected = np.array([start] if steps else [], dtype=np.float32)
+                else:
+                    step = float(np.float32((end - start) / np.float32(steps - 1)))
+                    expected = np.where(indices < steps // 2, start + step * indices,
+                                        end - step * (steps - 1 - indices)).astype(np.float32)
+                self.ae(result.cpu().numpy(), expected, msg=f"{device}, {steps} steps")
+        both_devices(body)
+
     def test_arange_float_arguments_make_a_float_range(self):
         # Any float bound or step makes a floating range. `arange(1.5)` used to
         # be an int32 range, and a 0-D float tensor step went through shape

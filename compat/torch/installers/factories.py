@@ -397,6 +397,8 @@ def _constructor_adapter(name, orig, _accepts_dtype, *args, **kwargs):
         out = _complex_random(name, shape, _draw_dtype)
     elif _cast_to in _COMPLEX_COMPONENTS and name == "normal":
         _complex_normal_refusal()
+    elif name == "linspace" and _jittor_dtype_name(_cast_to or "float32") == "float32":
+        out = _linspace_fp32(*args, **kwargs)
     else:
         out = orig(*args, **kwargs)
     # Typed factories can already return the requested dtype. A final cast
@@ -438,6 +440,22 @@ def _wrap_constructors(g):
             accepts_dtype = True
         _publish_factory(g, name, functools.partial(
             _constructor_adapter, name, original, accepts_dtype))
+
+
+def _linspace_fp32(start, end, steps):
+    if steps < 0:
+        raise RuntimeError("number of steps must be non-negative")
+    if steps <= 1:
+        return jt.array([start] if steps else [], dtype="float32")
+    start, end = np.float32(start), np.float32(end)
+    step = float(np.float32((end - start) / np.float32(steps - 1)))
+    # Torch evaluates each half from its nearest endpoint. Widen the known
+    # FP32 operands so the multiply-add rounds only once at the output.
+    with jt.flag_scope(amp_reg=0):
+        indices = jt.index((steps,))[0].float64()
+        first = jt.array(float(start), dtype="float64") + indices * step
+        last = jt.array(float(end), dtype="float64") - (steps - 1 - indices) * step
+        return jt.where(indices < steps // 2, first, last).float32()
 
 
 def _linspace_adapter(original, *args, dtype=None, **kwargs):

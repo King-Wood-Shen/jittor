@@ -57,9 +57,12 @@ class TestRegistrationOrder(unittest.TestCase):
                 super()._save_to_state_dict(destination, prefix, keep_vars)
                 destination[prefix + "weight.quant_state"] = torch.tensor([7], dtype=torch.uint8)
 
-        model = nn.Sequential(Quantized(2, 2))
+        model = nn.Sequential(Quantized(2, 2), Quantized(2, 2))
         state = model.state_dict()
-        self.assertIn("0.weight", state)
+        self.assertEqual(list(state), [
+            "0.weight", "0.bias", "0.weight.quant_state",
+            "1.weight", "1.bias", "1.weight.quant_state",
+        ])
         self.assertEqual(state["0.weight.quant_state"].tolist(), [7])
         self.assertNotIn("0.weight.quant_state", nn.Sequential(nn.Linear(2, 2)).state_dict())
 

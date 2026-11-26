@@ -95,48 +95,61 @@ class _TensorSnapshots:
             for item in value:
                 self.collect(item)
 
-    def capture(self, *arrays):
+    def capture(self, tensors, arrays):
         self.values.update((id(value), np.array(array, copy=True))
-                           for value, array in zip(self.tensors, arrays))
+                           for value, array in zip(tensors, arrays))
+
+
+_SNAPSHOT_BATCH_BYTES = 128 * 1024**2
+_SNAPSHOT_BATCH_TENSORS = 256
+
+
+def _snapshot_batches(tensors):
+    batch = []
+    size = 0
+    for tensor in tensors:
+        tensor_bytes = tensor.numel() * tensor.element_size()
+        if batch and (size + tensor_bytes > _SNAPSHOT_BATCH_BYTES
+                      or len(batch) == _SNAPSHOT_BATCH_TENSORS):
+            yield batch
+            batch = []
+            size = 0
+        batch.append(tensor)
+        size += tensor_bytes
+    if batch:
+        yield batch
+
+
+def _fetch_snapshot_batch(tensors):
+    # Only materialize operands belonging to this save. Noncontiguous inputs
+    # need a materialized contiguous copy before the fetch queue can run.
+    operands = [tensor.contiguous() for tensor in tensors]
+    jt.sync(operands, device_sync=False, weak_sync=False)
+    callback_done = _Event()
+    callback_arrays = None
+
+    def capture(*arrays):
+        nonlocal callback_arrays
+        # The converter owns the NumPy buffers after staging storage is released.
+        callback_arrays = arrays
+        callback_done.set()
+
+    from jittor._core.var import core as _core
+    fetch_op = _core.ops.fetch(operands, capture)
+    _core.submit_pending_fetches()
+    jt.sync([fetch_op], device_sync=True, weak_sync=False)
+    callback_done.wait()
+    return callback_arrays
 
 
 def _snapshot_tensors(obj):
     """Host values for codecs without changing source tensor residency."""
     snapshot = _TensorSnapshots()
     snapshot.collect(obj)
-    if snapshot.tensors:
-        # Saving an object must not execute unrelated live graphs. Materialize
-        # only its tensors before submitting the host copies; a global sync
-        # would also retry unrelated failed providers, even for metadata saves.
-        #
-        # `contiguous()` forwards a contiguous tensor unchanged and gives a
-        # non-contiguous one a copy this sync runs. Without it the fetch
-        # binding substitutes a *lazy* contiguous copy for a non-contiguous
-        # operand, and `submit_pending_fetches` only runs a fetch whose
-        # operands are already materialized -- a transposed view stayed queued
-        # until some later `sync_all`, leaving its capture slot empty.
-        operands = [tensor.contiguous() for tensor in snapshot.tensors]
-        jt.sync(operands, device_sync=False, weak_sync=False)
-        # Fetch copies to host without moving the source sharing group.
-        callback_done = _Event()
-        callback_arrays = None
-
-        def capture(*arrays):
-            nonlocal callback_arrays
-            # The native converter gives these NumPy arrays owned buffers.
-            # Keep them alive after FetchResult releases its staging storage.
-            callback_arrays = arrays
-            callback_done.set()
-
-        # Synchronize the fetch output itself, rather than an empty root list.
-        from jittor._core.var import core as _core
-        fetch_op = _core.ops.fetch(operands, capture)
-        _core.submit_pending_fetches()
-        jt.sync([fetch_op], device_sync=True, weak_sync=False)
-        callback_done.wait()
-        # Do fallible snapshot copies in the saving caller. A failed copy must
-        # propagate without throwing through, or poisoning, the fetch queue.
-        snapshot.capture(*callback_arrays)
+    # Fetch uses device staging to preserve live weights. Limit each fetch to
+    # a batch so staging does not require a second copy of the full shard.
+    for batch in _snapshot_batches(snapshot.tensors):
+        snapshot.capture(batch, _fetch_snapshot_batch(batch))
     if len(snapshot.values) != len(snapshot.tensors):
         raise RuntimeError("checkpoint tensor fetch did not complete")
     return snapshot.values
